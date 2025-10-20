@@ -1,0 +1,140 @@
+name: S1 CI/CD Baseline
+
+on:
+  # Trigger when app code or this workflow file changes
+  push:
+    paths:
+      - "services/app/**"
+      - "baseline/.github/workflows/s1_ci.yml"
+  # Allow manual execution from the Actions UI
+  workflow_dispatch:
+
+jobs:
+  build-test-push:
+    runs-on: ubuntu-latest
+
+    env:
+      # Define the container image tag that will be pushed to GHCR
+      IMAGE: ghcr.io/${{ github.repository }}/app:${{ github.sha }}
+
+    steps:
+      # ------------------------------------------
+      # 1️⃣ Generate a temporary GitHub App token
+      # (used for both repo access and GHCR authentication)
+      # ------------------------------------------
+      - id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation_id: ${{ secrets.APP_INSTALLATION_ID }}
+
+      # ------------------------------------------
+      # 2️⃣ Checkout repository using the App token
+      # (so any writes, commits, or pushes appear as the App identity)
+      # ------------------------------------------
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      # ------------------------------------------
+      # 3️⃣ Start overall timer (for TTD metrics)
+      # ------------------------------------------
+      - name: Start timer
+        id: t0
+        run: echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 4️⃣ Set up Docker Buildx
+      # ------------------------------------------
+      - uses: docker/setup-buildx-action@v3
+
+      # ------------------------------------------
+      # 5️⃣ Authenticate to GitHub Container Registry (GHCR)
+      # Username must be "x-access-token" for GitHub Apps
+      # ------------------------------------------
+      - name: Login to GHCR as App
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: x-access-token
+          password: ${{ steps.app-token.outputs.token }}
+
+      # ------------------------------------------
+      # 6️⃣ Build container image
+      # ------------------------------------------
+      - name: Build image
+        id: build
+        run: |
+          echo "t_build_start=$(date +%s)" >> $GITHUB_OUTPUT
+          docker build -t $IMAGE services/app
+          echo "t_build_end=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 7️⃣ Run unit tests (quiet mode)
+      # ------------------------------------------
+      - name: Test service
+        id: test
+        run: |
+          echo "t_test_start=$(date +%s)" >> $GITHUB_OUTPUT
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn pytest requests
+          pytest -q services/app/tests
+          echo "t_test_end=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 8️⃣ Push image to GHCR (App identity)
+      # ------------------------------------------
+      - name: Push image
+        id: push
+        run: |
+          echo "t_push_start=$(date +%s)" >> $GITHUB_OUTPUT
+          docker push $IMAGE
+          echo "t_push_end=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 9️⃣ Record intermediate metrics: build/test/push durations
+      # ------------------------------------------
+      - name: Record granular metrics
+        run: |
+          python scripts/collect_metrics.py --stage s1_build --status success \
+            --start ${{ steps.build.outputs.t_build_start }} --commit ${{ github.sha }} \
+            --outfile metrics/s1_s2_results.csv
+          python scripts/collect_metrics.py --stage s1_test --status success \
+            --start ${{ steps.test.outputs.t_test_start }} --commit ${{ github.sha }} \
+            --outfile metrics/s1_s2_results.csv
+          python scripts/collect_metrics.py --stage s1_push --status success \
+            --start ${{ steps.push.outputs.t_push_start }} --commit ${{ github.sha }} \
+            --outfile metrics/s1_s2_results.csv
+
+      # ------------------------------------------
+      # 🔟 Optional: Deploy ephemeral container to staging
+      # Simulates end-to-end deployment and health check
+      # ------------------------------------------
+      - name: Deploy to staging (ephemeral)
+        run: |
+          docker run -d -p 8080:8080 --name s1check $IMAGE
+          for i in {1..20}; do
+            curl -fsS http://localhost:8080/status && break || sleep 2
+          done
+          docker rm -f s1check
+
+      # ------------------------------------------
+      # 11️⃣ Record full TTD metric (Start → Healthy)
+      # ------------------------------------------
+      - name: Record S1 metrics (staging)
+        run: |
+          python scripts/collect_metrics.py \
+            --stage s1_staging --status success \
+            --start ${{ steps.t0.outputs.ts }} \
+            --commit ${{ github.sha }} \
+            --outfile metrics/s1_s2_results.csv
+
+      # ------------------------------------------
+      # 12️⃣ Upload metrics artifact (for analysis)
+      # ------------------------------------------
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s1_s2_results
+          path: metrics/s1_s2_results.csv
