@@ -83,10 +83,12 @@ jobs:
       # ------------------------------------------
       - name: Test service
         id: test
+        env:
+          # make repo root and baseline/ importable as top-level packages
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
           echo "t_test_start=$(date +%s)" >> $GITHUB_OUTPUT
           python -m pip install --upgrade pip
-          # include httpx (required by Starlette TestClient)
           pip install fastapi uvicorn pytest requests httpx
           pytest -q baseline/services/app/tests
           echo "t_test_end=$(date +%s)" >> $GITHUB_OUTPUT
