@@ -16,20 +16,25 @@ The project demonstrates how an autonomous cognitive agent can manage secure CI/
 
 ## 📂 Repository Structure
 
+## 📂 Repository Structure
+
 cogniops-resilient-devsecops/
 ├── baseline/
-│ ├── services/ # demo microservices (FastAPI)
-│ ├── .github/workflows/ # GitHub Actions for S1–S5
-│ ├── scripts/ # PQC, metrics, rollback, approvals
-│ ├── metrics/ # raw and aggregated CSV/JSON data
-│ ├── dashboards/ # Prometheus / Grafana dashboards
-│ └── reports/ # Baseline and consolidation reports
+│   ├── services/         # demo microservices (FastAPI, test workloads)
+│   ├── edge/             # simulated edge devices, OTA updates, PQC validation
+│   ├── .github/workflows/# GitHub Actions for S1–S5 pipelines
+│   ├── scripts/          # PQC signing, metrics collection, rollback logic
+│   ├── metrics/          # raw and aggregated CSV/JSON data for evaluation
+│   ├── dashboards/       # Prometheus / Grafana dashboards for observability
+│   └── reports/          # Baseline, consolidation, and analysis reports
+│
 ├── agent/
-│ ├── core/ # reasoning, explainability, memory
-│ ├── adapters/ # connectors for cloud / edge systems
-│ ├── policies/ # ISO/NIST/IMO compliance mapping
-│ └── tests/ # unit & integration tests
-├── docs/ # architecture diagrams, thesis plan, evaluation docs
+│   ├── core/             # reasoning, explainability, cognitive decision layer
+│   ├── adapters/         # connectors for cloud and edge execution environments
+│   ├── policies/         # ISO/NIST/DevSecOps compliance rules and policy mapping
+│   └── tests/            # unit, integration, and resilience validation tests
+│
+├── docs/                 # architecture diagrams, thesis plan, evaluation docs
 └── README.md
 
 ---
