@@ -1,150 +1,212 @@
+# GitHub Actions workflow for the S1 CI/CD Baseline pipeline.
+# Runs on pushes to baseline app files or when manually triggered.
+# This workflow:
+# - builds and tests a Python app
+# - packages the app into a Docker image and pushes to Artifact Registry
+# - deploys the image to Cloud Run
+# - performs a simple health check
+# - records timing/metrics as a CSV artifact and optionally posts a JSON payload to a metrics ingest endpoint
+#
+# Notes on GitHub Actions features used:
+# - $GITHUB_OUTPUT: used by steps to publish named outputs (accessible as steps.<id>.outputs.<name>)
+# - $GITHUB_ENV: used to export environment variables for later steps
+# - id-token permission + google-github-actions/auth allow Workload Identity Federation to GCP (no long-lived keys)
+# - artifacts: metrics CSV is uploaded with actions/upload-artifact
+#
 name: S1 CI/CD Baseline
 
 on:
-  # Trigger when app code or this workflow file changes
   push:
     paths:
-      - "baseline/services/app/**"
-      - ".github/workflows/s1_ci.yml"
-  # Allow manual execution from the Actions UI
-  workflow_dispatch:
+      - "baseline/services/app/**"    # only trigger when app files change
+      - ".github/workflows/s1_ci.yml" # retrigger when workflow is modified
+  workflow_dispatch:                 # allow manual runs from the UI
+
+# Common environment variables used throughout the job.
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}                # GCP project identifier (stored in repo vars)
+  REGION: ${{ vars.GCP_REGION }}                        # GCP region for Cloud Run
+  SERVICE: "baseline-app"                               # Cloud Run service name
+  REPO_LOCATION: "europe"                               # Artifact Registry location prefix (e.g. europe-docker.pkg.dev)
+  AR_REPO: "apps"                                       # Artifact Registry repository name (within the project)
+  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}    # optional remote metrics endpoint (empty if disabled)
+  ENV: "prod"                                           # app environment label used in metrics/payloads
+
+# Minimal permissions required by the workflow.
+permissions:
+  id-token: write  # required to mint OIDC tokens for GCP Workload Identity Federation
+  contents: read   # needed by actions/checkout to fetch repo contents
 
 jobs:
-  build-test-push:
+  build-test-push-deploy:
     runs-on: ubuntu-latest
-
-    # Explicit permissions (required for GHCR push)
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      # ------------------------------------------
-      # 1️⃣ Generate a temporary GitHub App token
-      # ------------------------------------------
-      - id: app-token
-        uses: tibdex/github-app-token@v2
-        with:
-          app_id: ${{ secrets.APP_ID }}
-          private_key: ${{ secrets.APP_PRIVATE_KEY }}
-          installation_id: ${{ secrets.APP_INSTALLATION_ID }}
-
-      # ------------------------------------------
-      # 2️⃣ Checkout repository using the App token
-      # ------------------------------------------
       - uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
+        # Checks out repository code so subsequent steps can build and test
 
-      # ------------------------------------------
-      # 3️⃣ Compute lowercase image tag for GHCR
-      # ------------------------------------------
-      - name: Set lowercase image name
-        id: vars
-        run: |
-          repo_lower=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE=ghcr.io/${repo_lower}/app:${GITHUB_SHA}" >> $GITHUB_ENV
-          echo "Using image: $IMAGE"
-
-      # ------------------------------------------
-      # 4️⃣ Start overall timer (for TTD metrics)
-      # ------------------------------------------
       - name: Start timer
         id: t0
-        run: echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
-
-      # ------------------------------------------
-      # 5️⃣ Set up Docker Buildx
-      # ------------------------------------------
-      - uses: docker/setup-buildx-action@v3
-
-      # ------------------------------------------
-      # 6️⃣ Authenticate to GHCR using the App token
-      # ------------------------------------------
-      - name: Login to GHCR as App
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: x-access-token
-          password: ${{ steps.app-token.outputs.token }}
-
-      # ------------------------------------------
-      # 7️⃣ Build container image (context: baseline/services/app)
-      # ------------------------------------------
-      - name: Build image
-        id: build
         run: |
-          echo "t_build_start=$(date +%s)" >> $GITHUB_OUTPUT
-          docker build -t "$IMAGE" baseline/services/app
-          echo "t_build_end=$(date +%s)" >> $GITHUB_OUTPUT
+          # Record pipeline start epoch (seconds) to the step output 'ts'.
+          # This value will be read later to compute durations and included in metrics.
+          echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 8️⃣ Run unit tests (adds httpx dependency)
-      # ------------------------------------------
-      - name: Test service
+      - name: Auth to GCP (OIDC/WIF) as APP CI
+        uses: google-github-actions/auth@v2
+        with:
+          # Workload Identity Federation connection (set in repo vars)
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          # Service account email to impersonate for subsequent gcloud operations
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+        # After this step gcloud and other tools can use short-lived credentials issued via OIDC.
+        # No service account JSON keys are stored in the repo.
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        # Installs gcloud CLI for subsequent gcloud commands
+
+      - name: Configure docker for Artifact Registry
+        run: |
+          # Configure Docker credential helper so 'docker push' is authenticated to Artifact Registry.
+          # NOTE: REPO_LOCATION is the region prefix (e.g. europe), gcloud constructs the full hostname.
+          gcloud auth configure-docker ${REPO_LOCATION}-docker.pkg.dev --quiet
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+        # Prepare Python runtime for tests and helper scripts
+
+      - name: Install test deps
+        run: |
+          # Install application/test dependencies. Keep pip updated to avoid compatibility issues.
+          python -m pip install --upgrade pip
+          pip install -r baseline/services/app/requirements.txt
+          # Install pytest and httpx (httpx used by tests for HTTP calls)
+          pip install pytest httpx
+
+      - name: Unit tests
         id: test
         env:
-          # make repo root and baseline/ importable as top-level packages
+          # Add repository root and baseline package to PYTHONPATH so tests can import app modules.
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
+          # Record test start and end timestamps to step outputs for metrics collection later.
           echo "t_test_start=$(date +%s)" >> $GITHUB_OUTPUT
-          python -m pip install --upgrade pip
-          pip install fastapi uvicorn pytest requests httpx
           pytest -q baseline/services/app/tests
           echo "t_test_end=$(date +%s)" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 9️⃣ Push image to GHCR (App identity)
-      # ------------------------------------------
-      - name: Push image
+      - name: Build image
+        id: build
+        run: |
+          # Record build start/end times and build a local Docker image tagged 'app-image:local'.
+          echo "t_build_start=$(date +%s)" >> $GITHUB_OUTPUT
+          docker build -t app-image:local baseline/services/app
+          echo "t_build_end=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Push image to Artifact Registry
         id: push
         run: |
+          # Record push start time. Construct the fully qualified Artifact Registry image name and push it.
           echo "t_push_start=$(date +%s)" >> $GITHUB_OUTPUT
+          # IMAGE name format: <LOCATION>-docker.pkg.dev/<PROJECT_ID>/<REPO>/<SERVICE>:<COMMIT_SHA>
+          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${{ github.sha }}"
+          docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
+          # Export IMAGE to subsequent steps via $GITHUB_ENV (makes it available as $IMAGE in later steps)
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           echo "t_push_end=$(date +%s)" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 🔟 Record granular metrics (build/test/push durations)
-      # ------------------------------------------
-      - name: Record granular metrics
+      - name: Deploy to Cloud Run
+        id: deploy
         run: |
-          python baseline/scripts/collect_metrics.py --stage s1_build --status success \
-            --start ${{ steps.build.outputs.t_build_start }} --commit ${{ github.sha }} \
-            --outfile baseline/metrics/s1_s2_results.csv
-          python baseline/scripts/collect_metrics.py --stage s1_test --status success \
-            --start ${{ steps.test.outputs.t_test_start }} --commit ${{ github.sha }} \
-            --outfile baseline/metrics/s1_s2_results.csv
-          python baseline/scripts/collect_metrics.py --stage s1_push --status success \
-            --start ${{ steps.push.outputs.t_push_start }} --commit ${{ github.sha }} \
-            --outfile baseline/metrics/s1_s2_results.csv
+          # Deploy the pushed image to Cloud Run (managed) with limited resources and autoscaling bounds.
+          # Record deploy start time and capture the service URL to a step output named 'url'.
+          echo "t_deploy_start=$(date +%s)" >> $GITHUB_OUTPUT
+          gcloud run deploy ${SERVICE} \
+            --image "$IMAGE" \
+            --region ${REGION} \
+            --allow-unauthenticated \
+            --platform managed \
+            --memory 256Mi --cpu 1 \
+            --min-instances 0 --max-instances 2
+          URL=$(gcloud run services describe ${SERVICE} --region ${REGION} --format='value(status.url)')
+          # Write the service URL to the step output 'url' so later steps can read it via steps.deploy.outputs.url
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "t_deploy_end=$(date +%s)" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 11️⃣ Ephemeral staging health check
-      # ------------------------------------------
-      - name: Deploy to staging (ephemeral)
+      - name: Health check
+        id: health
         run: |
-          docker run -d -p 8080:8080 --name s1check "$IMAGE"
-          for i in {1..20}; do
-            curl -fsS http://localhost:8080/status && break || sleep 2
+          # Read the deployed service URL from the deploy step outputs.
+          # Poll the /status endpoint for up to 30 attempts (approx 60s) until it returns {"ok": true}
+          URL="${{ steps.deploy.outputs.url }}"
+          for i in $(seq 1 30); do
+            if curl -fsS "${URL}/status" | grep -q '"ok": true'; then
+              echo "healthy=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 2
           done
-          docker rm -f s1check
+          echo "healthy=false" >> $GITHUB_OUTPUT
+          # Exit non-zero to fail the job if the health check never succeeded.
+          exit 1
 
-      # ------------------------------------------
-      # 12️⃣ Record full TTD metric (Start → Healthy)
-      # ------------------------------------------
-      - name: Record S1 metrics (staging)
+      - name: End timer
+        id: t1
+        if: always()
         run: |
-          python baseline/scripts/collect_metrics.py \
-            --stage s1_staging --status success \
-            --start ${{ steps.t0.outputs.ts }} \
-            --commit ${{ github.sha }} \
-            --outfile baseline/metrics/s1_s2_results.csv
+          # Record pipeline end epoch (seconds) regardless of job outcome. This allows computing durations.
+          echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 13️⃣ Upload metrics artifact (for analysis)
-      # ------------------------------------------
+      - name: Record metrics (CSV baseline)
+        run: |
+          # Create metrics directory and append per-stage timing/metadata rows to a CSV file.
+          # The helper script baseline/scripts/collect_metrics.py is expected to append a row for each invocation.
+          mkdir -p baseline/metrics
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_ttd" --status "${{ job.status }}" --tstart "${{ steps.t0.outputs.ts }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_tests"  --status "success" --tstart "${{ steps.test.outputs.t_test_start }}"  --tend "${{ steps.test.outputs.t_test_end }}"  --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_build"  --status "success" --tstart "${{ steps.build.outputs.t_build_start }}" --tend "${{ steps.build.outputs.t_build_end }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_push"   --status "success" --tstart "${{ steps.push.outputs.t_push_start }}"   --tend "${{ steps.push.outputs.t_push_end }}"   --outfile baseline/metrics/s1_pipeline_runs.csv
+          # For deploy we record the TTD end as the overall pipeline end timestamp (t1)
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_deploy" --status "success" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+
+      - name: "Optional: POST TTD to BigQuery ingest"
+        if: ${{ env.METRICS_INGEST_URL != '' }}
+        run: |
+          # If METRICS_INGEST_URL is set, build a JSON payload describing the run and POST it to the endpoint.
+          # This step uses gcloud to mint an ID token for authentication (audience must match the ingest endpoint).
+          START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
+          END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
+          DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
+          # Build a compact JSON payload. Adjust fields (tests_total/tests_failed) to reflect real test counts if available.
+          printf '{"run_id":"%s","commit_sha":"%s","started_at":"%s","ended_at":"%s","duration_sec":%s,"status":"%s","tests_total":1,"tests_failed":0,"service":"%s","env":"%s"}' \
+            "${{ github.run_id }}" "${{ github.sha }}" "$START_ISO" "$END_ISO" "$DUR" "${{ job.status }}" "${SERVICE}" "${ENV}" > payload.json
+          # Obtain an OIDC ID token targeted to the METRICS_INGEST_URL and POST the payload with Bearer auth.
+          ID_TOKEN=$(gcloud auth print-identity-token --audiences="${METRICS_INGEST_URL}")
+          curl -sS -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $ID_TOKEN" --data-binary @payload.json "${METRICS_INGEST_URL}"
+
+      - name: Summary
+        run: |
+          # Append a human-readable summary to the GitHub Actions job summary panel.
+          # The summary includes status, deployed URL, commit, total TTD and produced image name.
+          DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
+          URL="${{ steps.deploy.outputs.url }}"
+          {
+            echo "### S1 Baseline Run"
+            echo "- Status: ${{ job.status }}"
+            echo "- Service URL: ${URL}"
+            echo "- Commit: ${{ github.sha }}"
+            echo "- Full TTD (sec): $DUR"
+            echo "- Image: $IMAGE"
+          } >> $GITHUB_STEP_SUMMARY
+
       - name: Upload metrics artifact
         uses: actions/upload-artifact@v4
         with:
-          name: s1_s2_results
-          path: baseline/metrics/s1_s2_results.csv
+          # Upload the CSV metrics file as a workflow artifact for later inspection.
+          name: s1_pipeline_runs
+          path: baseline/metrics/s1_pipeline_runs.csv
+          if-no-files-found: ignore

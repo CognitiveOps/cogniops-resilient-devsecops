@@ -1,0 +1,162 @@
+# admin - Terraform Apply (GCP infra)
+# This workflow performs Terraform operations (init/plan/apply) for GCP infrastructure.
+# It uses GitHub OIDC Workload Identity Federation to authenticate to GCP and
+# optionally stores TF state in a GCS bucket. After apply, it writes selected
+# Terraform outputs back into repository variables.
+
+name: admin - Terraform Apply (GCP infra)
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Manual trigger input: when true, only run `terraform plan` and skip apply.
+      plan_only:
+        description: "Run plan only (no apply)"
+        required: false
+        default: "false"
+  push:
+    # Only run on pushes that change the infra directory (avoid running for other changes).
+    paths:
+      - "infra/**"
+
+permissions:
+  # id-token write is required for OIDC authentication to GCP (google-github-actions/auth)
+  id-token: write
+  # contents read is needed for checkout and other repository read operations
+  contents: read
+
+concurrency:
+  # Prevent simultaneous runs for the same ref (branch/PR) to avoid conflicting terraform applies.
+  group: "infra-${{ github.ref }}"
+  cancel-in-progress: false
+
+env:
+  # Environment variables sourced from repository or organization variables (set via Actions UI)
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  GITHUB_REPO: ${{ github.repository }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  # Prefix within the GCS bucket where terraform state files are stored
+  TF_STATE_PREFIX: "terraform/state"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      # Always check out the repository so Terraform configuration is available.
+      - uses: actions/checkout@v4
+
+      # Authenticate to GCP using Workload Identity Federation (OIDC) as the INFRA service account.
+      # create_credentials_file=true writes a service account JSON key to the runner for tools that need ADC.
+      - name: Auth to GCP (OIDC/WIF) as INFRA
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_INFRA_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      # Install and configure gcloud SDK (used for bucket creation and other GCP operations).
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Ensure the GCS bucket for remote Terraform state exists (optional).
+      # This step runs only if TF_STATE_BUCKET env var is set (non-empty).
+      - name: Ensure TF state bucket (optional)
+        if: ${{ env.TF_STATE_BUCKET != '' }}
+        run: |
+          gsutil ls -p "$PROJECT_ID" "gs://${TF_STATE_BUCKET}" || \
+            gsutil mb -p "$PROJECT_ID" -l ${REGION} "gs://${TF_STATE_BUCKET}"
+
+      # Install the specified Terraform version.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.4
+
+      # Initialize Terraform. If TF_STATE_BUCKET is set, write a small backend override
+      # so terraform init configures the GCS backend without modifying repo files.
+      - name: Terraform Init
+        working-directory: infra
+        run: |
+          if [ -n "${TF_STATE_BUCKET}" ]; then
+            cat > backend_override.tf <<EOF
+            terraform {
+              backend "gcs" {
+                bucket = "${TF_STATE_BUCKET}"
+                prefix = "${TF_STATE_PREFIX}"
+              }
+            }
+            EOF
+          fi
+          terraform init -input=false
+
+      # Run terraform plan and capture results. Expose common TF_VARs from workflow env.
+      - name: Terraform Plan
+        id: plan
+        working-directory: infra
+        env:
+          TF_VAR_project_id:  ${{ env.PROJECT_ID }}
+          TF_VAR_region:      ${{ env.REGION }}
+          TF_VAR_github_repo: ${{ env.GITHUB_REPO }}
+        run: terraform plan -input=false -no-color
+
+      # Apply changes unless the workflow was triggered with plan_only=true.
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.plan_only != 'true' }}
+        working-directory: infra
+        env:
+          TF_VAR_project_id:  ${{ env.PROJECT_ID }}
+          TF_VAR_region:      ${{ env.REGION }}
+          TF_VAR_github_repo: ${{ env.GITHUB_REPO }}
+        run: terraform apply -auto-approve -input=false
+
+      # Read Terraform outputs in JSON, write to GITHUB_OUTPUT so later steps can use them.
+      # jq is installed on the runner to parse the output.
+      - name: Read Terraform outputs
+        id: tfout
+        working-directory: infra
+        run: |
+          sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y jq >/dev/null 2>&1
+          OUT=$(terraform output -json)
+          echo "$OUT" > tf_outputs.json
+          # Map specific outputs to workflow outputs for downstream use.
+          echo "wif_provider=$(jq -r '.workload_identity_provider_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "sa_infra=$(jq -r '.gha_infra_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "metrics_url=$(jq -r '.metrics_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+
+      # Upsert repository variables with values from Terraform outputs so other workflows / actions can reuse them.
+      # Uses the REST API to create or update Actions repository variables.
+      - name: Upsert repository variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const varsToSet = {
+              GCP_PROJECT_ID: process.env.PROJECT_ID || '',
+              GCP_REGION: process.env.REGION || '',
+              TF_STATE_BUCKET: process.env.TF_STATE_BUCKET || '',
+              GCP_WIF_PROVIDER: '${{ steps.tfout.outputs.wif_provider }}',
+              GCP_SA_INFRA_EMAIL: '${{ steps.tfout.outputs.sa_infra }}',
+              GCP_SA_APP_EMAIL: '${{ steps.tfout.outputs.sa_app }}',
+              METRICS_INGEST_URL: '${{ steps.tfout.outputs.metrics_url }}'
+            };
+            for (const [name, value] of Object.entries(varsToSet)) {
+              if (!value) { core.info(`Skip empty ${name}`); continue; }
+              await github.request('PUT /repos/{owner}/{repo}/actions/variables/{name}', {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name,
+                value
+              });
+              core.info(`Set repository variable: ${name}`);
+            }
+
+      # Append a human-readable summary to the workflow run summary for quick inspection.
+      - name: Summary
+        run: |
+          echo "### Terraform Outputs → Repo Variables" >> $GITHUB_STEP_SUMMARY
+          echo "- GCP_WIF_PROVIDER     = ${{ steps.tfout.outputs.wif_provider }}" >> $GITHUB_STEP_SUMMARY
+          echo "- GCP_SA_INFRA_EMAIL   = ${{ steps.tfout.outputs.sa_infra }}" >> $GITHUB_STEP_SUMMARY
+          echo "- GCP_SA_APP_EMAIL     = ${{ steps.tfout.outputs.sa_app }}" >> $GITHUB_STEP_SUMMARY
+          echo "- METRICS_INGEST_URL   = ${{ steps.tfout.outputs.metrics_url }}" >> $GITHUB_STEP_SUMMARY
