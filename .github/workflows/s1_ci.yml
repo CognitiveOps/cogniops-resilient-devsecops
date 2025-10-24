@@ -22,8 +22,10 @@ on:
       - ".github/workflows/s1_ci.yml" # retrigger when workflow is modified
   workflow_dispatch:                 # allow manual runs from the UI
   workflow_run:
-  workflows: ["admin - Terraform Apply (GCP infra)"]
-  types: [completed]
+    workflows:
+      - "admin - Terraform Apply (GCP infra)"
+    types:
+      - completed
 
 # Common environment variables used throughout the job.
 env:
