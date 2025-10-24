@@ -21,6 +21,9 @@ on:
       - "baseline/services/app/**"    # only trigger when app files change
       - ".github/workflows/s1_ci.yml" # retrigger when workflow is modified
   workflow_dispatch:                 # allow manual runs from the UI
+  workflow_run:
+  workflows: ["admin - Terraform Apply (GCP infra)"]
+  types: [completed]
 
 # Common environment variables used throughout the job.
 env:
@@ -39,6 +42,7 @@ permissions:
 
 jobs:
   build-test-push-deploy:
+    if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
