@@ -1,9 +1,13 @@
-"""Baseline FastAPI application providing a status endpoint."""
 from fastapi import FastAPI
-app = FastAPI()
+import os
 
+app = FastAPI()
 
 @app.get("/status")
 def status():
-    """Return service status and basic health indicator."""
     return {"ok": True, "service": "baseline-app"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8080"))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
