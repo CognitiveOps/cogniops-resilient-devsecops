@@ -66,6 +66,26 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
+      - name: Ensure TF state bucket (must exist before init)
+        if: ${{ env.TF_STATE_BUCKET != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Project: $PROJECT_ID"
+          echo "Bucket : gs://${TF_STATE_BUCKET}"
+          # Δημιουργία αν δεν υπάρχει
+          if ! gsutil ls -p "$PROJECT_ID" "gs://${TF_STATE_BUCKET}" >/dev/null 2>&1; then
+            # Διάλεξε location: multi-region EU ή region π.χ. europe-west1
+            # Multi-region:
+            gsutil mb -p "$PROJECT_ID" -c STANDARD -l EU -b on "gs://${TF_STATE_BUCKET}"
+            # (ή) Regional:
+            # gsutil mb -p "$PROJECT_ID" -c STANDARD -l ${REGION} -b on "gs://${TF_STATE_BUCKET}"
+            gsutil versioning set on "gs://${TF_STATE_BUCKET}"
+            echo "✅ Created bucket gs://${TF_STATE_BUCKET}"
+          else
+            echo "✅ Bucket already exists"
+          fi
+
       # Install the specified Terraform version.
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
