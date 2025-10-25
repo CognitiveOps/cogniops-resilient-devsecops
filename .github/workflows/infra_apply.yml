@@ -46,6 +46,25 @@ jobs:
     steps:
       # Always check out the repository so Terraform configuration is available.
       - uses: actions/checkout@v4
+        
+      # 1) Prefer WIF if repo variables already exist (after the first run)
+      - name: Auth to GCP (WIF)
+        if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_INFRA_EMAIL != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_INFRA_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      # 2) Bootstrap (first run only): use JSON key secret
+      - name: Auth to GCP (bootstrap JSON)
+        if: ${{ vars.GCP_WIF_PROVIDER == '' || vars.GCP_SA_INFRA_EMAIL == '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+          create_credentials_file: true
+          export_environment_variables: true
 
       # Install the specified Terraform version.
       - name: Setup Terraform
