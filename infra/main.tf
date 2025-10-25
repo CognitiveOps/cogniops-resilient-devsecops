@@ -71,7 +71,11 @@ resource "google_bigquery_table" "s1_runs" {
     dataset_id = google_bigquery_dataset.metrics.dataset_id
     table_id   = "s1_pipeline_runs"
 
-    time_partitioning { type = "DAY", field = "ended_at" }
+    time_partitioning {
+        type  = "DAY"
+        field = "ended_at"
+        }
+
     clustering = ["status", "service"]
 
     schema = jsonencode([
@@ -209,7 +213,11 @@ resource "google_cloud_run_v2_service" "app" {
 
     template {
         service_account = google_service_account.run_exec.email
-        scaling { min_instance_count = 0, max_instance_count = 2 }
+        scaling {
+            min_instance_count = 0
+            max_instance_count = 2
+            }
+
         containers {
             image = "us-docker.pkg.dev/cloudrun/container/hello"
             ports { container_port = 8080 }
