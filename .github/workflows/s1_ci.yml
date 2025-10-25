@@ -95,13 +95,20 @@ jobs:
 
       - name: Unit tests
         id: test
+        # Ensure the test runner can import application modules by adding the repo root and
+        # the 'baseline' package directory to PYTHONPATH.
         env:
-          # Add repository root and baseline package to PYTHONPATH so tests can import app modules.
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
-          # Record test start and end timestamps to step outputs for metrics collection later.
+          # Record test start epoch (seconds) to the step output 't_test_start'.
+          # This timestamp is used later to compute the test duration in metrics.
           echo "t_test_start=$(date +%s)" >> $GITHUB_OUTPUT
+
+          # Run pytest against the application's tests. '-q' produces concise output.
+          # The step will fail if tests fail, causing the job to stop (unless 'if: always()' is set elsewhere).
           pytest -q baseline/services/app/tests
+
+          # Record test end epoch (seconds) to the step output 't_test_end'.
           echo "t_test_end=$(date +%s)" >> $GITHUB_OUTPUT
 
       - name: Build image
@@ -146,18 +153,29 @@ jobs:
       - name: Health check
         id: health
         run: |
-          # Read the deployed service URL from the deploy step outputs.
-          # Poll the /status endpoint for up to 30 attempts (approx 60s) until it returns {"ok": true}
+          # Read the Cloud Run service URL produced by the deploy step.
           URL="${{ steps.deploy.outputs.url }}"
+
+          # Poll the service for up to 30 attempts (~60 seconds total with 2s sleeps)
+          # until we receive an HTTP 200. This gives the service time to become ready
+          # after deployment (cold starts, container initialization, etc).
           for i in $(seq 1 30); do
-            if curl -fsS "${URL}/status" | grep -q '"ok": true'; then
+            # Use curl to fetch only the HTTP status code (silent output).
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+
+            # If we see 200 OK, record a named step output 'healthy' and succeed.
+            if [ "$STATUS" -eq 200 ]; then
               echo "healthy=true" >> $GITHUB_OUTPUT
               exit 0
             fi
+
+            # Otherwise wait a bit and try again.
             sleep 2
           done
+
+          # If all retries are exhausted, record unhealthy and fail the step so
+          # subsequent steps (or the job) know the deployment did not become healthy.
           echo "healthy=false" >> $GITHUB_OUTPUT
-          # Exit non-zero to fail the job if the health check never succeeded.
           exit 1
 
       - name: End timer

@@ -47,40 +47,6 @@ jobs:
       # Always check out the repository so Terraform configuration is available.
       - uses: actions/checkout@v4
 
-      # Bootstrap path (first run ONLY): temp JSON key secret
-      - name: Auth to GCP (JSON key) as INFRA  # TEMP for initial bootstrap
-        if: ${{ vars.GCP_WIF_PROVIDER == '' || vars.GCP_SA_INFRA_EMAIL == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
-          create_credentials_file: true
-          export_environment_variables: true
-
-
-      # Authenticate to GCP using Workload Identity Federation (OIDC) as the INFRA service account.
-      # create_credentials_file=true writes a service account JSON key to the runner for tools that need ADC.
-      # Preferred path: WIF (after first apply)
-      - name: Auth to GCP (OIDC/WIF) as INFRA
-        if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_INFRA_EMAIL != '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA_INFRA_EMAIL }}
-          create_credentials_file: true
-          export_environment_variables: true
-
-      # Install and configure gcloud SDK (used for bucket creation and other GCP operations).
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      # Ensure the GCS bucket for remote Terraform state exists (optional).
-      # This step runs only if TF_STATE_BUCKET env var is set (non-empty).
-      - name: Ensure TF state bucket (optional)
-        if: ${{ env.TF_STATE_BUCKET != '' }}
-        run: |
-          gsutil ls -p "$PROJECT_ID" "gs://${TF_STATE_BUCKET}" || \
-            gsutil mb -p "$PROJECT_ID" -l ${REGION} "gs://${TF_STATE_BUCKET}"
-
       # Install the specified Terraform version.
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
