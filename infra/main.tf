@@ -30,19 +30,23 @@ provider "google-beta" {
 # This ensures the services we create below (Artifact Registry, Cloud Run, etc.) are usable
 # --------------------------------------------------------------------------------
 resource "google_project_service" "services" {
-    for_each = toset([
-        "artifactregistry.googleapis.com",
-        "run.googleapis.com",
-        "cloudfunctions.googleapis.com",
-        "eventarc.googleapis.com",
-        "bigquery.googleapis.com",
-        "iamcredentials.googleapis.com",
-        "iam.googleapis.com",
-        "sts.googleapis.com",
-        "logging.googleapis.com",
-    ])
-    project = var.project_id
-    service = each.key
+  for_each = toset([
+    "cloudresourcemanager.googleapis.com", 
+    "serviceusage.googleapis.com",         
+    "artifactregistry.googleapis.com",
+    "run.googleapis.com",
+    "cloudfunctions.googleapis.com",
+    "cloudbuild.googleapis.com", 
+    "eventarc.googleapis.com",
+    "bigquery.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "iam.googleapis.com",
+    "sts.googleapis.com",
+    "logging.googleapis.com",
+  ])
+  project = var.project_id
+  service = each.key
+  disable_on_destroy = true
 }
 
 # --------------------------------------------------------------------------------
@@ -144,9 +148,6 @@ resource "google_iam_workload_identity_pool_provider" "provider" {
         "google.subject"       = "assertion.sub"
         "attribute.repository" = "assertion.repository" # used to restrict repo => principal
         "attribute.ref"        = "assertion.ref"
-
-    # Map repository assertion; restricted to the GitHub repo specified by var.github_repo
-    attribute_condition = "attribute.repository==\"${var.github_repo}\""
     }
 }
 
@@ -181,7 +182,7 @@ resource "google_project_iam_member" "infra_roles" {
         "roles/iam.serviceAccountAdmin",
         # Optional: allow Terraform to manage the WIF pool/provider itself
         "roles/iam.workloadIdentityPoolAdmin",
-        "roles/iam.workloadIdentityPoolProviderAdmin",
+        # "roles/iam.workloadIdentityPoolProviderAdmin",
     ])
     project = var.project_id
     role    = each.key
@@ -222,9 +223,14 @@ resource "google_cloud_run_v2_service" "app" {
             }
 
         containers {
-            image = "us-docker.pkg.dev/cloudrun/container/hello"
-            ports { container_port = 8080 }
-            resources { limits = { cpu = "1", memory = "256Mi" } }
+        image = "us-docker.pkg.dev/cloudrun/container/hello"
+        ports { container_port = 8080 }
+        resources {
+            limits = {
+            cpu    = "1"
+            memory = "512Mi"  # << αυξήθηκε από 256Mi
+            }
+        }
         }
     }
 
@@ -240,8 +246,10 @@ resource "google_cloud_run_v2_service" "app" {
 # --------------------------------------------------------------------------------
 resource "google_storage_bucket" "src" {
   name     = "${var.project_id}-fn-src"
-  location = "EU"
+  location = var.bucket_location   # << αντί για EUROPE / var.repo_location
+  uniform_bucket_level_access = true
 }
+
 
 
 data "archive_file" "ingest_zip" {
@@ -257,25 +265,27 @@ resource "google_storage_bucket_object" "ingest_object" {
 }
 
 resource "google_cloudfunctions2_function" "ingest" {
-    name     = "s1-metrics-ingest"
-    location = var.region
+  name     = "s1-metrics-ingest"
+  location = var.region
 
-    build_config {
-        runtime     = "python312"
-        entry_point = "ingest"
-        source {
-            storage_source {
-                bucket = google_storage_bucket.src.name
-                object = google_storage_bucket_object.ingest_object.name
-            }
-        }
+  build_config {
+    runtime     = "python312"
+    entry_point = "ingest"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.src.name
+        object = google_storage_bucket_object.ingest_object.name
+      }
     }
+  }
 
-    service_config {
-        max_instance_count = 1
-        available_memory   = "256M"
-        ingress_settings   = "ALLOW_ALL" # function still requires IAM invoker unless opened to allUsers
-    }
+  service_config {
+    max_instance_count = 1
+    available_memory   = "256M"
+    ingress_settings   = "ALLOW_ALL"
+  }
+
+  depends_on = [google_project_service.services] # << περιμένει APIs
 }
 
 # --------------------------------------------------------------------------------
