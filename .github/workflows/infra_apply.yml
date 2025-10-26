@@ -88,6 +88,13 @@ jobs:
             gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
             echo "✅ Created bucket gs://${TF_STATE_BUCKET}"
           fi
+      - name: Ensure bucket IAM for bootstrap SA
+        run: |
+          set -euo pipefail
+          echo "Granting objectAdmin to $BOOTSTRAP_SA_EMAIL on gs://$TF_STATE_BUCKET"
+          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+            --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
+            --role="roles/storage.objectAdmin" || true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
