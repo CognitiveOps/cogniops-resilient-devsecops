@@ -73,18 +73,20 @@ jobs:
           set -euo pipefail
           echo "Project: $PROJECT_ID"
           echo "Bucket : gs://${TF_STATE_BUCKET}"
-          # Δημιουργία αν δεν υπάρχει
-          if ! gsutil ls -p "$PROJECT_ID" "gs://${TF_STATE_BUCKET}" >/dev/null 2>&1; then
-            # Διάλεξε location: multi-region EU ή region π.χ. europe-west1
-            # Multi-region:
-            gsutil mb -p "$PROJECT_ID" -c STANDARD -l EU -b on "gs://${TF_STATE_BUCKET}"
-            # (ή) Regional:
-            # gsutil mb -p "$PROJECT_ID" -c STANDARD -l ${REGION} -b on "gs://${TF_STATE_BUCKET}"
-            gsutil versioning set on "gs://${TF_STATE_BUCKET}"
-            echo "✅ Created bucket gs://${TF_STATE_BUCKET}"
-          else
+
+          # Already exists?
+          if gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --format='value(name)' >/dev/null 2>&1; then
             echo "✅ Bucket already exists"
+          else
+            # Create (choose location: EU or regional ${REGION})
+            gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
+              --project="${PROJECT_ID}" \
+              --location="EU" \
+              --uniform-bucket-level-access
+            gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
+            echo "✅ Created bucket gs://${TF_STATE_BUCKET}"
           fi
+
 
       # Install the specified Terraform version.
       - name: Setup Terraform
