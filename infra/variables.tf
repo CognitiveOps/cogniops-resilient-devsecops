@@ -1,5 +1,50 @@
-variable "project_id" {}
-variable "region"        { default = "europe-west1" }
-variable "repo_location" { default = "europe" }     # για Artifact Registry
-variable "github_repo"   {}                         # "org/repo"
-variable "bucket_location" { default = "EU" }       # GCS: "EU" (multi-region) ή π.χ. "europe-west1"
+# --------------------------------------------------------------------------------
+# Terraform Variables for GCP Infrastructure (CogniOps)
+# These variables are populated from GitHub Actions environment variables.
+# --------------------------------------------------------------------------------
+
+# The Google Cloud Project ID where all resources will be created.
+variable "project_id" {
+  description = "GCP Project ID (e.g., cogent-wall-445012-h5)"
+  type        = string
+}
+
+# The GCP region used for regional services like Cloud Run and Cloud Functions.
+variable "region" {
+  description = "Default GCP region for regional services (e.g., europe-west1)"
+  type        = string
+  default     = "europe-west1"
+}
+
+# Artifact Registry location (multi-region prefix, e.g. europe, us, asia)
+variable "repo_location" {
+  description = "Artifact Registry location prefix (e.g., europe)"
+  type        = string
+  default     = "europe"
+}
+
+# Multi-region or regional location for GCS buckets
+variable "bucket_location" {
+  description = "GCS bucket location (e.g., EU for multi-region or europe-west1 for regional)"
+  type        = string
+  default     = "EU"
+}
+
+# BigQuery dataset location (multi-region recommended)
+variable "bigquery_location" {
+  description = "BigQuery dataset location (e.g., EU or US)"
+  type        = string
+  default     = "EU"
+}
+
+# GitHub repository identifier, used in WIF trust (e.g. CognitiveOps/cogniops-resilient-devsecops)
+variable "github_repo" {
+  description = "GitHub repository identifier (org/repo) for Workload Identity Federation trust"
+  type        = string
+}
+
+# Service Account used for initial Terraform bootstrap (with JSON key auth)
+variable "bootstrap_sa_email" {
+  description = "Email of the Service Account used by Terraform (bootstrap/apply)"
+  type        = string
+}
