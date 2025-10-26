@@ -319,7 +319,7 @@ resource "google_cloudfunctions2_function" "ingest" {
 # - *_sa_email: service account emails used by CI and runtime
 # - metrics_function_url: public callable URL pattern (useful for wiring GitHub secrets / env)
 # --------------------------------------------------------------------------------
-output "workload_identity_provider_name" { value = google_iam_workload_identity_pool_provider.provider.resource_name }
+output "workload_identity_provider_name" { value = google_iam_workload_identity_pool_provider.provider.name }
 output "gha_infra_sa_email"             { value = google_service_account.gha_infra.email }
 output "gha_app_sa_email"               { value = google_service_account.gha_app.email }
 output "run_exec_sa_email"              { value = google_service_account.run_exec.email }
