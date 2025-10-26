@@ -233,7 +233,7 @@ resource "google_cloud_run_v2_service" "app" {
 # --------------------------------------------------------------------------------
 resource "google_storage_bucket" "src" {
   name     = "${var.project_id}-fn-src"
-  location = var.bucket_location         # e.g. "EU"
+  location = var.bucket_location
   uniform_bucket_level_access = true
 }
 
@@ -250,10 +250,10 @@ resource "google_storage_bucket_iam_member" "src_cf_read" {
   member = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
 
-# Bootstrap SA needs upload/get on objects (for terraform google_storage_bucket_object)
+# Bootstrap SA needs upload/get on objects for TF bucket_object
 resource "google_storage_bucket_iam_member" "src_uploader" {
   bucket = google_storage_bucket.src.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectAdmin" # (εναλλακτικά: objectCreator + objectViewer)
   member = "serviceAccount:${var.bootstrap_sa_email}"
 }
 
