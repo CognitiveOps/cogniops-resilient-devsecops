@@ -6,6 +6,7 @@
         - var.github_repo  : GitHub repository identifier used for Workload Identity (e.g. "org/repo")
 */
 
+data "google_project" "current" {}
 terraform {
     required_version = ">= 1.6"
     required_providers {
@@ -67,7 +68,7 @@ resource "google_artifact_registry_repository" "docker" {
 # --------------------------------------------------------------------------------
 resource "google_bigquery_dataset" "metrics" {
     dataset_id                 = "agent_metrics"
-    location                   = "EU"
+    location                   = var.repo_location
     delete_contents_on_destroy = false  # preserve data on destroy unless explicitly removed
 }
 
@@ -181,8 +182,8 @@ resource "google_project_iam_member" "infra_roles" {
         "roles/bigquery.admin",
         "roles/iam.serviceAccountAdmin",
         # Optional: allow Terraform to manage the WIF pool/provider itself
-        "roles/iam.workloadIdentityPoolAdmin",
-        # "roles/iam.workloadIdentityPoolProviderAdmin",
+        "roles/iam.workloadIdentityPoolAdmin"
+        # The role "roles/iam.workloadIdentityPoolProviderAdmin" is not required unless you need Terraform to manage providers within the WIF pool.
     ])
     project = var.project_id
     role    = each.key
@@ -197,6 +198,12 @@ resource "google_project_iam_member" "app_roles" {
     project = var.project_id
     role    = each.key
     member  = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+resource "google_project_iam_member" "cf_can_deploy_run" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
 
 # Allow the App CI SA to impersonate the Cloud Run runtime SA when deploying
@@ -228,7 +235,7 @@ resource "google_cloud_run_v2_service" "app" {
         resources {
             limits = {
             cpu    = "1"
-            memory = "512Mi"  # << αυξήθηκε από 256Mi
+            memory = "512Mi"
             }
         }
         }
@@ -246,11 +253,23 @@ resource "google_cloud_run_v2_service" "app" {
 # --------------------------------------------------------------------------------
 resource "google_storage_bucket" "src" {
   name     = "${var.project_id}-fn-src"
-  location = var.bucket_location   # << αντί για EUROPE / var.repo_location
+  location = var.repo_location   # use the same location variable as BigQuery and Artifact Registry
   uniform_bucket_level_access = true
 }
 
+# Cloud Build SA: <PROJECT_NUMBER>@cloudbuild.gserviceaccount.com
+resource "google_storage_bucket_iam_member" "src_cb_read" {
+  bucket = google_storage_bucket.src.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+}
 
+# Cloud Functions Service Agent: service-<PROJECT_NUMBER>@gcf-admin-robot.iam.gserviceaccount.com
+resource "google_storage_bucket_iam_member" "src_cf_read" {
+  bucket = google_storage_bucket.src.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
+}
 
 data "archive_file" "ingest_zip" {
     type        = "zip"
@@ -285,7 +304,13 @@ resource "google_cloudfunctions2_function" "ingest" {
     ingress_settings   = "ALLOW_ALL"
   }
 
-  depends_on = [google_project_service.services] # << περιμένει APIs
+  # MUST wait for APIs + bucket IAM + Run IAM
+  depends_on = [
+    google_project_service.services,
+    google_storage_bucket_iam_member.src_cb_read,
+    google_storage_bucket_iam_member.src_cf_read,
+    google_project_iam_member.cf_can_deploy_run
+  ]
 }
 
 # --------------------------------------------------------------------------------
@@ -294,8 +319,14 @@ resource "google_cloudfunctions2_function" "ingest" {
 # - *_sa_email: service account emails used by CI and runtime
 # - metrics_function_url: public callable URL pattern (useful for wiring GitHub secrets / env)
 # --------------------------------------------------------------------------------
-output "workload_identity_provider_name" { value = google_iam_workload_identity_pool_provider.provider.name }
+output "workload_identity_provider_name" { value = google_iam_workload_identity_pool_provider.provider.resource_name }
 output "gha_infra_sa_email"             { value = google_service_account.gha_infra.email }
 output "gha_app_sa_email"               { value = google_service_account.gha_app.email }
 output "run_exec_sa_email"              { value = google_service_account.run_exec.email }
-output "metrics_function_url"           { value = "https://${var.region}-${var.project_id}.cloudfunctions.net/${google_cloudfunctions2_function.ingest.name}" }
+# NOTE: The URL format for Cloud Functions Gen2 may differ by region and IAM settings.
+# For public access, you must grant the 'roles/cloudfunctions.invoker' role to 'allUsers' or the desired principal.
+# See: https://cloud.google.com/functions/docs/securing/function-identity
+output "metrics_function_url" {
+  value = "https://${var.region}-${var.project_id}.cloudfunctions.net/${google_cloudfunctions2_function.ingest.name}"
+  description = "Default HTTP trigger URL for Cloud Functions Gen2. The actual URL may differ by region and deployment; verify the deployed URL in the GCP Console. Ensure IAM permissions allow invocation."
+}
