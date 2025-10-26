@@ -144,6 +144,9 @@ resource "google_iam_workload_identity_pool_provider" "provider" {
         "google.subject"       = "assertion.sub"
         "attribute.repository" = "assertion.repository" # used to restrict repo => principal
         "attribute.ref"        = "assertion.ref"
+
+    # Map repository assertion; restricted to the GitHub repo specified by var.github_repo
+    attribute_condition = "attribute.repository==\"${var.github_repo}\""
     }
 }
 
@@ -236,9 +239,10 @@ resource "google_cloud_run_v2_service" "app" {
 # - Cloud Function 2 (Gen2) configured for HTTP; still IAM-protected unless you add an 'allUsers' invoker
 # --------------------------------------------------------------------------------
 resource "google_storage_bucket" "src" {
-    name     = "${var.project_id}-fn-src"
-    location = var.repo_location
+  name     = "${var.project_id}-fn-src"
+  location = "EU"
 }
+
 
 data "archive_file" "ingest_zip" {
     type        = "zip"

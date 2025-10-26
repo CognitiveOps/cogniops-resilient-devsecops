@@ -125,6 +125,13 @@ jobs:
           TF_VAR_github_repo: ${{ env.GITHUB_REPO }}
         run: terraform plan -input=false -no-color
 
+      - name: Enable Cloud Resource Manager API (bootstrap)
+        run: |
+            set -euo pipefail
+            gcloud services enable cloudresourcemanager.googleapis.com --project "$PROJECT_ID"
+            # brief wait to allow the API enablement to propagate
+            sleep 10
+
       # Apply changes unless the workflow was triggered with plan_only=true.
       - name: Terraform Apply
         if: ${{ github.event.inputs.plan_only != 'true' }}
