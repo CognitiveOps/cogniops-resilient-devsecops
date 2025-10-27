@@ -43,7 +43,7 @@ def test_nginx_container_build_and_serve():
     container_name = "test-nginx-c"
     try:
         # Run container
-        run = docker("run", "-d", "-p", "8080:80", "--name", container_name, "test-nginx")
+        run = docker("run", "-d", "-p", "8080:8080", "--name", container_name, "test-nginx")
         assert run.returncode == 0, f"Run failed:\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
 
         # Wait for port open

@@ -133,23 +133,42 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
+        shell: bash
         run: |
-          # Deploy the pushed image to Cloud Run (managed) with autoscaling bounds.
-          # Record deploy start time and capture the service URL to a step output named 'url'.
-          echo "t_deploy_start=$(date +%s)" >> $GITHUB_OUTPUT
+          set -euo pipefail
 
-          gcloud run deploy ${SERVICE} \
-            --image "$IMAGE" \
-            --region ${REGION} \
+          # Defaults/validation
+          : "${REGION:?REGION is required}"
+          : "${IMAGE:?IMAGE is required}"
+          SERVICE="${SERVICE:-baseline-app}"
+
+          echo "t_deploy_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: $IMAGE"
+          gcloud --version
+
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
             --allow-unauthenticated \
-            --platform managed \
-            --memory 512Mi --cpu 1 \
-            --min-instances 0 --max-instances 2
+            --port=8080 \
+            --cpu=1 \
+            --memory=512Mi \
+            --min-instances=0 \
+            --max-instances=2 \
+            --timeout=300s \
+            --quiet
 
-          URL=$(gcloud run services describe ${SERVICE} \
-            --region ${REGION} --format='value(status.url)')
-          echo "url=$URL" >> $GITHUB_OUTPUT
-          echo "t_deploy_end=$(date +%s)" >> $GITHUB_OUTPUT
+          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "t_deploy_end=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Allow unauthenticated (invoker)
+        run: |
+          gcloud run services add-iam-policy-binding baseline-app \
+            --region="${REGION}" \
+            --member=allUsers \
+            --role=roles/run.invoker || true
 
       - name: Health check
         id: health
