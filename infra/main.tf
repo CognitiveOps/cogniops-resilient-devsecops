@@ -144,6 +144,8 @@ resource "google_iam_workload_identity_pool_provider" "provider" {
         "attribute.repository" = "assertion.repository"
         "attribute.ref"        = "assertion.ref"
     }
+
+     attribute_condition = "attribute.repository == \"${var.github_repo}\""
 }
 
 # Bind repo → SAs
