@@ -163,39 +163,67 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "t_deploy_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Allow unauthenticated (invoker)
+      # Make sure it's publicly invokable (in case --allow-unauthenticated raced).
+      - name: Ensure unauthenticated invoke
+        if: ${{ always() }}  # harmless if already set
+        shell: bash
         run: |
-          gcloud run services add-iam-policy-binding baseline-app \
-            --region="${REGION}" \
-            --member=allUsers \
-            --role=roles/run.invoker || true
+          set -euo pipefail
+          gcloud run services add-iam-policy-binding "$SERVICE" \
+            --region "$REGION" \
+            --member="allUsers" \
+            --role="roles/run.invoker" \
+            --quiet || true
 
-      - name: Health check
-        id: health
+      # Wait until the service actually responds with 200 OK.
+      - name: Wait for Cloud Run to become healthy
+        id: wait-healthy
+        shell: bash
         run: |
-          # Read the Cloud Run service URL produced by the deploy step.
+          set -euo pipefail
+
+          # Prefer the URL from the deploy step; fall back to describing the service.
           URL="${{ steps.deploy.outputs.url }}"
+          if [[ -z "${URL:-}" ]]; then
+            URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+          fi
+          : "${URL:?could not determine Cloud Run URL}"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Probing ${URL} ..."
 
-          # Poll the service for up to 30 attempts (~60 seconds total with 2s sleeps)
-          # until we receive an HTTP 200. This gives the service time to become ready
-          # after deployment (cold starts, container initialization, etc).
-          for i in $(seq 1 30); do
-            # Use curl to fetch only the HTTP status code (silent output).
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
-
-            # If we see 200 OK, record a named step output 'healthy' and succeed.
-            if [ "$STATUS" -eq 200 ]; then
-              echo "healthy=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-
-            # Otherwise wait a bit and try again.
+          # 1) Wait until the Service reports Ready=True (reduces early 404/5xx).
+          for i in {1..90}; do
+            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" \
+              --format='get(status.conditions[type=Ready].status)' 2>/dev/null || true)"
+            [[ "$READY" == "True" ]] && break
             sleep 2
           done
 
-          # If all retries are exhausted, record unhealthy and fail the step so
-          # subsequent steps (or the job) know the deployment did not become healthy.
-          echo "healthy=false" >> $GITHUB_OUTPUT
+          # 2) Probe HTTP until we see an explicit 200 OK.
+          for i in {1..60}; do
+            CODE="$(curl -Ls -o /dev/null -w '%{http_code}' \
+              --retry 5 --retry-delay 2 --retry-all-errors \
+              --connect-timeout 5 --max-time 10 \
+              "$URL" || echo 000)"
+            if [[ "$CODE" == "200" ]]; then
+              echo "healthy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          # 3) Diagnostics on failure.
+          echo "::group::Cloud Run describe"
+          gcloud run services describe "$SERVICE" --region "$REGION" || true
+          echo "::endgroup::"
+
+          echo "::group::Recent revision logs"
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE" \
+            --project "$PROJECT_ID" --limit=100 --format='value(textPayload)' || true
+          echo "::endgroup::"
+
+          echo "healthy=false" >> "$GITHUB_OUTPUT"
           exit 1
 
       - name: End timer
