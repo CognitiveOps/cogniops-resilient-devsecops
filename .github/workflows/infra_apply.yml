@@ -1,3 +1,8 @@
+# admin - Terraform Apply workflow for GCP infrastructure
+# This workflow runs on push to infra-related paths or manually via workflow_dispatch.
+# It plans and (optionally) applies Terraform changes, stores state in a GCS bucket,
+# and writes important outputs back to repository variables.
+
 name: admin - Terraform Apply (GCP infra)
 
 on:
@@ -8,24 +13,30 @@ on:
         required: false
         default: "false"
   push:
+    # Trigger only when infra code or this workflow changes (and functions/ingest)
     paths:
       - "infra/**"
       - ".github/workflows/infra_apply.yml"
+      - "functions/ingest/**"
 
+# Minimal repository permissions required by this job (principle of least privilege).
 permissions:
-  id-token: write
-  contents: read
+  id-token: write    # needed for Workload Identity Federation (WIF)
+  contents: write     # write repository contents
+  actions: write     # to write repo-level variables later
 
 concurrency:
+  # Ensure only one run per ref (branch/PR) is active; prevents concurrent infra changes.
   group: "infra-${{ github.ref }}"
   cancel-in-progress: false
 
 env:
+  # Environment defaults and mappings to repository/organization variables.
   PROJECT_ID:        ${{ vars.GCP_PROJECT_ID }}
   REGION:            ${{ vars.GCP_REGION }}
-  REPO_LOCATION:     ${{ vars.GCP_REPO_LOCATION || 'europe' }}   # e.g. 'europe'
-  BUCKET_LOCATION:   ${{ vars.GCP_BUCKET_LOCATION || 'EU' }}     # e.g. 'EU' or 'europe-west1'
-  BIGQUERY_LOCATION: ${{ vars.GCP_BIGQUERY_LOCATION || 'EU' }}   # e.g. 'EU'
+  REPO_LOCATION:     ${{ vars.GCP_REPO_LOCATION || 'europe' }}
+  BUCKET_LOCATION:   ${{ vars.GCP_BUCKET_LOCATION || 'EU' }}
+  BIGQUERY_LOCATION: ${{ vars.GCP_BIGQUERY_LOCATION || 'EU' }}
   GITHUB_REPO:       ${{ github.repository }}
   TF_STATE_BUCKET:   ${{ vars.TF_STATE_BUCKET }}
   TF_STATE_PREFIX:   "terraform/state"
@@ -34,10 +45,15 @@ env:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    permissions:           # job-level perms override top-level if present; specify explicitly
+      id-token: write
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
+        # Checkout the repository so Terraform configuration in infra/ is available.
 
-      # Prefer WIF when you already have outputs from a previous apply
+      # Authenticate to GCP using Workload Identity Federation if provider and SA are configured.
       - name: Auth to GCP (WIF)
         if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_INFRA_EMAIL != '' }}
         uses: google-github-actions/auth@v2
@@ -47,7 +63,7 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-      # First run / bootstrap with JSON key
+      # Fallback: authenticate using a service account JSON key for bootstrap runs.
       - name: Auth to GCP (bootstrap JSON)
         if: ${{ vars.GCP_WIF_PROVIDER == '' || vars.GCP_SA_INFRA_EMAIL == '' }}
         uses: google-github-actions/auth@v2
@@ -58,18 +74,18 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+        # Ensures gcloud CLI is available for bucket and API management commands.
 
-      # Pre-enable core APIs so Terraform doesn't fail when enabling services
       - name: Pre-enable core APIs (CRM & Service Usage)
         run: |
           set -euo pipefail
+          # Ensure required APIs are enabled before interacting with projects or enabling other services.
           gcloud services enable cloudresourcemanager.googleapis.com serviceusage.googleapis.com --project "$PROJECT_ID"
-          # ensure they are enabled
+          # Wait briefly until service enablement is visible to subsequent commands.
           for i in 1 2 3 4 5; do
             gcloud services list --enabled --project "$PROJECT_ID" | grep -q cloudresourcemanager.googleapis.com && break || sleep 5
           done
 
-      # GCS backend bucket for TF state (create if missing)
       - name: Ensure TF state bucket (must exist before init)
         if: ${{ env.TF_STATE_BUCKET != '' }}
         shell: bash
@@ -77,7 +93,7 @@ jobs:
           set -euo pipefail
           echo "Project: $PROJECT_ID"
           echo "Bucket : gs://${TF_STATE_BUCKET}"
-
+          # Check if bucket exists; if not, create with uniform access and enable versioning.
           if gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --format='value(name)' >/dev/null 2>&1; then
             echo "✅ Bucket already exists"
           else
@@ -88,9 +104,12 @@ jobs:
             gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
             echo "✅ Created bucket gs://${TF_STATE_BUCKET}"
           fi
+
       - name: Ensure bucket IAM for bootstrap SA
+        if: ${{ env.TF_STATE_BUCKET != '' && env.BOOTSTRAP_SA_EMAIL != '' }}
         run: |
           set -euo pipefail
+          # Grant storage.objectAdmin to the bootstrap SA so it can manage state objects during first runs.
           echo "Granting objectAdmin to $BOOTSTRAP_SA_EMAIL on gs://$TF_STATE_BUCKET"
           gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
             --member="serviceAccount:${BOOTSTRAP_SA_EMAIL}" \
@@ -100,17 +119,17 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.4
+        # Installs Terraform CLI used for init/plan/apply.
 
       - name: Terraform Init
         working-directory: infra
         shell: bash
         run: |
           set -euo pipefail
-
+          # If a remote GCS backend is specified via TF_STATE_BUCKET, write a backend override
+          # so terraform init will configure the GCS backend dynamically.
           if [[ -n "${TF_STATE_BUCKET:-}" ]]; then
-            # Write backend_override.tf using a CLEAN heredoc.
-            # Warning: the EOF must be at the first column, without spaces/tabs.
-            cat > backend_override.tf <<EOF
+          cat > backend_override.tf <<EOF
           terraform {
             backend "gcs" {
               bucket = "${TF_STATE_BUCKET}"
@@ -121,13 +140,14 @@ jobs:
             echo "✅ Wrote backend_override.tf"
             cat backend_override.tf
           fi
-
-            terraform init -input=false
+          # Initialize modules/providers and the backend.
+          terraform init -input=false
 
       - name: Terraform Plan
         id: plan
         working-directory: infra
         env:
+          # Map environment variables into TF_VAR_* for use in Terraform modules.
           TF_VAR_project_id:        ${{ env.PROJECT_ID }}
           TF_VAR_region:            ${{ env.REGION }}
           TF_VAR_repo_location:     ${{ env.REPO_LOCATION }}
@@ -136,6 +156,7 @@ jobs:
           TF_VAR_github_repo:       ${{ env.GITHUB_REPO }}
           TF_VAR_bootstrap_sa_email: ${{ env.BOOTSTRAP_SA_EMAIL }}
         run: terraform plan -input=false -no-color
+        # Produces a plan; subsequent step applies it unless plan_only is true.
 
       - name: Terraform Apply
         if: ${{ github.event.inputs.plan_only != 'true' }}
@@ -149,14 +170,17 @@ jobs:
           TF_VAR_github_repo:       ${{ env.GITHUB_REPO }}
           TF_VAR_bootstrap_sa_email: ${{ env.BOOTSTRAP_SA_EMAIL }}
         run: terraform apply -auto-approve -input=false
+        # Apply the planned changes. Skipped when plan_only input equals "true".
 
       - name: Read Terraform outputs
         id: tfout
         working-directory: infra
         run: |
+          # Ensure jq is available to parse JSON outputs.
           sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y jq >/dev/null 2>&1
           OUT=$(terraform output -json)
           echo "$OUT" > tf_outputs.json
+          # Extract useful outputs and write them to $GITHUB_OUTPUT for later steps.
           echo "wif_provider=$(jq -r '.workload_identity_provider_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_infra=$(jq -r '.gha_infra_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
@@ -178,19 +202,41 @@ jobs:
               GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',
               METRICS_INGEST_URL:    '${{ steps.tfout.outputs.metrics_url }}'
             };
+
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
-              await github.request('PUT /repos/{owner}/{repo}/actions/variables/{name}', {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                name,
-                value
-              });
-              core.info(`Set repository variable: ${name}`);
+              try {
+                // Try to CREATE first (POST)
+                await github.request('POST /repos/{owner}/{repo}/actions/variables', {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  value
+                });
+                core.info(`Created repository variable: ${name}`);
+              } catch (e) {
+                if (e.status === 409) {
+                  // Already exists → UPDATE (PATCH)
+                  await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    value
+                  });
+                  core.info(`Updated repository variable: ${name}`);
+                } else if (e.status === 404) {
+                  core.error(`Got 404 managing ${name}. Check: repo Actions enabled, org workflow permissions = Read & write, and workflow permissions: contents: write, actions: write.`);
+                  throw e;
+                } else {
+                  throw e;
+                }
+              }
             }
+
 
       - name: Summary
         run: |
+          # Append a short summary of key outputs to the job summary for quick inspection.
           {
             echo "### Terraform Outputs → Repo Variables"
             echo "- GCP_WIF_PROVIDER   = ${{ steps.tfout.outputs.wif_provider }}"

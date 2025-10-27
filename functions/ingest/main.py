@@ -102,6 +102,8 @@ def ingest(request):
                 "service": payload.get("service", "baseline-app"),
                 "env": payload.get("env", "prod"),
             }
+        ]
+        table_id = f"{bq.project}.{DATASET}.{TABLE}"
         errors = bq.insert_rows_json(table_id, row)
         if errors:
             return (json.dumps({"ok": False, "errors": errors}), 500)
