@@ -89,7 +89,6 @@ jobs:
         run: |
           # Install application/test dependencies. Keep pip updated to avoid compatibility issues.
           python -m pip install --upgrade pip
-          pip install -r baseline/services/app/requirements.txt
           # Install pytest and httpx (httpx used by tests for HTTP calls)
           pip install pytest httpx
 
