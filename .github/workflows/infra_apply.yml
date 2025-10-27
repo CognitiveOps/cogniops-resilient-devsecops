@@ -189,6 +189,7 @@ jobs:
       - name: Upsert repository variables
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GH_ADMIN_TOKEN }}  # PAT with repo admin/maintain
           script: |
             const varsToSet = {
               GCP_PROJECT_ID:        process.env.PROJECT_ID || '',
@@ -206,33 +207,24 @@ jobs:
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
               try {
-                // Try to CREATE first (POST)
+                // Try CREATE
                 await github.request('POST /repos/{owner}/{repo}/actions/variables', {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                  value
+                  owner: context.repo.owner, repo: context.repo.repo, name, value
                 });
                 core.info(`Created repository variable: ${name}`);
               } catch (e) {
                 if (e.status === 409) {
-                  // Already exists → UPDATE (PATCH)
+                  // Already exists → UPDATE
                   await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name,
-                    value
+                    owner: context.repo.owner, repo: context.repo.repo, name, value
                   });
                   core.info(`Updated repository variable: ${name}`);
-                } else if (e.status === 404) {
-                  core.error(`Got 404 managing ${name}. Check: repo Actions enabled, org workflow permissions = Read & write, and workflow permissions: contents: write, actions: write.`);
-                  throw e;
                 } else {
+                  core.error(`Failed ${name}: ${e.status} ${e.message}`);
                   throw e;
                 }
               }
             }
-
 
       - name: Summary
         run: |
