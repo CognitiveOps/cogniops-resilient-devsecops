@@ -134,18 +134,20 @@ jobs:
       - name: Deploy to Cloud Run
         id: deploy
         run: |
-          # Deploy the pushed image to Cloud Run (managed) with limited resources and autoscaling bounds.
+          # Deploy the pushed image to Cloud Run (managed) with autoscaling bounds.
           # Record deploy start time and capture the service URL to a step output named 'url'.
           echo "t_deploy_start=$(date +%s)" >> $GITHUB_OUTPUT
+
           gcloud run deploy ${SERVICE} \
             --image "$IMAGE" \
             --region ${REGION} \
             --allow-unauthenticated \
             --platform managed \
-            --memory 256Mi --cpu 1 \
+            --memory 512Mi --cpu 1 \
             --min-instances 0 --max-instances 2
-          URL=$(gcloud run services describe ${SERVICE} --region ${REGION} --format='value(status.url)')
-          # Write the service URL to the step output 'url' so later steps can read it via steps.deploy.outputs.url
+
+          URL=$(gcloud run services describe ${SERVICE} \
+            --region ${REGION} --format='value(status.url)')
           echo "url=$URL" >> $GITHUB_OUTPUT
           echo "t_deploy_end=$(date +%s)" >> $GITHUB_OUTPUT
 
