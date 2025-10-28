@@ -130,10 +130,11 @@ resource "google_project_iam_member" "app_logging_viewer" {
   member  = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-resource "google_cloud_run_service_iam_member" "baseline_public" {
+# Allow public (unauthenticated) access to the Cloud Run service
+resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   project  = var.project_id
   location = var.region
-  service  = google_cloud_run_v2_service.app.name
+  name     = google_cloud_run_v2_service.app.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
@@ -185,7 +186,9 @@ resource "google_project_iam_member" "infra_roles" {
         "roles/cloudfunctions.admin",
         "roles/bigquery.admin",
         "roles/iam.serviceAccountAdmin",
-        "roles/iam.workloadIdentityPoolAdmin",
+        "roles/iam.workloadIdentityPoolAdmin",    
+        "roles/serviceusage.serviceUsageAdmin",
+        "roles/viewer",
     ])
     project = var.project_id
     role    = each.key

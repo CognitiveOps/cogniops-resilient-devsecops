@@ -77,13 +77,18 @@ jobs:
         # Ensures gcloud CLI is available for bucket and API management commands.
 
       - name: Pre-enable core APIs (CRM & Service Usage)
+        # Only when bootstrapping with JSON creds
+        if: ${{ vars.GCP_WIF_PROVIDER == '' || vars.GCP_SA_INFRA_EMAIL == '' }}
         run: |
           set -euo pipefail
-          # Ensure required APIs are enabled before interacting with projects or enabling other services.
-          gcloud services enable cloudresourcemanager.googleapis.com serviceusage.googleapis.com --project "$PROJECT_ID"
-          # Wait briefly until service enablement is visible to subsequent commands.
-          for i in 1 2 3 4 5; do
-            gcloud services list --enabled --project "$PROJECT_ID" | grep -q cloudresourcemanager.googleapis.com && break || sleep 5
+          gcloud services enable \
+            cloudresourcemanager.googleapis.com \
+            serviceusage.googleapis.com \
+            --project "$PROJECT_ID"
+          # tiny wait so they show up as enabled
+          for i in {1..5}; do
+            gcloud services list --enabled --project "$PROJECT_ID" \
+              | grep -q cloudresourcemanager.googleapis.com && break || sleep 3
           done
 
       - name: Ensure TF state bucket (must exist before init)
