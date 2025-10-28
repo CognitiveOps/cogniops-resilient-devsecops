@@ -189,6 +189,7 @@ resource "google_project_iam_member" "infra_roles" {
         "roles/iam.workloadIdentityPoolAdmin",    
         "roles/serviceusage.serviceUsageAdmin",
         "roles/viewer",
+        "roles/storage.admin",
     ])
     project = var.project_id
     role    = each.key
@@ -264,12 +265,11 @@ resource "google_storage_bucket_iam_member" "src_uploader_admin" {
   member = "serviceAccount:${var.bootstrap_sa_email}"
 }
 
-# # (Optional but helpful) project-level admin for bootstrap SA while bootstrapping
-# resource "google_project_iam_member" "bootstrap_storage_admin" {
-#   project = var.project_id
-#   role    = "roles/storage.admin"
-#   member  = "serviceAccount:${var.bootstrap_sa_email}"
-# }
+resource "google_storage_bucket_iam_member" "tf_state_infra_access" {
+  bucket = var.tf_state_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.gha_infra.email}"
+}
 
 resource "google_storage_bucket_iam_member" "src_uploader_view" {
     bucket = google_storage_bucket.src.name
@@ -289,18 +289,6 @@ resource "google_storage_bucket_iam_member" "src_cf_read" {
     role   = "roles/storage.objectViewer"
     member = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
-
-# Wait for IAM propagation (45–60s is safer than 20)
-# resource "time_sleep" "wait_iam" {
-#   depends_on = [
-#     google_storage_bucket_iam_member.src_uploader_admin,
-#     google_storage_bucket_iam_member.src_uploader_view,
-#     google_storage_bucket_iam_member.src_cb_read,
-#     google_storage_bucket_iam_member.src_cf_read,
-#     # google_project_iam_member.bootstrap_storage_admin,
-#   ]
-#   create_duration = "90s"
-# }
 
 data "archive_file" "ingest_zip" {
     type        = "zip"
