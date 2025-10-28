@@ -179,40 +179,44 @@ jobs:
       - name: Wait for Cloud Run to become healthy
         id: wait-healthy
         shell: bash
+        env:
+          SERVICE: ${{ env.SERVICE }}
+          REGION:  ${{ env.REGION }}
+          PROJECT_ID: ${{ env.PROJECT_ID }}
         run: |
           set -euo pipefail
 
-          # Prefer the URL from the deploy step; fall back to describing the service.
-          URL="${{ steps.deploy.outputs.url }}"
-          if [[ -z "${URL:-}" ]]; then
+          # Prefer the URL emitted by the deploy step; if missing, describe the service.
+          URL="${{ steps.deploy.outputs.url || '' }}"
+          if [[ -z "${URL}" ]]; then
             URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
           fi
           : "${URL:?could not determine Cloud Run URL}"
+          echo "Using URL: ${URL}"
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
-          echo "Probing ${URL} ..."
 
-          # 1) Wait until the Service reports Ready=True (reduces early 404/5xx).
-          for i in {1..90}; do
-            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" \
-              --format='get(status.conditions[type=Ready].status)' 2>/dev/null || true)"
+          # 1) Wait until Ready=True to avoid early 404/5xx.
+          for i in $(seq 1 90); do
+            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='get(status.conditions[type=Ready].status)' 2>/dev/null || true)"
             [[ "$READY" == "True" ]] && break
             sleep 2
           done
 
-          # 2) Probe HTTP until we see an explicit 200 OK.
-          for i in {1..60}; do
+          # 2) HTTP probe: follow redirects, treat 2xx/3xx as success.
+          #    We’ll accept 200–399 to be tolerant of redirects.
+          for i in $(seq 1 60); do
             CODE="$(curl -Ls -o /dev/null -w '%{http_code}' \
-              --retry 5 --retry-delay 2 --retry-all-errors \
-              --connect-timeout 5 --max-time 10 \
-              "$URL" || echo 000)"
-            if [[ "$CODE" == "200" ]]; then
+                    --retry 5 --retry-delay 2 --retry-all-errors \
+                    --connect-timeout 5 --max-time 10 \
+                    "$URL" || echo 000)"
+            if [[ "$CODE" =~ ^2[0-9][0-9]$ || "$CODE" =~ ^3[0-9][0-9]$ ]]; then
               echo "healthy=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep 2
           done
 
-          # 3) Diagnostics on failure.
+          # 3) Diagnostics (best effort). This needs logging.viewer (see section B).
           echo "::group::Cloud Run describe"
           gcloud run services describe "$SERVICE" --region "$REGION" || true
           echo "::endgroup::"
