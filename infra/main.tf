@@ -213,6 +213,13 @@ resource "google_project_iam_member" "cf_can_deploy_run" {
     member  = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
 
+# Allow the infra SA (which runs Terraform) to act as the runtime SA used by Cloud Run
+resource "google_service_account_iam_member" "infra_can_actas_run_exec" {
+  service_account_id = google_service_account.run_exec.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
 # App CI SA can act as runtime SA
 resource "google_service_account_iam_member" "app_can_actas_run_exec" {
     service_account_id = google_service_account.run_exec.name
