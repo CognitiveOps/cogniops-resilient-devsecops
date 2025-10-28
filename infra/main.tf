@@ -266,7 +266,7 @@ resource "google_storage_bucket_iam_member" "src_uploader_admin" {
 }
 
 resource "google_storage_bucket_iam_member" "tf_state_infra_access" {
-  bucket = var.tf_state_bucket_name
+  bucket = google_storage_bucket.src.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.gha_infra.email}"
 }
