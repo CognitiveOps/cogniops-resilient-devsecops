@@ -129,9 +129,9 @@ jobs:
           terraform_version: 1.8.4
         # Installs Terraform CLI used for init/plan/apply.
 
-      # --- switch to the bootstrap JSON SA only to edit bucket IAM ---
-      - name: Auth as bootstrap SA (temporary)
-        if: ${{ env.TF_STATE_BUCKET != '' && env.HAS_JSON == 'true' }}
+      # --- temporarily auth as the bootstrap SA to modify bucket IAM ---
+      - name: Temp auth as bootstrap SA (for bucket IAM)
+        if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_INFRA_EMAIL != '' && env.TF_STATE_BUCKET != '' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
@@ -139,23 +139,21 @@ jobs:
           export_environment_variables: true
 
       - name: Grant TF state bucket access to infra SA
-        if: ${{ env.TF_STATE_BUCKET != '' && vars.GCP_SA_INFRA_EMAIL != '' && env.HAS_JSON == 'true' }}
+        if: ${{ env.TF_STATE_BUCKET != '' && vars.GCP_SA_INFRA_EMAIL != '' }}
         shell: bash
         run: |
           set -euo pipefail
           SA="${{ vars.GCP_SA_INFRA_EMAIL }}"
-          BUCKET="gs://${TF_STATE_BUCKET}"
-
-          echo "Granting roles/storage.objectAdmin on ${BUCKET} to ${SA}"
-          gcloud storage buckets add-iam-policy-binding "${BUCKET}" \
+          echo "Granting roles/storage.objectAdmin on gs://${TF_STATE_BUCKET} to ${SA}"
+          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
             --member="serviceAccount:${SA}" \
-            --role="roles/storage.objectAdmin" || true
+            --role="roles/storage.objectAdmin"
 
-          gcloud storage buckets add-iam-policy-binding "${BUCKET}" \
-            --member="serviceAccount:${SA}" \
-            --role="roles/storage.legacyBucketReader" || true
+          # (optional) quick verify
+          gcloud storage buckets get-iam-policy "gs://${TF_STATE_BUCKET}" \
+            --format='bindings' | grep -E "roles/storage.objectAdmin.*${SA}" || true
 
-      # --- re-auth back to WIF for the rest of the job ---
+      # --- re-auth back to WIF for the rest of the run ---
       - name: Re-auth to GCP (WIF)
         if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_INFRA_EMAIL != '' }}
         uses: google-github-actions/auth@v2
@@ -164,7 +162,6 @@ jobs:
           service_account: ${{ vars.GCP_SA_INFRA_EMAIL }}
           create_credentials_file: true
           export_environment_variables: true
-
 
       - name: Terraform Init
         working-directory: infra
