@@ -124,6 +124,20 @@ resource "google_project_iam_member" "run_exec_writers" {
     member   = "serviceAccount:${google_service_account.run_exec.email}"
 }
 
+resource "google_project_iam_member" "app_logging_viewer" {
+  project = var.project_id
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+resource "google_cloud_run_service_iam_member" "baseline_public" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloud_run_v2_service.app.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
 # --------------------------------------------------------------------------------
 # Workload Identity Federation (OIDC) for GitHub Actions
 # --------------------------------------------------------------------------------
