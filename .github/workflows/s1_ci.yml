@@ -133,90 +133,60 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
-        shell: bash
         run: |
           set -euo pipefail
-
-          # Defaults/validation
-          : "${REGION:?REGION is required}"
-          : "${IMAGE:?IMAGE is required}"
-          SERVICE="${SERVICE:-baseline-app}"
-
-          echo "t_deploy_start=$(date +%s)" >> "$GITHUB_OUTPUT"
-          echo "Deploying image: $IMAGE"
-          gcloud --version
-
           gcloud run deploy "$SERVICE" \
-            --image="$IMAGE" \
-            --region="$REGION" \
-            --platform=managed \
+            --image "$IMAGE" \
+            --region "$REGION" \
             --allow-unauthenticated \
-            --port=8080 \
-            --cpu=1 \
-            --memory=512Mi \
-            --min-instances=0 \
-            --max-instances=2 \
-            --timeout=300s \
-            --quiet
-
+            --platform managed \
+            --memory 512Mi --cpu 1 \
+            --min-instances 0 --max-instances 2
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "t_deploy_end=$(date +%s)" >> "$GITHUB_OUTPUT"
-
-      # Make sure it's publicly invokable (in case --allow-unauthenticated raced).
-      - name: Ensure unauthenticated invoke
-        if: ${{ always() }}  # harmless if already set
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run services add-iam-policy-binding "$SERVICE" \
-            --region "$REGION" \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet || true
 
       # Wait until the service actually responds with 200 OK.
       - name: Wait for Cloud Run to become healthy
         id: wait-healthy
         shell: bash
         env:
-          SERVICE: ${{ env.SERVICE }}
-          REGION:  ${{ env.REGION }}
-          PROJECT_ID: ${{ env.PROJECT_ID }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
         run: |
           set -euo pipefail
 
-          # Prefer the URL emitted by the deploy step; if missing, describe the service.
-          URL="${{ steps.deploy.outputs.url || '' }}"
-          if [[ -z "${URL}" ]]; then
-            URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
-          fi
-          : "${URL:?could not determine Cloud Run URL}"
-          echo "Using URL: ${URL}"
-          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          # Show what the deploy step said vs what Cloud Run says now
+          echo "Deploy step URL (if any): ${DEPLOY_URL:-<empty>}"
 
-          # 1) Wait until Ready=True to avoid early 404/5xx.
-          for i in $(seq 1 90); do
-            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='get(status.conditions[type=Ready].status)' 2>/dev/null || true)"
+          # Always resolve from Cloud Run to avoid stale env
+          RESOLVED_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+          : "${RESOLVED_URL:?could not determine Cloud Run URL from gcloud}"
+          echo "Resolved URL via gcloud: ${RESOLVED_URL}"
+
+          # Use the resolved one and expose it for later steps
+          URL="$RESOLVED_URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+          echo "Probing ${URL} ..."
+
+          # 1) Wait until the Service reports Ready=True (reduces early 404/5xx).
+          for i in {1..90}; do
+            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" \
+              --format='get(status.conditions[type=Ready].status)' 2>/dev/null || true)"
             [[ "$READY" == "True" ]] && break
             sleep 2
           done
 
-          # 2) HTTP probe: follow redirects, treat 2xx/3xx as success.
-          #    We’ll accept 200–399 to be tolerant of redirects.
-          for i in $(seq 1 60); do
+          # 2) Probe HTTP until we see an explicit 200 OK (follow redirects; retry).
+          for i in {1..60}; do
             CODE="$(curl -Ls -o /dev/null -w '%{http_code}' \
-                    --retry 5 --retry-delay 2 --retry-all-errors \
-                    --connect-timeout 5 --max-time 10 \
-                    "$URL" || echo 000)"
-            if [[ "$CODE" =~ ^2[0-9][0-9]$ || "$CODE" =~ ^3[0-9][0-9]$ ]]; then
-              echo "healthy=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+              --retry 5 --retry-delay 2 --retry-all-errors \
+              --connect-timeout 5 --max-time 10 \
+              "$URL" || echo 000)"
+            [[ "$CODE" == "200" ]] && { echo "healthy=true" >> "$GITHUB_OUTPUT"; exit 0; }
             sleep 2
           done
 
-          # 3) Diagnostics (best effort). This needs logging.viewer (see section B).
+          # 3) Diagnostics on failure (non-fatal if logging perms are missing).
           echo "::group::Cloud Run describe"
           gcloud run services describe "$SERVICE" --region "$REGION" || true
           echo "::endgroup::"
