@@ -48,3 +48,16 @@ variable "bootstrap_sa_email" {
   description = "Email of the Service Account used by Terraform (bootstrap/apply)"
   type        = string
 }
+
+# Scenario toggles
+variable "cloud_run_public" {
+  type        = bool
+  default     = true
+  description = "Public access to Cloud Run service (S1 baseline = true)."
+}
+
+variable "cf_ingest_public" {
+  type        = bool
+  default     = false
+  description = "Whether to make the ingest Cloud Function public (keep false)."
+}

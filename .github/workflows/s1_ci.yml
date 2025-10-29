@@ -1,5 +1,4 @@
-# GitHub Actions workflow for the S1 CI/CD Baseline pipeline.
-# Runs on pushes to baseline app files or when manually triggered.
+# S1 CI/CD Baseline — Build → Test → Build Image → Push → Deploy → Health Check → Metrics
 name: S1 CI/CD Baseline
 
 on:
@@ -9,15 +8,15 @@ on:
       - ".github/workflows/s1_ci.yml"
   workflow_dispatch:
   workflow_run:
-    workflows:
-      - "admin - Terraform Apply (GCP infra)"
+    workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
 
+# Global environment variables (secrets/vars should remain in repo settings)
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
   SERVICE: "baseline-app"
-  REPO_LOCATION: "europe"
+  REPO_LOCATION: "europe"      # region prefix (europe, us, asia)
   AR_REPO: "apps"
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   ENV: "prod"
@@ -26,17 +25,38 @@ permissions:
   id-token: write
   contents: read
 
+# Prevent concurrent runs for the same branch
+concurrency:
+  group: s1-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-push-deploy:
+    # Only run if required GCP variables exist and (if triggered by workflow_run) the upstream run succeeded
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 30
 
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      - name: Compute IMAGE var
+        run: |
+          IMAGE="$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE:${GITHUB_SHA}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      # ——— Source checkout ——————————————————————————————————————————————
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ——— Start global timer (for TTD metric) ————————————————————————
       - name: Start timer
         id: t0
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # ——— Authenticate and setup toolchains —————————————————————————
       - name: Auth to GCP (OIDC/WIF) as APP CI
         uses: google-github-actions/auth@v2
         with:
@@ -48,177 +68,157 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure docker for Artifact Registry
-        run: gcloud auth configure-docker ${REPO_LOCATION}-docker.pkg.dev --quiet
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REPO_LOCATION}-docker.pkg.dev" --quiet
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install test deps
+      - name: Install test dependencies
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install pytest httpx
 
+      # ——— Run unit tests ———————————————————————————————————————————————
       - name: Unit tests
         id: test
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
+          set -euo pipefail
           echo "t_test_start=$(date +%s)" >> "$GITHUB_OUTPUT"
           pytest -q baseline/services/app/tests
           echo "t_test_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # ——— Build & Push container ——————————————————————————————————————
       - name: Build image
         id: build
         run: |
+          set -euo pipefail
           echo "t_build_start=$(date +%s)" >> "$GITHUB_OUTPUT"
           docker build -t app-image:local baseline/services/app
           echo "t_build_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Push image to Artifact Registry
+      - name: Push image
         id: push
         run: |
+          set -euo pipefail
           echo "t_push_start=$(date +%s)" >> "$GITHUB_OUTPUT"
-          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${{ github.sha }}"
           docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "t_push_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # ——— Deploy to Cloud Run ————————————————————————————————————————————
       - name: Deploy to Cloud Run
         id: deploy
         run: |
           set -euo pipefail
           echo "t_deploy_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
             --allow-unauthenticated \
             --platform managed \
-            --memory 512Mi --cpu 1 \
-            --min-instances 0 --max-instances 2
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 2
+
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
           : "${URL:?failed to resolve Cloud Run URL}"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "t_deploy_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for Cloud Run to become healthy
-        id: wait-healthy
-        shell: bash
+      # ——— Health Check (simple HTTP probe with optional auth) ————————————
+      # Purpose: Verify service reachability (HTTP 200). 
+      # Reusable across S1–S5 scenarios by changing the URL or target env.
+      - name: Health Check
+        id: health_check
         env:
-          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          REGION: ${{ env.REGION }}
+          SERVICE: ${{ env.SERVICE }}
         run: |
           set -euo pipefail
+          echo "Checking service health (public, no auth)..."
 
-          echo "Deploy step URL (if any): ${DEPLOY_URL:-<empty>}"
-          RESOLVED_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
-          : "${RESOLVED_URL:?could not determine Cloud Run URL from gcloud}"
-          echo "Resolved URL via gcloud: ${RESOLVED_URL}"
-          URL="$RESOLVED_URL"
+          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
+          : "${URL:?Could not resolve Cloud Run URL}"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-          echo "Probing ${URL} ..."
+          CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
+          echo "HTTP status: $CODE"
 
-          # 1) Wait for Ready=True
-          for i in {1..120}; do
-            READY="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed \
-              --format="get(status.conditions[type=Ready].status)" 2>/dev/null || true)"
-            [[ "$READY" == "True" ]] && break
-            sleep 2
-          done
+          # Public baseline expectation: must be 200 without Authorization
+          if [[ "$CODE" == "200" ]]; then
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "healthy=false" >> "$GITHUB_OUTPUT"
+            echo "Expected public 200 without auth; got $CODE (service may be private)."
+            exit 1
+          fi
 
-          # Helper: HTTP status code, optionally with auth
-          status_code() {
-            local with_auth="${1:-false}"
-            if [[ "$with_auth" == "true" ]]; then
-              local token
-              token="$(gcloud auth print-identity-token)"
-              curl -Ls -o /dev/null -w '%{http_code}' \
-                -H "Authorization: Bearer ${token}" \
-                --connect-timeout 5 --max-time 10 \
-                --retry 3 --retry-delay 2 --retry-all-errors \
-                "$URL" || echo 000
-            else
-              curl -Ls -o /dev/null -w '%{http_code}' \
-                --connect-timeout 5 --max-time 10 \
-                --retry 3 --retry-delay 2 --retry-all-errors \
-                "$URL" || echo 000
-            fi
-          }
-
-          # 2) Probe unauth first; if 401/403, switch to auth automatically
-          USE_AUTH=false
-          for i in {1..60}; do
-            CODE="$(status_code "$USE_AUTH")"
-            if [[ "$CODE" == "200" ]]; then
-              echo "healthy=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            if [[ "$CODE" == "401" || "$CODE" == "403" ]]; then
-              USE_AUTH=true
-            fi
-            sleep $(( (i<10?i:10) ))  # mild backoff
-          done
-
-          # 3) Diagnostics (don’t fail if logging access missing)
-          echo "::group::Cloud Run describe"
-          gcloud run services describe "$SERVICE" --region "$REGION" --platform managed || true
-          echo "::endgroup::"
-
-          echo "::group::Recent revision logs"
-          gcloud logging read \
-            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE}" \
-            --project "$PROJECT_ID" --limit=100 --freshness=1h --format='value(textPayload)' || true
-          echo "::endgroup::"
-
-          echo "healthy=false" >> "$GITHUB_OUTPUT"
-          exit 1
-
+      # ——— End global timer ———————————————————————————————————————————————
       - name: End timer
         id: t1
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # ——— Record metrics to CSV (baseline) ————————————————————————————
       - name: Record metrics (CSV baseline)
+        if: always()
         run: |
+          set -euo pipefail
           mkdir -p baseline/metrics
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_ttd"   --status "${{ job.status }}" --tstart "${{ steps.t0.outputs.ts }}"           --tend "${{ steps.t1.outputs.ts }}"           --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_tests" --status "success"            --tstart "${{ steps.test.outputs.t_test_start }}" --tend "${{ steps.test.outputs.t_test_end }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_build" --status "success"            --tstart "${{ steps.build.outputs.t_build_start }}" --tend "${{ steps.build.outputs.t_build_end }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_push"  --status "success"            --tstart "${{ steps.push.outputs.t_push_start }}"   --tend "${{ steps.push.outputs.t_push_end }}"   --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_deploy" --status "${{ steps.wait-healthy.outcomes == 'success' && 'success' || 'failed' }}" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_ttd"    --status "${{ job.status }}"                                  --tstart "${{ steps.t0.outputs.ts }}"            --tend "${{ steps.t1.outputs.ts }}"            --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_tests"  --status "success"                                             --tstart "${{ steps.test.outputs.t_test_start }}" --tend "${{ steps.test.outputs.t_test_end }}"  --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_build"  --status "success"                                             --tstart "${{ steps.build.outputs.t_build_start }}" --tend "${{ steps.build.outputs.t_build_end }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_push"   --status "success"                                             --tstart "${{ steps.push.outputs.t_push_start }}"   --tend "${{ steps.push.outputs.t_push_end }}"   --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_deploy" --status "${{ steps.health_check.outcome == 'success' && 'success' || 'failed' }}" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_health" --status "${{ steps.health_check.outputs.healthy == 'true' && 'success' || 'failed' }}" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
+      
+      # ——— Optional: POST TTD metrics to BigQuery ingest endpoint ——————————
       - name: POST TTD to BigQuery ingest
         if: ${{ env.METRICS_INGEST_URL != '' }}
         run: |
           set -euo pipefail
-
           START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
 
-          printf '{"run_id":"%s","commit_sha":"%s","started_at":"%s","ended_at":"%s","duration_sec":%s,"status":"%s","tests_total":1,"tests_failed":0,"service":"%s","env":"%s"}' \
-            "${{ github.run_id }}" "${{ github.sha }}" "$START_ISO" "$END_ISO" "$DUR" "${{ job.status }}" "${SERVICE}" "${ENV}" > payload.json
+          jq -n --arg run_id "${{ github.run_id }}" \
+                --arg sha "${{ github.sha }}" \
+                --arg start "$START_ISO" \
+                --arg end "$END_ISO" \
+                --arg status "${{ job.status }}" \
+                --arg service "${SERVICE}" \
+                --arg env "${ENV}" \
+                --argjson dur "$DUR" \
+                --argjson tests_total 1 \
+                --argjson tests_failed 0 \
+                '{run_id:$run_id,commit_sha:$sha,started_at:$start,ended_at:$end,duration_sec:$dur,status:$status,tests_total:$tests_total,tests_failed:$tests_failed,service:$service,env:$env}' > payload.json
 
-          # Mint ID token using WIF impersonation
           ID_TOKEN=$(gcloud auth print-identity-token \
             --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
             --audiences="${METRICS_INGEST_URL}" \
             --format='get(token)')
 
-          # POST metrics payload
           curl -sS -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             --data-binary @payload.json \
             "${METRICS_INGEST_URL}"
 
+      # ——— Job Summary (markdown in GitHub UI) ————————————————————————————
       - name: Summary
+        if: always()
         run: |
+          set -euo pipefail
           DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
-          URL="${{ steps.wait-healthy.outputs.url || steps.deploy.outputs.url }}"
+          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')" || URL="<unknown>"
           {
             echo "### S1 Baseline Run"
             echo "- Status: ${{ job.status }}"
@@ -226,8 +226,10 @@ jobs:
             echo "- Commit: ${{ github.sha }}"
             echo "- Full TTD (sec): $DUR"
             echo "- Image: $IMAGE"
+            echo "- Health: ${{ steps.health_check.outputs.healthy || '<n/a>' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ——— Upload metrics CSV as workflow artifact ————————————————————————
       - name: Upload metrics artifact
         uses: actions/upload-artifact@v4
         with:
