@@ -193,13 +193,27 @@ jobs:
       - name: POST TTD to BigQuery ingest
         if: ${{ env.METRICS_INGEST_URL != '' }}
         run: |
+          set -euo pipefail
+
           START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
+
           printf '{"run_id":"%s","commit_sha":"%s","started_at":"%s","ended_at":"%s","duration_sec":%s,"status":"%s","tests_total":1,"tests_failed":0,"service":"%s","env":"%s"}' \
             "${{ github.run_id }}" "${{ github.sha }}" "$START_ISO" "$END_ISO" "$DUR" "${{ job.status }}" "${SERVICE}" "${ENV}" > payload.json
-          ID_TOKEN=$(gcloud auth print-identity-token --audiences="${METRICS_INGEST_URL}")
-          curl -sS -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $ID_TOKEN" --data-binary @payload.json "${METRICS_INGEST_URL}"
+
+          # Mint ID token using WIF impersonation
+          ID_TOKEN=$(gcloud auth print-identity-token \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
+            --audiences="${METRICS_INGEST_URL}" \
+            --format='get(token)')
+
+          # POST metrics payload
+          curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            --data-binary @payload.json \
+            "${METRICS_INGEST_URL}"
 
       - name: Summary
         run: |
