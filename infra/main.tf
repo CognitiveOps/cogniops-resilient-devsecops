@@ -206,6 +206,20 @@ resource "google_project_iam_member" "app_roles" {
     member  = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
+# Allow app CI SA to mint identity tokens (used for Cloud Function auth)
+resource "google_service_account_iam_member" "app_can_mint_tokens" {
+  service_account_id = google_service_account.gha_app.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+# Allow infra SA to mint tokens too
+resource "google_service_account_iam_member" "infra_can_mint_tokens" {
+  service_account_id = google_service_account.gha_infra.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
 # CF SA can deploy to Run
 resource "google_project_iam_member" "cf_can_deploy_run" {
     project = var.project_id
