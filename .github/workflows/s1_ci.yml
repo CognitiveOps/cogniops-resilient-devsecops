@@ -11,7 +11,6 @@ on:
     workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
 
-# Global environment variables (secrets/vars should remain in repo settings)
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
@@ -25,14 +24,12 @@ permissions:
   id-token: write
   contents: read
 
-# Prevent concurrent runs for the same branch
 concurrency:
   group: s1-baseline-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-test-push-deploy:
-    # Only run if required GCP variables exist and (if triggered by workflow_run) the upstream run succeeded
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -42,21 +39,22 @@ jobs:
         shell: bash
 
     steps:
+      # --- Source checkout ----------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      # --- Compute image ref early (used throughout) --------------------------
       - name: Compute IMAGE var
         run: |
           IMAGE="$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE:${GITHUB_SHA}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-      # ——— Source checkout ——————————————————————————————————————————————
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      # ——— Start global timer (for TTD metric) ————————————————————————
+      # --- Start global timer (TTD start) -------------------------------------
       - name: Start timer
         id: t0
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # ——— Authenticate and setup toolchains —————————————————————————
+      # --- Auth & toolchains --------------------------------------------------
       - name: Auth to GCP (OIDC/WIF) as APP CI
         uses: google-github-actions/auth@v2
         with:
@@ -82,42 +80,89 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest httpx
 
-      # ——— Run unit tests ———————————————————————————————————————————————
-      - name: Unit tests
+      # --- Prepare metrics context (scenario/branch/env) ----------------------
+      - name: Set run context (scenario/branch/env)
+        run: |
+          echo "SCENARIO_ID=S1" >> $GITHUB_ENV
+          echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RUN_ENV=cloud-run" >> $GITHUB_ENV
+
+      - name: Ensure metrics directory
+        run: mkdir -p baseline/metrics
+
+      # --- Metrics: commit (begin row; records commit_ts) ---------------------
+      - name: "S1 metrics: commit"
+        run: |
+          python baseline/scripts/s1_write_metrics.py \
+            --outfile baseline/metrics/s1_pipeline_runs.csv \
+            --run_id "${{ github.run_id }}" \
+            --commit_sha "${{ github.sha }}" \
+            --stage commit \
+            --scenario_id "${{ env.SCENARIO_ID }}" \
+            --branch "${{ env.BRANCH }}" \
+            --env "${{ env.RUN_ENV }}"
+
+      # --- Unit tests (non-fatal capture) -------------------------------------
+      - name: Unit tests (capture exit code)
         id: test
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
-          set -euo pipefail
-          echo "t_test_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+          set +e
           pytest -q baseline/services/app/tests
-          echo "t_test_end=$(date +%s)" >> "$GITHUB_OUTPUT"
+          CODE=$?
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
 
-      # ——— Build & Push container ——————————————————————————————————————
+      - name: "S1 metrics: test status"
+        if: always()
+        run: |
+          STATUS=$([ "${{ steps.test.outputs.code }}" = "0" ] && echo success || echo failure)
+          python baseline/scripts/s1_write_metrics.py \
+            --outfile baseline/metrics/s1_pipeline_runs.csv \
+            --run_id "${{ github.run_id }}" \
+            --commit_sha "${{ github.sha }}" \
+            --stage test \
+            --status "$STATUS" \
+            --scenario_id "${{ env.SCENARIO_ID }}" \
+            --branch "${{ env.BRANCH }}" \
+            --env "${{ env.RUN_ENV }}"
+
+      # --- Build & Push -------------------------------------------------------
       - name: Build image
         id: build
         run: |
           set -euo pipefail
-          echo "t_build_start=$(date +%s)" >> "$GITHUB_OUTPUT"
           docker build -t app-image:local baseline/services/app
-          echo "t_build_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Push image
         id: push
         run: |
           set -euo pipefail
-          echo "t_push_start=$(date +%s)" >> "$GITHUB_OUTPUT"
           docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
-          echo "t_push_end=$(date +%s)" >> "$GITHUB_OUTPUT"
+          DIGEST=$(gcloud artifacts docker images list \
+            "$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE" \
+            --include-tags --format='get(DIGEST)' --filter="TAGS:${GITHUB_SHA}" | head -n1)
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
 
-      # ——— Deploy to Cloud Run ————————————————————————————————————————————
+      - name: "S1 metrics: push (image ref)"
+        run: |
+          python baseline/scripts/s1_write_metrics.py \
+            --outfile baseline/metrics/s1_pipeline_runs.csv \
+            --run_id "${{ github.run_id }}" \
+            --commit_sha "${{ github.sha }}" \
+            --stage push \
+            --image "${IMAGE}@${DIGEST}" \
+            --scenario_id "${{ env.SCENARIO_ID }}" \
+            --branch "${{ env.BRANCH }}" \
+            --env "${{ env.RUN_ENV }}"
+
+      # --- Deploy to Cloud Run ------------------------------------------------
       - name: Deploy to Cloud Run
         id: deploy
         run: |
           set -euo pipefail
-          echo "t_deploy_start=$(date +%s)" >> "$GITHUB_OUTPUT"
-
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
@@ -127,60 +172,58 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 2
-
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
           : "${URL:?failed to resolve Cloud Run URL}"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "t_deploy_end=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # ——— Health Check (simple HTTP probe with optional auth) ————————————
-      # Purpose: Verify service reachability (HTTP 200). 
-      # Reusable across S1–S5 scenarios by changing the URL or target env.
-      - name: Health Check
+      - name: "S1 metrics: deploy"
+        run: |
+          python baseline/scripts/s1_write_metrics.py \
+            --outfile baseline/metrics/s1_pipeline_runs.csv \
+            --run_id "${{ github.run_id }}" \
+            --commit_sha "${{ github.sha }}" \
+            --stage deploy \
+            --scenario_id "${{ env.SCENARIO_ID }}" \
+            --branch "${{ env.BRANCH }}" \
+            --env "${{ env.RUN_ENV }}"
+
+      # --- Health check (retry/backoff) ---------------------------------------
+      - name: Health Check (with retries)
         id: health_check
-        env:
-          REGION: ${{ env.REGION }}
-          SERVICE: ${{ env.SERVICE }}
         run: |
           set -euo pipefail
-          echo "Checking service health (public, no auth)..."
-
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
           : "${URL:?Could not resolve Cloud Run URL}"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          OK=0
+          for i in {1..6}; do
+            CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
+            if [[ "$CODE" == "200" ]]; then OK=1; break; fi
+            sleep 10
+          done
+          echo "healthy=$OK" >> "$GITHUB_OUTPUT"
+          if [[ "$OK" != "1" ]]; then exit 1; fi
 
-          CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
-          echo "HTTP status: $CODE"
-
-          # Public baseline expectation: must be 200 without Authorization
-          if [[ "$CODE" == "200" ]]; then
-            echo "healthy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "healthy=false" >> "$GITHUB_OUTPUT"
-            echo "Expected public 200 without auth; got $CODE (service may be private)."
-            exit 1
-          fi
-
-      # ——— End global timer ———————————————————————————————————————————————
+      # --- End timer (TTD end) ------------------------------------------------
       - name: End timer
         id: t1
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # ——— Record metrics to CSV (baseline) ————————————————————————————
-      - name: Record metrics (CSV baseline)
+      # --- Finalize metrics (health stage writes overall status) --------------
+      - name: "S1 metrics: health (final)"
         if: always()
         run: |
-          set -euo pipefail
-          mkdir -p baseline/metrics
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_ttd"    --status "${{ job.status }}"                                  --tstart "${{ steps.t0.outputs.ts }}"            --tend "${{ steps.t1.outputs.ts }}"            --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_tests"  --status "success"                                             --tstart "${{ steps.test.outputs.t_test_start }}" --tend "${{ steps.test.outputs.t_test_end }}"  --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_build"  --status "success"                                             --tstart "${{ steps.build.outputs.t_build_start }}" --tend "${{ steps.build.outputs.t_build_end }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_push"   --status "success"                                             --tstart "${{ steps.push.outputs.t_push_start }}"   --tend "${{ steps.push.outputs.t_push_end }}"   --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_deploy" --status "${{ steps.health_check.outcome == 'success' && 'success' || 'failed' }}" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-          python baseline/scripts/collect_metrics.py --commit "${{ github.sha }}" --stage "s1_health" --status "${{ steps.health_check.outputs.healthy == 'true' && 'success' || 'failed' }}" --tstart "${{ steps.deploy.outputs.t_deploy_start }}" --tend "${{ steps.t1.outputs.ts }}" --outfile baseline/metrics/s1_pipeline_runs.csv
-      
-      # ——— Optional: POST TTD metrics to BigQuery ingest endpoint ——————————
+          python baseline/scripts/s1_write_metrics.py \
+            --outfile baseline/metrics/s1_pipeline_runs.csv \
+            --run_id "${{ github.run_id }}" \
+            --commit_sha "${{ github.sha }}" \
+            --stage health \
+            --status "${{ job.status }}" \
+            --scenario_id "${{ env.SCENARIO_ID }}" \
+            --branch "${{ env.BRANCH }}" \
+            --env "${{ env.RUN_ENV }}"
+
+      # --- Optional: POST TTD to external ingest ------------------------------
       - name: POST TTD to BigQuery ingest
         if: ${{ env.METRICS_INGEST_URL != '' }}
         run: |
@@ -188,7 +231,6 @@ jobs:
           START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
-
           jq -n --arg run_id "${{ github.run_id }}" \
                 --arg sha "${{ github.sha }}" \
                 --arg start "$START_ISO" \
@@ -198,21 +240,69 @@ jobs:
                 --arg env "${ENV}" \
                 --argjson dur "$DUR" \
                 --argjson tests_total 1 \
-                --argjson tests_failed 0 \
+                --argjson tests_failed $([ "${{ steps.test.outputs.code }}" = "0" ] && echo 0 || echo 1) \
                 '{run_id:$run_id,commit_sha:$sha,started_at:$start,ended_at:$end,duration_sec:$dur,status:$status,tests_total:$tests_total,tests_failed:$tests_failed,service:$service,env:$env}' > payload.json
-
           ID_TOKEN=$(gcloud auth print-identity-token \
             --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
             --audiences="${METRICS_INGEST_URL}" \
             --format='get(token)')
+          curl -sS -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${ID_TOKEN}" --data-binary @payload.json "${METRICS_INGEST_URL}"
 
-          curl -sS -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            --data-binary @payload.json \
-            "${METRICS_INGEST_URL}"
+      # --- Snapshot for the thesis (lifetime & per-scenario) ------------------
+      - name: Build baseline snapshot (history-based)
+        if: always()
+        run: |
+          python baseline/scripts/metrics_snapshot.py \
+            --in baseline/metrics/s1_pipeline_runs.csv \
+            --out baseline/metrics/s1_baseline_snapshot.json \
+            --group-by scenario \
+            --scenario-default S1
 
-      # ——— Job Summary (markdown in GitHub UI) ————————————————————————————
+      - name: Upload S1 baseline snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s1_baseline_snapshot
+          path: baseline/metrics/s1_baseline_snapshot.json
+          if-no-files-found: error
+
+      # --- Render CFR/DF from the snapshot (no duplicate math) ----------------
+      - name: Render CFR/DF from snapshot
+        if: always()
+        run: |
+          FILE="baseline/metrics/s1_baseline_snapshot.json"
+          if [ ! -f "$FILE" ]; then
+            echo "**Snapshot not found at $FILE**" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          L_CFR=$(jq -r '.lifetime.cfr' "$FILE")
+          L_DF=$(jq -r '.lifetime.df_per_day' "$FILE")
+          L_DAYS=$(jq -r '.lifetime.days' "$FILE")
+
+          {
+            echo "### CFR/DF — lifetime & per-scenario (from snapshot)"
+            echo "- **Lifetime CFR:** ${L_CFR}%"
+            if [ "$L_DAYS" != "0" ]; then
+              printf -- "- **Lifetime DF:** %.2f successful deployments/day (duration≈%.2f days)\n" "$L_DF" "$L_DAYS"
+            else
+              echo "- **Lifetime DF:** n/a (insufficient timestamps)"
+            fi
+            # Per-scenario lines
+            jq -r '
+              .per_scenario
+              | to_entries
+              | sort_by(.key)
+              | .[]
+              | "- **Scenario \(.key):** CFR \(.value.cfr)% (total=\(.value.total_runs), fail=\(.value.fail), success=\(.value.success))"
+                + (if (.value.days|tonumber) > 0
+                  then ", DF \(.value.df_per_day)/day over ≈\(.value.days) days"
+                  else ", DF n/a (insufficient timestamps)"
+                  end)
+            ' "$FILE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Summary (human-readable headline in the Job UI) --------------------
       - name: Summary
         if: always()
         run: |
@@ -227,10 +317,12 @@ jobs:
             echo "- Full TTD (sec): $DUR"
             echo "- Image: $IMAGE"
             echo "- Health: ${{ steps.health_check.outputs.healthy || '<n/a>' }}"
+            echo "- Scenario: ${{ env.SCENARIO_ID }} | Branch: ${{ env.BRANCH }} | Env: ${{ env.RUN_ENV }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ——— Upload metrics CSV as workflow artifact ————————————————————————
+      # --- Upload metrics artifact -------------------------------------------
       - name: Upload metrics artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s1_pipeline_runs

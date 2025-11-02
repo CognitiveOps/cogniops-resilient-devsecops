@@ -9,21 +9,6 @@
         - var.bootstrap_sa_email    : SA that runs Terraform (bootstrap/apply)
 */
 
-########################
-# Variables & Providers
-########################
-# variable "project_id"         { type = string }
-# variable "region"             { type = string }
-# variable "repo_location"      { type = string }
-# variable "bucket_location"    { type = string }
-# variable "bigquery_location"  { type = string }
-# variable "github_repo"        { type = string }
-# variable "bootstrap_sa_email" { type = string }
-
-# # Feature toggles (scenarios)
-# variable "cloud_run_public"   { type = bool  default = true }  # S1 baseline = true (public)
-# variable "cf_ingest_public"   { type = bool  default = false } # Ingest stays private by default
-
 data "google_project" "current" {}
 
 terraform {
