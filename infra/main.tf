@@ -243,6 +243,13 @@ resource "google_bigquery_dataset_iam_member" "cf_ingest_bq_writer" {
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.cf_ingest.email}"
 }
+
+resource "google_service_account_iam_member" "user_can_mint_tokens" {
+  service_account_id = google_service_account.gha_app.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:ykoutroum@gmail.com"
+}
+
 # --- ACT-AS bindings (roles/iam.serviceAccountUser) ---
 
 # Allow Infra SA (Terraform runner) to "act as" the Cloud Run runtime SA.

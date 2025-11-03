@@ -45,13 +45,14 @@ jobs:
         uses: actions/checkout@v4
 
       # --- Restore previous CSV history (artifact) ----------------------------
-      # This makes CFR/DF lifetime-cumulative across runs
+      # This allows CFR/DF to be lifetime-cumulative across runs.
       - name: Restore previous metrics artifact
         uses: dawidd6/action-download-artifact@v3
         with:
-          name: s1_pipeline_runs                # must match the upload name below
+          name: s1_pipeline_runs
           path: baseline/metrics/_restore
           if_no_artifact_found: ignore
+          # (optional) you can constrain further with:
           workflow: s1_ci.yml
           branch: ${{ github.ref_name }}
 
@@ -235,53 +236,7 @@ jobs:
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}"
 
-      # --- Optional: POST TTD to external ingest ------------------------------
-      - name: POST metrics to BigQuery ingest (unified history)
-        if: ${{ env.METRICS_INGEST_URL != '' }}
-        run: |
-          set -euo pipefail
-          START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
-          END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
-          DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
-
-          jq -n \
-            --arg run_id "${{ github.run_id }}" \
-            --arg sha "${{ github.sha }}" \
-            --arg scenario "S1" \
-            --arg branch "${{ github.ref_name }}" \
-            --arg env "${{ env.ENV }}" \
-            --arg service "${{ env.SERVICE }}" \
-            --arg start "$START_ISO" \
-            --arg end "$END_ISO" \
-            --arg status "${{ job.status }}" \
-            --argjson ttd "$DUR" \
-            '{
-              run_id: $run_id,
-              commit_sha: $sha,
-              scenario_id: $scenario,
-              branch: $branch,
-              env: $env,
-              service: $service,
-              started_at: $start,
-              ended_at: $end,
-              duration_sec: $ttd,
-              status: $status,
-              tests_total: 1,
-              tests_failed: ( if $status == "success" then 0 else 1 end )
-            }' > payload.json
-
-          ID_TOKEN=$(gcloud auth print-identity-token \
-            --impersonate-service-account="gha-app@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" \
-            --audiences="${METRICS_INGEST_URL}" \
-            --format='get(token)')
-
-          curl -sS -X POST \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data-binary @payload.json \
-            "${METRICS_INGEST_URL}"
-
-      # --- Snapshot for the thesis (lifetime & per-scenario) ------------------
+      # --- Snapshot + BigQuery ingest (history-based) -------------------------
       - name: Build baseline snapshot (history-based)
         if: always()
         run: |
@@ -292,8 +247,9 @@ jobs:
             --out baseline/metrics/s1_baseline_snapshot.json \
             --group-by scenario \
             --scenario-default S1 \
-            --min-days 1.0
-
+            --min-days 1.0 \
+            --upload-to "${METRICS_INGEST_URL}" \
+            --service "${SERVICE}"
 
       - name: Upload S1 baseline snapshot
         if: always()
@@ -325,7 +281,6 @@ jobs:
             else
               echo "- **Lifetime DF:** n/a (insufficient timestamps)"
             fi
-            # Per-scenario lines
             jq -r '
               .per_scenario
               | to_entries
