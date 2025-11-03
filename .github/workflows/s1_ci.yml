@@ -52,7 +52,6 @@ jobs:
           name: s1_pipeline_runs
           path: baseline/metrics/_restore
           if_no_artifact_found: ignore
-          # (optional) you can constrain further with:
           workflow: s1_ci.yml
           branch: ${{ github.ref_name }}
 
@@ -236,9 +235,18 @@ jobs:
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}"
 
+      # --- Install deps for metrics_snapshot (requests) -----------------------
+      - name: Install Python dependencies for snapshot
+        if: always()
+        run: |
+          pip install requests
+
       # --- Snapshot + BigQuery ingest (history-based) -------------------------
       - name: Build baseline snapshot (history-based)
         if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python baseline/scripts/metrics_snapshot.py \
             --in baseline/metrics/s1_pipeline_runs.csv \
@@ -247,9 +255,7 @@ jobs:
             --out baseline/metrics/s1_baseline_snapshot.json \
             --group-by scenario \
             --scenario-default S1 \
-            --min-days 1.0 \
-            --upload-to "${METRICS_INGEST_URL}" \
-            --service "${SERVICE}"
+            --min-days 1.0
 
       - name: Upload S1 baseline snapshot
         if: always()
