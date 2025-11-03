@@ -87,8 +87,8 @@ resource "google_bigquery_table" "s1_runs" {
   schema = jsonencode([
     { name = "run_id",       type = "STRING",    mode = "REQUIRED" },
     { name = "commit_sha",   type = "STRING",    mode = "REQUIRED" },
-    { name = "scenario_id",  type = "STRING",    mode = "NULLABLE" }, # NEW
-    { name = "branch",       type = "STRING",    mode = "NULLABLE" }, # NEW
+    { name = "scenario_id",  type = "STRING",    mode = "NULLABLE" },
+    { name = "branch",       type = "STRING",    mode = "NULLABLE" },
     { name = "env",          type = "STRING",    mode = "REQUIRED" },
     { name = "service",      type = "STRING",    mode = "REQUIRED" },
     { name = "started_at",   type = "TIMESTAMP", mode = "REQUIRED" },
@@ -97,7 +97,7 @@ resource "google_bigquery_table" "s1_runs" {
     { name = "status",       type = "STRING",    mode = "REQUIRED" },
     { name = "tests_total",  type = "INTEGER",   mode = "NULLABLE" },
     { name = "tests_failed", type = "INTEGER",   mode = "NULLABLE" },
-    { name = "inserted_at",  type = "TIMESTAMP", mode = "NULLABLE" }  # optional
+    { name = "inserted_at",  type = "TIMESTAMP", mode = "NULLABLE" } 
   ])
 }
 
@@ -178,8 +178,11 @@ resource "google_service_account_iam_member" "wif_app" {
 }
 
 ########################
-# IAM Roles to SAs
+# IAM Roles to Service Accounts
 ########################
+
+# Infra SA (Terraform runner) — has broad admin permissions for bootstrapping.
+# You can later reduce privileges if you split infra responsibilities.
 resource "google_project_iam_member" "infra_roles" {
   for_each = toset([
     "roles/artifactregistry.admin",
@@ -197,6 +200,7 @@ resource "google_project_iam_member" "infra_roles" {
   member  = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
+# App CI — minimal roles to build/push images and deploy to Cloud Run.
 resource "google_project_iam_member" "app_roles" {
   for_each = toset([
     "roles/artifactregistry.writer",
@@ -207,7 +211,14 @@ resource "google_project_iam_member" "app_roles" {
   member  = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Token minting
+# Cloud Run runtime SA — needs to pull container images from Artifact Registry.
+resource "google_project_iam_member" "run_exec_ar_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.run_exec.email}"
+}
+
+# Token minting (for impersonation / ID token generation)
 resource "google_service_account_iam_member" "app_can_mint_tokens" {
   service_account_id = google_service_account.gha_app.name
   role               = "roles/iam.serviceAccountTokenCreator"
@@ -220,24 +231,11 @@ resource "google_service_account_iam_member" "infra_can_mint_tokens" {
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-# CF SA can deploy to Run
+# Cloud Functions (Gen2) service agent must be able to deploy Cloud Run services.
 resource "google_project_iam_member" "cf_can_deploy_run" {
   project = var.project_id
   role    = "roles/run.developer"
   member  = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
-}
-
-# Allow TF SA & App CI to act as runtime SA
-resource "google_service_account_iam_member" "infra_can_actas_run_exec" {
-  service_account_id = google_service_account.run_exec.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.gha_infra.email}"
-}
-
-resource "google_service_account_iam_member" "app_can_actas_run_exec" {
-  service_account_id = google_service_account.run_exec.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
 resource "google_bigquery_dataset_iam_member" "cf_ingest_bq_writer" {
@@ -245,6 +243,59 @@ resource "google_bigquery_dataset_iam_member" "cf_ingest_bq_writer" {
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.cf_ingest.email}"
 }
+# --- ACT-AS bindings (roles/iam.serviceAccountUser) ---
+
+# Allow Infra SA (Terraform runner) to "act as" the Cloud Run runtime SA.
+resource "google_service_account_iam_member" "infra_can_actas_run_exec" {
+  service_account_id = google_service_account.run_exec.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
+# Allow App CI to "act as" the Cloud Run runtime SA (for deploy actions).
+resource "google_service_account_iam_member" "app_can_actas_run_exec" {
+  service_account_id = google_service_account.run_exec.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+# Allow Infra SA (Terraform runner) to act as the Cloud Function SA (cf-ingest).
+resource "google_service_account_iam_member" "infra_can_actas_cf_ingest" {
+  service_account_id = google_service_account.cf_ingest.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
+# Optional — if Terraform is executed via a bootstrap SA, allow it too.
+resource "google_service_account_iam_member" "bootstrap_can_actas_cf_ingest" {
+  count              = var.bootstrap_sa_email != "" ? 1 : 0
+  service_account_id = google_service_account.cf_ingest.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.bootstrap_sa_email}"
+}
+
+# Allow Cloud Functions internal agent to impersonate cf-ingest.
+resource "google_service_account_iam_member" "gcf_admin_can_actas_cf_ingest" {
+  service_account_id = google_service_account.cf_ingest.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
+}
+
+# Allow Serverless runtime (Cloud Run’s serverless-robot-prod) to impersonate cf-ingest.
+resource "google_service_account_iam_member" "serverless_can_actas_cf_ingest" {
+  service_account_id = google_service_account.cf_ingest.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.current.number}@serverless-robot-prod.iam.gserviceaccount.com"
+}
+
+# Allow Infra SA to act as the default Compute Engine SA (for CF update transition)
+resource "google_service_account_iam_member" "infra_can_actas_default_compute" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
+
 ########################
 # Cloud Run (v2)
 ########################
@@ -344,7 +395,6 @@ resource "google_storage_bucket_object" "ingest_object" {
     google_storage_bucket_iam_member.src_uploader_view,
   ]
 }
-
 resource "google_cloudfunctions2_function" "ingest" {
   name     = "s1-metrics-ingest"
   location = var.region
@@ -361,20 +411,19 @@ resource "google_cloudfunctions2_function" "ingest" {
   }
 
   service_config {
-    service_account_email = google_service_account.cf_ingest.email 
-    max_instance_count = 1
-    available_memory   = "256M"
-    ingress_settings   = "ALLOW_ALL" # network ingress (auth is controlled via IAM below)
-
-    environment_variables = {
-      BQ_DATASET = google_bigquery_dataset.metrics.dataset_id
-      BQ_TABLE   = google_bigquery_table.s1_runs.table_id
-    }
+    service_account_email = google_service_account.cf_ingest.email
+    max_instance_count    = 1
+    available_memory      = "256M"
+    ingress_settings      = "ALLOW_ALL" # Public ingress (auth still enforced via IAM)
   }
 
   depends_on = [
-    google_project_service.services,
+    google_service_account.cf_ingest,
+    google_service_account_iam_member.infra_can_actas_cf_ingest,
+    google_service_account_iam_member.gcf_admin_can_actas_cf_ingest,
+    google_service_account_iam_member.serverless_can_actas_cf_ingest,
     google_project_iam_member.cf_can_deploy_run,
+    google_bigquery_dataset_iam_member.cf_ingest_bq_writer,
   ]
 }
 
