@@ -267,11 +267,11 @@ jobs:
               duration_sec: $ttd,
               status: $status,
               tests_total: 1,
-              tests_failed: ( $status=="success" ? 0 : 1 )
+              tests_failed: ( if $status == "success" then 0 else 1 end )
             }' > payload.json
 
           ID_TOKEN=$(gcloud auth print-identity-token \
-            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
+            --impersonate-service-account="gha-app@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" \
             --audiences="${METRICS_INGEST_URL}" \
             --format='get(token)')
 
@@ -280,7 +280,6 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @payload.json \
             "${METRICS_INGEST_URL}"
-    
 
       # --- Snapshot for the thesis (lifetime & per-scenario) ------------------
       - name: Build baseline snapshot (history-based)
