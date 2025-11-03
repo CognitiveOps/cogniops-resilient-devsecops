@@ -87,14 +87,17 @@ resource "google_bigquery_table" "s1_runs" {
   schema = jsonencode([
     { name = "run_id",       type = "STRING",    mode = "REQUIRED" },
     { name = "commit_sha",   type = "STRING",    mode = "REQUIRED" },
+    { name = "scenario_id",  type = "STRING",    mode = "NULLABLE" }, # NEW
+    { name = "branch",       type = "STRING",    mode = "NULLABLE" }, # NEW
+    { name = "env",          type = "STRING",    mode = "REQUIRED" },
+    { name = "service",      type = "STRING",    mode = "REQUIRED" },
     { name = "started_at",   type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "ended_at",     type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "duration_sec", type = "FLOAT",     mode = "REQUIRED" },
     { name = "status",       type = "STRING",    mode = "REQUIRED" },
     { name = "tests_total",  type = "INTEGER",   mode = "NULLABLE" },
     { name = "tests_failed", type = "INTEGER",   mode = "NULLABLE" },
-    { name = "service",      type = "STRING",    mode = "REQUIRED" },
-    { name = "env",          type = "STRING",    mode = "REQUIRED" },
+    { name = "inserted_at",  type = "TIMESTAMP", mode = "NULLABLE" }  # optional
   ])
 }
 
@@ -129,6 +132,11 @@ resource "google_project_iam_member" "app_logging_viewer" {
   project = var.project_id
   role    = "roles/logging.viewer"
   member  = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+resource "google_service_account" "cf_ingest" {
+  account_id   = "cf-ingest"
+  display_name = "Cloud Functions (Gen2) - Metrics Ingest"
 }
 
 ##############################
@@ -232,6 +240,11 @@ resource "google_service_account_iam_member" "app_can_actas_run_exec" {
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
+resource "google_bigquery_dataset_iam_member" "cf_ingest_bq_writer" {
+  dataset_id = google_bigquery_dataset.metrics.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.cf_ingest.email}"
+}
 ########################
 # Cloud Run (v2)
 ########################
@@ -348,9 +361,15 @@ resource "google_cloudfunctions2_function" "ingest" {
   }
 
   service_config {
+    service_account_email = google_service_account.cf_ingest.email 
     max_instance_count = 1
     available_memory   = "256M"
     ingress_settings   = "ALLOW_ALL" # network ingress (auth is controlled via IAM below)
+
+    environment_variables = {
+      BQ_DATASET = google_bigquery_dataset.metrics.dataset_id
+      BQ_TABLE   = google_bigquery_table.s1_runs.table_id
+    }
   }
 
   depends_on = [

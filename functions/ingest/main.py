@@ -90,9 +90,11 @@ def ingest(request):
                 400,
             )
         row = [
-            {
+            {        
                 "run_id": payload["run_id"],
                 "commit_sha": payload["commit_sha"],
+                "scenario_id": payload.get("scenario_id"),   
+                "branch": payload.get("branch"),     
                 "started_at": payload["started_at"],
                 "ended_at": payload["ended_at"],
                 "duration_sec": float(payload["duration_sec"]),
