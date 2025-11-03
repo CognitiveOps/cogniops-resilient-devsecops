@@ -23,6 +23,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  actions: read   # needed for downloading artifacts from previous workflow runs
 
 concurrency:
   group: s1-baseline-${{ github.ref }}
@@ -42,6 +43,17 @@ jobs:
       # --- Source checkout ----------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
+
+      # --- Restore previous CSV history (artifact) ----------------------------
+      # This makes CFR/DF lifetime-cumulative across runs
+      - name: Restore previous metrics artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          name: s1_pipeline_runs                # must match the upload name below
+          path: baseline/metrics/_restore
+          if_no_artifact_found: ignore
+          workflow: s1_ci.yml
+          branch: ${{ github.ref_name }}
 
       # --- Compute image ref early (used throughout) --------------------------
       - name: Compute IMAGE var
@@ -224,29 +236,51 @@ jobs:
             --env "${{ env.RUN_ENV }}"
 
       # --- Optional: POST TTD to external ingest ------------------------------
-      - name: POST TTD to BigQuery ingest
+      - name: POST metrics to BigQuery ingest (unified history)
         if: ${{ env.METRICS_INGEST_URL != '' }}
         run: |
           set -euo pipefail
           START_ISO=$(date -u -d "@${{ steps.t0.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           END_ISO=$(date -u -d "@${{ steps.t1.outputs.ts }}" +"%Y-%m-%dT%H:%M:%SZ")
           DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
-          jq -n --arg run_id "${{ github.run_id }}" \
-                --arg sha "${{ github.sha }}" \
-                --arg start "$START_ISO" \
-                --arg end "$END_ISO" \
-                --arg status "${{ job.status }}" \
-                --arg service "${SERVICE}" \
-                --arg env "${ENV}" \
-                --argjson dur "$DUR" \
-                --argjson tests_total 1 \
-                --argjson tests_failed $([ "${{ steps.test.outputs.code }}" = "0" ] && echo 0 || echo 1) \
-                '{run_id:$run_id,commit_sha:$sha,started_at:$start,ended_at:$end,duration_sec:$dur,status:$status,tests_total:$tests_total,tests_failed:$tests_failed,service:$service,env:$env}' > payload.json
+
+          jq -n \
+            --arg run_id "${{ github.run_id }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg scenario "S1" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg env "${{ env.ENV }}" \
+            --arg service "${{ env.SERVICE }}" \
+            --arg start "$START_ISO" \
+            --arg end "$END_ISO" \
+            --arg status "${{ job.status }}" \
+            --argjson ttd "$DUR" \
+            '{
+              run_id: $run_id,
+              commit_sha: $sha,
+              scenario_id: $scenario,
+              branch: $branch,
+              env: $env,
+              service: $service,
+              started_at: $start,
+              ended_at: $end,
+              duration_sec: $ttd,
+              status: $status,
+              tests_total: 1,
+              tests_failed: ( $status=="success" ? 0 : 1 )
+            }' > payload.json
+
           ID_TOKEN=$(gcloud auth print-identity-token \
             --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
             --audiences="${METRICS_INGEST_URL}" \
             --format='get(token)')
-          curl -sS -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${ID_TOKEN}" --data-binary @payload.json "${METRICS_INGEST_URL}"
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json \
+            "${METRICS_INGEST_URL}"
+    
 
       # --- Snapshot for the thesis (lifetime & per-scenario) ------------------
       - name: Build baseline snapshot (history-based)
@@ -254,9 +288,13 @@ jobs:
         run: |
           python baseline/scripts/metrics_snapshot.py \
             --in baseline/metrics/s1_pipeline_runs.csv \
+            --merge-from "baseline/metrics/_restore/**/s1_pipeline_runs.csv" \
+            --write-merged-to baseline/metrics/s1_pipeline_runs.csv \
             --out baseline/metrics/s1_baseline_snapshot.json \
             --group-by scenario \
-            --scenario-default S1
+            --scenario-default S1 \
+            --min-days 1.0
+
 
       - name: Upload S1 baseline snapshot
         if: always()
@@ -320,7 +358,7 @@ jobs:
             echo "- Scenario: ${{ env.SCENARIO_ID }} | Branch: ${{ env.BRANCH }} | Env: ${{ env.RUN_ENV }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # --- Upload metrics artifact -------------------------------------------
+      # --- Upload metrics artifact (CSV) --------------------------------------
       - name: Upload metrics artifact
         if: always()
         uses: actions/upload-artifact@v4
