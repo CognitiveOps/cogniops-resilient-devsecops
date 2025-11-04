@@ -102,7 +102,7 @@ jobs:
       - name: Ensure metrics directory
         run: mkdir -p baseline/metrics
 
-      # --- Metrics: commit (begin row; records commit_ts) ---------------------
+      # --- Metrics: commit (begin row; records started_at) --------------------
       - name: "S1 metrics: commit"
         run: |
           python baseline/scripts/s1_write_metrics.py \
@@ -112,7 +112,9 @@ jobs:
             --stage commit \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}"
+            --env "${{ env.RUN_ENV }}" \
+            --service "${SERVICE}" \
+            --workflow "s1_ci.yml"
 
       # --- Unit tests (non-fatal capture) -------------------------------------
       - name: Unit tests (capture exit code)
@@ -129,16 +131,28 @@ jobs:
       - name: "S1 metrics: test status"
         if: always()
         run: |
-          STATUS=$([ "${{ steps.test.outputs.code }}" = "0" ] && echo success || echo failure)
+          # Map pytest exit code -> status + test counts
+          if [ "${{ steps.test.outputs.code }}" = "0" ]; then
+            STATUS="success"
+            TESTS_FAILED=0
+          else
+            STATUS="failure"
+            TESTS_FAILED=1
+          fi
+
           python baseline/scripts/s1_write_metrics.py \
             --outfile baseline/metrics/s1_pipeline_runs.csv \
             --run_id "${{ github.run_id }}" \
             --commit_sha "${{ github.sha }}" \
             --stage test \
             --status "$STATUS" \
+            --tests_total 1 \
+            --tests_failed "$TESTS_FAILED" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}"
+            --env "${{ env.RUN_ENV }}" \
+            --service "${SERVICE}" \
+            --workflow "s1_ci.yml"
 
       # --- Build & Push -------------------------------------------------------
       - name: Build image
@@ -168,7 +182,9 @@ jobs:
             --image "${IMAGE}@${DIGEST}" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}"
+            --env "${{ env.RUN_ENV }}" \
+            --service "${SERVICE}" \
+            --workflow "s1_ci.yml"
 
       # --- Deploy to Cloud Run ------------------------------------------------
       - name: Deploy to Cloud Run
@@ -197,7 +213,9 @@ jobs:
             --stage deploy \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}"
+            --env "${{ env.RUN_ENV }}" \
+            --service "${SERVICE}" \
+            --workflow "s1_ci.yml"
 
       # --- Health check (retry/backoff) ---------------------------------------
       - name: Health Check (with retries)
@@ -221,10 +239,23 @@ jobs:
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # --- Finalize metrics (health stage writes overall status) --------------
-      - name: "S1 metrics: health (final)"
+      # --- Finalize metrics + BigQuery ingest (health stage) ------------------
+      - name: "S1 metrics: health (final + ingest)"
         if: always()
+        env:
+          METRICS_INGEST_URL: ${{ env.METRICS_INGEST_URL }}
         run: |
+          set -euo pipefail
+
+          # Prepare optional ID token for ingest (if URL is configured)
+          TOKEN=""
+          if [ -n "${METRICS_INGEST_URL}" ]; then
+            TOKEN=$(gcloud auth print-identity-token \
+              --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
+              --audiences="${METRICS_INGEST_URL}" \
+              --format='get(token)')
+          fi
+
           python baseline/scripts/s1_write_metrics.py \
             --outfile baseline/metrics/s1_pipeline_runs.csv \
             --run_id "${{ github.run_id }}" \
@@ -233,7 +264,11 @@ jobs:
             --status "${{ job.status }}" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}"
+            --env "${{ env.RUN_ENV }}" \
+            --service "${SERVICE}" \
+            --workflow "s1_ci.yml" \
+            --post-to "${METRICS_INGEST_URL}" \
+            --auth-token "$TOKEN"
 
       # --- Install deps for metrics_snapshot (requests) -----------------------
       - name: Install Python dependencies for snapshot
@@ -241,7 +276,7 @@ jobs:
         run: |
           pip install requests
 
-      # --- Snapshot + BigQuery ingest (history-based) -------------------------
+      # --- Snapshot (history-based CFR/DF from CSV history) -------------------
       - name: Build baseline snapshot (history-based)
         if: always()
         env:
