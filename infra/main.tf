@@ -67,49 +67,61 @@ resource "google_artifact_registry_repository" "docker" {
 #############################
 # BigQuery (dataset + table)
 #############################
+#############################
+# BigQuery (dataset + table)
+#############################
+
+# Dataset that holds all S1 pipeline runs
+resource "google_bigquery_dataset" "metrics" {
+  dataset_id                 = "agent_metrics"
+  location                   = var.bigquery_location
+  delete_contents_on_destroy = false
+}
+
+# One row per GitHub Actions run, matching s1_pipeline_runs.csv
 resource "google_bigquery_table" "s1_runs" {
   dataset_id = google_bigquery_dataset.metrics.dataset_id
   table_id   = "s1_pipeline_runs"
+  deletion_protection = false
 
+  # Partition by when the pipeline reached "healthy" (or finished)
   time_partitioning {
     type  = "DAY"
     field = "healthy_ts"
   }
 
+  # Useful filters for queries
   clustering = ["status", "service"]
 
   schema = jsonencode([
-    # Identity / Context
     { name = "run_id",        type = "STRING",    mode = "REQUIRED" },
-    { name = "commit_sha",    type = "STRING",    mode = "REQUIRED" },
     { name = "workflow",      type = "STRING",    mode = "NULLABLE" },
     { name = "scenario_id",   type = "STRING",    mode = "NULLABLE" },
     { name = "branch",        type = "STRING",    mode = "NULLABLE" },
     { name = "env",           type = "STRING",    mode = "NULLABLE" },
     { name = "service",       type = "STRING",    mode = "NULLABLE" },
 
-    # Stage timestamps
+    { name = "status",        type = "STRING",    mode = "NULLABLE" },
+    { name = "failure_stage", type = "STRING",    mode = "NULLABLE" },
+
+    { name = "commit_sha",    type = "STRING",    mode = "REQUIRED" },
+    { name = "image",         type = "STRING",    mode = "NULLABLE" },
+
+    { name = "tests_total",   type = "INTEGER",   mode = "NULLABLE" },
+    { name = "tests_failed",  type = "INTEGER",   mode = "NULLABLE" },
+
     { name = "commit_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
-    { name = "test_ts",       type = "TIMESTAMP", mode = "NULLABLE" },
     { name = "push_ts",       type = "TIMESTAMP", mode = "NULLABLE" },
     { name = "deploy_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
     { name = "healthy_ts",    type = "TIMESTAMP", mode = "NULLABLE" },
 
-    # Status & Quality
-    { name = "status",        type = "STRING",    mode = "REQUIRED" },
-    { name = "failure_stage", type = "STRING",    mode = "NULLABLE" },
-    { name = "tests_total",   type = "INTEGER",   mode = "NULLABLE" },
-    { name = "tests_failed",  type = "INTEGER",   mode = "NULLABLE" },
-
-    # Aggregated metric
+    # single canonical duration: full time-to-done in seconds
     { name = "ttd_sec",       type = "FLOAT",     mode = "NULLABLE" },
 
-    # Bookkeeping
+    # set by the Cloud Function if you want (CURRENT_TIMESTAMP())
     { name = "inserted_at",   type = "TIMESTAMP", mode = "NULLABLE" }
   ])
 }
-
-
 
 #####################
 # Service Accounts
