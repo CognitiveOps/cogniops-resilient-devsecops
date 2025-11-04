@@ -2,15 +2,19 @@
 name: S1 CI/CD Baseline
 
 on:
-  push:
-    paths:
-      - "baseline/services/app/**"
-      - ".github/workflows/s1_ci.yml"
-  workflow_dispatch:
+  # Run S1 only after infra workflow completes
   workflow_run:
     workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
 
+  # Run automatically on app code changes (if infra already exists)
+  push:
+    paths:
+      - "baseline/services/app/**"
+      - ".github/workflows/s1_ci.yml"
+      
+  # Optional: still allow manual runs
+  workflow_dispatch:
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
