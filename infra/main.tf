@@ -80,48 +80,129 @@ resource "google_bigquery_dataset" "metrics" {
 
 # One row per GitHub Actions run, matching s1_pipeline_runs.csv
 resource "google_bigquery_table" "s1_runs" {
-  dataset_id = google_bigquery_dataset.metrics.dataset_id
-  table_id   = "s1_pipeline_runs"
+  dataset_id          = google_bigquery_dataset.metrics.dataset_id
+  table_id            = "s1_pipeline_runs"
   deletion_protection = false
 
-  # Partition by when the pipeline reached "healthy" (or finished)
   time_partitioning {
     type  = "DAY"
-    field = "healthy_ts"
+    field = "healthy_ts"  # your new partitioning field
   }
 
-  # Useful filters for queries
   clustering = ["status", "service"]
 
   schema = jsonencode([
-    { name = "run_id",        type = "STRING",    mode = "REQUIRED" },
-    { name = "workflow",      type = "STRING",    mode = "NULLABLE" },
-    { name = "scenario_id",   type = "STRING",    mode = "NULLABLE" },
-    { name = "branch",        type = "STRING",    mode = "NULLABLE" },
-    { name = "env",           type = "STRING",    mode = "NULLABLE" },
-    { name = "service",       type = "STRING",    mode = "NULLABLE" },
-
-    { name = "status",        type = "STRING",    mode = "NULLABLE" },
-    { name = "failure_stage", type = "STRING",    mode = "NULLABLE" },
-
-    { name = "commit_sha",    type = "STRING",    mode = "REQUIRED" },
-    { name = "image",         type = "STRING",    mode = "NULLABLE" },
-
-    { name = "tests_total",   type = "INTEGER",   mode = "NULLABLE" },
-    { name = "tests_failed",  type = "INTEGER",   mode = "NULLABLE" },
-
-    { name = "commit_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
-    { name = "push_ts",       type = "TIMESTAMP", mode = "NULLABLE" },
-    { name = "deploy_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
-    { name = "healthy_ts",    type = "TIMESTAMP", mode = "NULLABLE" },
-
-    # single canonical duration: full time-to-done in seconds
-    { name = "ttd_sec",       type = "FLOAT",     mode = "NULLABLE" },
-
-    # set by the Cloud Function if you want (CURRENT_TIMESTAMP())
-    { name = "inserted_at",   type = "TIMESTAMP", mode = "NULLABLE" }
+    {
+      name        = "run_id"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "GitHub Actions run ID (unique per pipeline run)"
+    },
+    {
+      name        = "workflow"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Workflow file name (e.g. s1_ci.yml)"
+    },
+    {
+      name        = "scenario_id"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Scenario identifier (e.g. S1)"
+    },
+    {
+      name        = "branch"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Git branch where the run executed"
+    },
+    {
+      name        = "env"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Logical environment (e.g. prod, cloud-run)"
+    },
+    {
+      name        = "service"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Service name (e.g. baseline-app)"
+    },
+    {
+      name        = "status"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Final pipeline outcome: success / failure / cancelled"
+    },
+    {
+      name        = "failure_stage"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Stage where failure occurred (test / deploy / health); null if success"
+    },
+    {
+      name        = "commit_sha"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Git commit SHA for this run"
+    },
+    {
+      name        = "image"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Container image reference with digest"
+    },
+    {
+      name        = "tests_total"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Total number of tests in this run"
+    },
+    {
+      name        = "tests_failed"
+      type        = "INTEGER"
+      mode        = "NULLABLE"
+      description = "Number of failing tests"
+    },
+    {
+      name        = "commit_ts"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Pipeline start time (UTC)"
+    },
+    {
+      name        = "push_ts"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Image pushed time (UTC)"
+    },
+    {
+      name        = "deploy_ts"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Deploy finished time (UTC)"
+    },
+    {
+      name        = "healthy_ts"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Health check OK time (UTC)"
+    },
+    {
+      name        = "ttd_sec"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Time-to-deploy in seconds (commit_ts → healthy_ts)"
+    },
+    {
+      name        = "inserted_at"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Row ingestion timestamp (set by Cloud Function)"
+    },
   ])
 }
+
 
 #####################
 # Service Accounts
