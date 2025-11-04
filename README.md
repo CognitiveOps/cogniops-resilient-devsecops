@@ -21,20 +21,20 @@ cogniops-resilient-devsecops/
 ├── baseline/
 │ ├── services/ # demo microservices (FastAPI, test workloads)
 │ ├── edge/ # simulated edge devices, OTA updates, PQC validation
-│ ├── .github/workflows/ # GitHub Actions for S1–S5 pipelines
+│ ├── .github/workflows/ # GitHub Actions pipelines (S1–S5)
 │ ├── scripts/ # metrics writers, rollback logic, PQC signing
 │ ├── metrics/ # raw & aggregated CSV/JSON data
 │ ├── dashboards/ # Prometheus / Grafana observability
-│ └── reports/ # baseline and evaluation reports
+│ └── reports/ # baseline & evaluation reports
 │
 ├── agent/
-│ ├── core/ # reasoning, explainability, cognitive decision layer
-│ ├── adapters/ # connectors for cloud and edge runtimes
+│ ├── core/ # reasoning & explainability engine
+│ ├── adapters/ # connectors for cloud & edge runtimes
 │ ├── policies/ # ISO/NIST/IMO compliance mapping
 │ └── tests/ # unit, integration & resilience tests
 │
 ├── infra/ # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
-├── functions/ingest/ # optional Cloud Function Gen2 for metrics ingest
+├── functions/ingest/ # Cloud Function Gen2 for metrics ingest
 ├── docs/ # architecture diagrams & thesis documentation
 └── README.md
 
@@ -45,13 +45,13 @@ cogniops-resilient-devsecops/
 
 | ID | Scenario | Purpose |
 |----|-----------|----------|
-| **S1** | Cloud → Pipeline CI/CD Baseline | Measure build–test–push–deploy TTD, CFR, DF metrics using GitHub Actions + GCP. |
+| **S1** | Cloud → Pipeline CI/CD Baseline | Measure build–test–push–deploy TTD, CFR, DF metrics via GitHub Actions + GCP. |
 | **S2** | Pipeline → Edge Deployment | OTA deployment to simulated edge devices with latency & integrity metrics. |
 | **S3** | Rollback & Hotfix Resilience | Fault injection → manual recovery → measure MTTD & MTTR. |
 | **S4** | Security & PQC Validation | Validate update authenticity using NIST PQC algorithms (FIPS 203–205). |
 | **S5** | Explainability & Human-in-the-Loop | Measure approval latency (AL) and audit completeness (ACR). |
-| **SS1** | End-to-End Security Policy Audit | Execute full-pipeline OPA/Kyverno policy enforcement with ISO/NIST compliance tracing. |
-| **SS2** | Adaptive Threat Mitigation | Simulate anomaly injection; agent performs autonomous mitigation using PQC trust chain. |
+| **SS1** | End-to-End Security Policy Audit | Execute full-pipeline OPA/Kyverno policy enforcement with ISO/NIST trace. |
+| **SS2** | Adaptive Threat Mitigation | Simulate anomaly injection; agent performs autonomous mitigation with PQC trust chain. |
 
 ---
 
@@ -75,13 +75,13 @@ cogniops-resilient-devsecops/
 |-----------|---------|-------------|
 | **Operational** | **TTD** – Time to Deploy | Time from commit to healthy deployment (agility). |
 |  | **CFR** – Change Failure Rate | % of failed deployments over total attempts. |
-|  | **DF** – Deployment Frequency | Successful deployments per unit time (lifetime based). |
-| **Resilience** | **MTTD** – Mean Time to Detect | Average time to detect a fault or anomaly. |
-|  | **MTTR** – Mean Time to Recover | Average time to restore system functionality. |
-| **Security** | **TTV** – Time to Verify | Time required for PQC signature validation. |
-|  | **VSR** – Verification Success Rate | % of successful PQC signature validations. |
-|  | **FDR** – Failure Detection Rate | % of successfully detected tampered artifacts. |
-| **Explainability** | **AL** – Approval Latency | Human-in-the-loop decision delay. |
+|  | **DF** – Deployment Frequency | Successful deployments per unit time (lifetime). |
+| **Resilience** | **MTTD** – Mean Time to Detect | Avg time to detect a fault or anomaly. |
+|  | **MTTR** – Mean Time to Recover | Avg time to restore system functionality. |
+| **Security** | **TTV** – Time to Verify | Time for PQC signature validation. |
+|  | **VSR** – Verification Success Rate | % of successful PQC verifications. |
+|  | **FDR** – Failure Detection Rate | % of tampered artifacts detected. |
+| **Explainability** | **AL** – Approval Latency | Delay in human decision loop. |
 |  | **ACR** – Audit Completeness Rate | % of actions with full explainable logs. |
 
 ---
@@ -90,12 +90,12 @@ cogniops-resilient-devsecops/
 **Cloud:** Google Cloud Platform (GCP)  
 **CI/CD:** GitHub Actions + OIDC Workload Identity Federation  
 **IaC:** Terraform (v1.8+) for Artifact Registry, Cloud Run, BigQuery, IAM  
-**Runtime:** Cloud Run (Managed) + Docker images from Artifact Registry  
+**Runtime:** Cloud Run (Managed) + Artifact Registry images  
 **Edge:** Docker Compose on Raspberry Pi / Jetson Nano (simulated OTA)  
 **Monitoring:** Prometheus + Grafana (+ Loki for logs)  
 **Security:** Post-Quantum Crypto Validation (FIPS 203–205 – Dilithium, SPHINCS+)  
-**Explainability:** Structured JSON logs + Markdown / PDF XAI reports  
-**Language:** Python 3.11 / FastAPI / pytest  
+**Explainability:** Structured JSON logs + Markdown/PDF XAI reports  
+**Language:** Python 3.11 / FastAPI / pytest
 
 ---
 
@@ -103,79 +103,77 @@ cogniops-resilient-devsecops/
 
 | Script | Purpose |
 |---------|----------|
-| **`baseline/scripts/s1_write_metrics.py`** | Appends stage metrics (commit, build, test, push, deploy, health) to `*.csv`. Scenario context (`S1`, `SS1`, etc.) replaces previous epoch logic. |
-| **`baseline/scripts/metrics_snapshot.py`** | Builds history-based snapshots (`*.json`) aggregating **lifetime** and **per-scenario** CFR/DF values. No rolling window — metrics computed over the full run history. |
+| **`baseline/scripts/s1_write_metrics.py`** | Appends stage metrics (commit, test, push, deploy, health) to CSV. Scenario context (S1) replaces older epoch logic. |
+| **`baseline/scripts/metrics_snapshot.py`** | Merges CSV history and computes lifetime & per-scenario CFR/DF values (no rolling window). |
 
-All metrics are automatically collected from GitHub Actions workflows and versioned under  
+All metrics are automatically collected from GitHub Actions workflows and stored under  
 `baseline/metrics/` for reproducibility.
 
 ---
 
-## 🚀 S1 – Hybrid Baseline (GitHub Actions + GCP)
+## 🧾 S1 Metrics Schema — CSV and BigQuery Alignment
 
-### 🎯 Objective
-Establish a fully automated CI/CD baseline with real deploy to Cloud Run and quantitative metrics for **TTD**, **DF**, **CFR**.
+This schema and dataflow apply **only to Scenario S1 (Cloud → Pipeline CI/CD Baseline)**.  
+It captures operational metrics — **TTD**, **CFR**, and **DF** — directly from the GitHub Actions pipeline and GCP deployment events.
 
-### 🧱 Pipeline Stages
-1. **Build → Test → Push → Deploy → Health Check**
-2. Source: GitHub → Build/Test with Docker + pytest  
-   → Push image to **Artifact Registry**  
-   → Deploy to **Cloud Run (Managed)**  
-   → Verify service health (HTTP 200)  
-   → Write metrics to CSV → Generate snapshot JSON
+### 📊 Data Stores
 
-### 🪣 GCP Resources
+| Layer | File / Table | Purpose |
+|:------|:--------------|:--------|
+| **Local CSV (GitHub Actions)** | `baseline/metrics/s1_pipeline_runs.csv` | Per-run ledger for S1 executions. |
+| **BigQuery Table** | `agent_metrics.s1_pipeline_runs` | Central analytics store for S1 metrics (via Cloud Function Gen2 ingest). |
 
-| Resource | Purpose |
-|-----------|----------|
-| **Artifact Registry** | Docker image storage (`apps`) |
-| **Cloud Run** | Service deployment (`baseline-app`) |
-| **BigQuery (optional)** | Ingest metrics for later analysis |
-| **Service Accounts** | `gha-infra`, `gha-app`, `run-exec` with OIDC auth |
-| **Storage Bucket** | Terraform state + function source (`*-fn-src`) |
+### 🧱 Schema (CSV + BigQuery)
+
+| Field | Type | Source | Description |
+|:--|:--|:--|:--|
+| **run_id** | STRING | GitHub Actions | Unique workflow run ID. |
+| **workflow** | STRING | Workflow name (`s1_ci`) | Identifies pipeline. |
+| **scenario_id** | STRING | Static | Always `S1`. |
+| **branch** | STRING | Git ref | Branch tested. |
+| **env** | STRING | Variable | Runtime environment (e.g. `cloud-run`). |
+| **service** | STRING | Variable | Cloud Run service (e.g. `baseline-app`). |
+| **status** | STRING | GitHub Job | Final status (success / failure / cancelled). |
+| **failure_stage** | STRING | Derived | First stage that failed (commit/test/push/deploy/health). |
+| **commit_sha** | STRING | Git | Commit hash of deployed revision. |
+| **tests_total** | INTEGER | pytest | Total test sets executed. |
+| **tests_failed** | INTEGER | pytest | Failed test sets. |
+| **commit_ts** | TIMESTAMP | Stage commit | Pipeline start. |
+| **push_ts** | TIMESTAMP | Stage push | Docker image push. |
+| **deploy_ts** | TIMESTAMP | Stage deploy | Cloud Run deployment end. |
+| **healthy_ts** | TIMESTAMP | Stage health | Service healthy (HTTP 200). |
+| **ttd_sec** | FLOAT | Derived | Time-to-Deploy = `healthy_ts − commit_ts`. |
+| **inserted_at** | TIMESTAMP | BigQuery | Server ingestion timestamp. |
+
+### 🧮 Derived Metrics
+
+| Metric | Formula | Interpretation |
+|:--|:--|:--|
+| **TTD** | `healthy_ts − commit_ts` | End-to-end CI/CD agility. |
+| **CFR** | `failed runs / total runs × 100` | Deployment stability. |
+| **DF** | `successful runs / days(active)` | Deployment throughput. |
 
 ---
 
-## 🧠 Authentication (GitHub → GCP OIDC)
+### ⚙️ Collection Flow
 
-| Component | Description |
-|------------|-------------|
-| **Workload Identity Federation** | Trust link between GitHub and GCP (issuer `https://token.actions.githubusercontent.com`) |
-| **Infra SA (`gha-infra`)** | Used by Terraform to provision infrastructure |
-| **App SA (`gha-app`)** | Used by CI pipeline to build/push/deploy |
-| **Runtime SA (`run-exec`)** | Used by Cloud Run to execute the app |
+1. **GitHub Actions Workflow** (`.github/workflows/s1_ci.yml`)  
+   Stages → Build → Test → Push → Deploy → Health → writes CSV via `s1_write_metrics.py`.  
+2. **Snapshot Builder** (`metrics_snapshot.py`)  
+   Merges CSV history → computes lifetime CFR/DF statistics.  
+3. **Cloud Function Ingest** (optional)  
+   Receives row and inserts it into BigQuery.
 
-No service keys are stored — only short-lived OIDC tokens are used.
+### 📈 Example (S1 Baseline Metrics)
 
----
+| Metric | Value | Meaning |
+|:--|:--|:--|
+| **TTD = 118 s** | Avg commit → healthy deployment. |
+| **CFR = 10 %** | 1 failed run in 10. |
+| **DF = 3.4 /day** | Successful deployments per day. |
 
-## 🧪 Running S1
-
-1. **Ensure repository variables are set:**
-
-GCP_PROJECT_ID, GCP_REGION,
-GCP_WIF_PROVIDER,
-GCP_SA_APP_EMAIL,
-GCP_SA_INFRA_EMAIL,
-METRICS_INGEST_URL (optional),
-TF_STATE_BUCKET (optional)
-
-
-2. Push any change to `baseline/services/app/`  
-3. The **S1 CI/CD Baseline** workflow runs automatically.  
-4. Watch under **Actions → S1 CI/CD Baseline**  
-5. Check Summary for status, TTD, CFR/DF (lifetime & per-scenario), and service URL.
-
-Example summary:
-
-S1 Baseline Run
-
-Status: success
-Service URL: https://baseline-app-ew.a.run.app
-
-Full TTD (commit → healthy): 132 sec
-Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
-
+🟦 **Note:** Currently only **S1** produces operational telemetry.  
+Future scenarios (S2–S5, SS1–SS2) will extend the schema with additional fields (e.g., `edge_latency_ms`, `pqc_verify_time_ms`, `xai_latency_ms`, `audit_score`) to capture security, resilience, and explainability metrics.
 
 ---
 
@@ -196,9 +194,9 @@ Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
 - **S3:** Rollback & hotfix resilience  
 - **S4:** Security & PQC validation tests  
 - **S5:** Explainability / Human-in-the-Loop metrics  
-- **SS1:** Full-pipeline policy audit & compliance trace  
+- **SS1:** Policy audit & compliance trace  
 - **SS2:** Adaptive threat mitigation simulation  
-- **Agent Core:** Autonomous reasoning + explainability integration  
+- **Agent Core:** Autonomous reasoning + XAI integration  
 
 ---
 
