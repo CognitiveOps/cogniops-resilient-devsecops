@@ -12,9 +12,10 @@ on:
     paths:
       - "baseline/services/app/**"
       - ".github/workflows/s1_ci.yml"
-      
+
   # Optional: still allow manual runs
   workflow_dispatch:
+
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
@@ -106,7 +107,7 @@ jobs:
       - name: Ensure metrics directory
         run: mkdir -p baseline/metrics
 
-      # --- Metrics: commit (begin row; records started_at) --------------------
+      # --- Metrics: commit (begin row; records commit_ts) ---------------------
       - name: "S1 metrics: commit"
         run: |
           python baseline/scripts/s1_write_metrics.py \
@@ -114,11 +115,12 @@ jobs:
             --run_id "${{ github.run_id }}" \
             --commit_sha "${{ github.sha }}" \
             --stage commit \
+            --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
             --service "${SERVICE}" \
-            --workflow "s1_ci.yml"
+            --commit_ts "${{ steps.t0.outputs.ts }}"
 
       # --- Unit tests (non-fatal capture) -------------------------------------
       - name: Unit tests (capture exit code)
@@ -135,13 +137,10 @@ jobs:
       - name: "S1 metrics: test status"
         if: always()
         run: |
-          # Map pytest exit code -> status + test counts
           if [ "${{ steps.test.outputs.code }}" = "0" ]; then
             STATUS="success"
-            TESTS_FAILED=0
           else
             STATUS="failure"
-            TESTS_FAILED=1
           fi
 
           python baseline/scripts/s1_write_metrics.py \
@@ -150,13 +149,11 @@ jobs:
             --commit_sha "${{ github.sha }}" \
             --stage test \
             --status "$STATUS" \
-            --tests_total 1 \
-            --tests_failed "$TESTS_FAILED" \
+            --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --workflow "s1_ci.yml"
+            --service "${SERVICE}"
 
       # --- Build & Push -------------------------------------------------------
       - name: Build image
@@ -176,19 +173,18 @@ jobs:
             --include-tags --format='get(DIGEST)' --filter="TAGS:${GITHUB_SHA}" | head -n1)
           echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
 
-      - name: "S1 metrics: push (image ref)"
+      - name: "S1 metrics: push"
         run: |
           python baseline/scripts/s1_write_metrics.py \
             --outfile baseline/metrics/s1_pipeline_runs.csv \
             --run_id "${{ github.run_id }}" \
             --commit_sha "${{ github.sha }}" \
             --stage push \
-            --image "${IMAGE}@${DIGEST}" \
+            --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --workflow "s1_ci.yml"
+            --service "${SERVICE}"
 
       # --- Deploy to Cloud Run ------------------------------------------------
       - name: Deploy to Cloud Run
@@ -215,11 +211,11 @@ jobs:
             --run_id "${{ github.run_id }}" \
             --commit_sha "${{ github.sha }}" \
             --stage deploy \
+            --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --workflow "s1_ci.yml"
+            --service "${SERVICE}"
 
       # --- Health check (retry/backoff) ---------------------------------------
       - name: Health Check (with retries)
@@ -251,7 +247,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Prepare optional ID token for ingest (if URL is configured)
           TOKEN=""
           if [ -n "${METRICS_INGEST_URL}" ]; then
             TOKEN=$(gcloud auth print-identity-token \
@@ -266,11 +261,12 @@ jobs:
             --commit_sha "${{ github.sha }}" \
             --stage health \
             --status "${{ job.status }}" \
+            --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
             --service "${SERVICE}" \
-            --workflow "s1_ci.yml" \
+            --healthy_ts "${{ steps.t1.outputs.ts }}" \
             --post-to "${METRICS_INGEST_URL}" \
             --auth-token "$TOKEN"
 

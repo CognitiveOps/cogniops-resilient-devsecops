@@ -67,124 +67,48 @@ resource "google_artifact_registry_repository" "docker" {
 #############################
 # BigQuery (dataset + table)
 #############################
-resource "google_bigquery_dataset" "metrics" {
-  dataset_id                 = "agent_metrics"
-  location                   = var.bigquery_location
-  delete_contents_on_destroy = false
-}
-
 resource "google_bigquery_table" "s1_runs" {
   dataset_id = google_bigquery_dataset.metrics.dataset_id
   table_id   = "s1_pipeline_runs"
 
-  # Partition by pipeline end time (used for monthly / daily aggregates)
   time_partitioning {
     type  = "DAY"
-    field = "ended_at"
+    field = "healthy_ts"
   }
 
-  # Cluster by commonly filtered dimensions
-  clustering = ["status", "service", "scenario_id"]
+  clustering = ["status", "service"]
 
   schema = jsonencode([
-    {
-      name        = "run_id"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "GitHub Actions run ID (unique per pipeline run)"
-    },
-    {
-      name        = "workflow"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Workflow file name (e.g. s1_ci.yml)"
-    },
-    {
-      name        = "scenario_id"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Scenario identifier (e.g. S1)"
-    },
-    {
-      name        = "branch"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Git branch where the run executed"
-    },
-    {
-      name        = "env"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Logical environment (e.g. prod, cloud-run)"
-    },
-    {
-      name        = "service"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Service name (e.g. baseline-app)"
-    },
-    {
-      name        = "status"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Final pipeline outcome: success / failure"
-    },
-    {
-      name        = "failure_stage"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Stage where failure occurred (test / deploy / health); null if success"
-    },
-    {
-      name        = "commit_sha"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Git commit SHA for this run"
-    },
-    {
-      name        = "image"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Container image reference with digest"
-    },
-    {
-      name        = "tests_total"
-      type        = "INTEGER"
-      mode        = "NULLABLE"
-      description = "Total number of tests in this run"
-    },
-    {
-      name        = "tests_failed"
-      type        = "INTEGER"
-      mode        = "NULLABLE"
-      description = "Number of failing tests"
-    },
-    {
-      name        = "started_at"
-      type        = "TIMESTAMP"
-      mode        = "REQUIRED"
-      description = "Pipeline start time (UTC)"
-    },
-    {
-      name        = "ended_at"
-      type        = "TIMESTAMP"
-      mode        = "REQUIRED"
-      description = "Pipeline end time (UTC)"
-    },
-    {
-      name        = "duration_sec"
-      type        = "FLOAT"
-      mode        = "NULLABLE"
-      description = "Total pipeline duration in seconds"
-    },
-    {
-      name        = "inserted_at"
-      type        = "TIMESTAMP"
-      mode        = "NULLABLE"
-      description = "Row ingestion timestamp (set by Cloud Function)"
-    }
+    # Identity / Context
+    { name = "run_id",        type = "STRING",    mode = "REQUIRED" },
+    { name = "commit_sha",    type = "STRING",    mode = "REQUIRED" },
+    { name = "workflow",      type = "STRING",    mode = "NULLABLE" },
+    { name = "scenario_id",   type = "STRING",    mode = "NULLABLE" },
+    { name = "branch",        type = "STRING",    mode = "NULLABLE" },
+    { name = "env",           type = "STRING",    mode = "NULLABLE" },
+    { name = "service",       type = "STRING",    mode = "NULLABLE" },
+
+    # Stage timestamps
+    { name = "commit_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "test_ts",       type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "push_ts",       type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "deploy_ts",     type = "TIMESTAMP", mode = "NULLABLE" },
+    { name = "healthy_ts",    type = "TIMESTAMP", mode = "NULLABLE" },
+
+    # Status & Quality
+    { name = "status",        type = "STRING",    mode = "REQUIRED" },
+    { name = "failure_stage", type = "STRING",    mode = "NULLABLE" },
+    { name = "tests_total",   type = "INTEGER",   mode = "NULLABLE" },
+    { name = "tests_failed",  type = "INTEGER",   mode = "NULLABLE" },
+
+    # Aggregated metric
+    { name = "ttd_sec",       type = "FLOAT",     mode = "NULLABLE" },
+
+    # Bookkeeping
+    { name = "inserted_at",   type = "TIMESTAMP", mode = "NULLABLE" }
   ])
 }
+
 
 
 #####################
