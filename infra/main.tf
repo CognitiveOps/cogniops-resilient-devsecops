@@ -67,9 +67,6 @@ resource "google_artifact_registry_repository" "docker" {
 #############################
 # BigQuery (dataset + table)
 #############################
-#############################
-# BigQuery (dataset + table)
-#############################
 
 # Dataset that holds all S1 pipeline runs
 resource "google_bigquery_dataset" "metrics" {
@@ -82,11 +79,10 @@ resource "google_bigquery_dataset" "metrics" {
 resource "google_bigquery_table" "s1_runs" {
   dataset_id          = google_bigquery_dataset.metrics.dataset_id
   table_id            = "s1_pipeline_runs"
-  deletion_protection = false
 
   time_partitioning {
     type  = "DAY"
-    field = "healthy_ts"  # your new partitioning field
+    field = "ended_ts"
   }
 
   clustering = ["status", "service"]
@@ -183,7 +179,7 @@ resource "google_bigquery_table" "s1_runs" {
       description = "Deploy finished time (UTC)"
     },
     {
-      name        = "healthy_ts"
+      name        = "ended_ts"
       type        = "TIMESTAMP"
       mode        = "NULLABLE"
       description = "Health check OK time (UTC)"
@@ -192,7 +188,7 @@ resource "google_bigquery_table" "s1_runs" {
       name        = "ttd_sec"
       type        = "FLOAT"
       mode        = "NULLABLE"
-      description = "Time-to-deploy in seconds (commit_ts → healthy_ts)"
+      description = "Time-to-deploy in seconds (commit_ts → ended_ts)"
     },
     {
       name        = "inserted_at"

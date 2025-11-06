@@ -266,7 +266,7 @@ jobs:
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
             --service "${SERVICE}" \
-            --healthy_ts "${{ steps.t1.outputs.ts }}" \
+            --ended_ts "${{ steps.t1.outputs.ts }}" \
             --post-to "${METRICS_INGEST_URL}" \
             --auth-token "$TOKEN"
 

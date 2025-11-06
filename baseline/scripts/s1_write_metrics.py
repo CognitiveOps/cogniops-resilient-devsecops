@@ -8,7 +8,7 @@ Columns (header):
   run_id, workflow, scenario_id, branch, env, service,
   status, failure_stage, commit_sha,
   tests_total, tests_failed,
-  commit_ts, test_ts, push_ts, deploy_ts, healthy_ts, ttd_sec
+  commit_ts, test_ts, push_ts, deploy_ts, ended_ts, ttd_sec
 
 Usage from GitHub Actions (examples):
 
@@ -36,7 +36,7 @@ Usage from GitHub Actions (examples):
 
   # health stage – use t1 as canonical end timestamp and job.status
   python ... --stage health --status "${{ job.status }}" \
-               --healthy_ts "${{ steps.t1.outputs.ts }}"
+               --ended_ts "${{ steps.t1.outputs.ts }}"
 """
 
 import argparse
@@ -61,7 +61,7 @@ FIELDS = [
     "test_ts",
     "push_ts",
     "deploy_ts",
-    "healthy_ts",
+    "ended_ts",
     "ttd_sec",
 ]
 
@@ -85,7 +85,7 @@ def parse_args():
 
     # Optionally override timestamps from CI (epoch seconds or ISO8601)
     ap.add_argument("--commit_ts", default="")
-    ap.add_argument("--healthy_ts", default="")
+    ap.add_argument("--ended_ts", default="")
     return ap.parse_args()
 
 
@@ -175,17 +175,17 @@ def apply_stage_updates(row: Dict[str, str], args) -> Dict[str, str]:
         # job.status from GA is success / failure / cancelled
         if status:
             row["status"] = status
-        row["healthy_ts"] = iso_from_epoch_or_iso(args.healthy_ts) or now_iso()
+        row["ended_ts"] = iso_from_epoch_or_iso(args.ended_ts) or now_iso()
 
     # First failing stage wins
     if status and status != "success" and not row.get("failure_stage"):
         row["failure_stage"] = stage
 
     # Recompute TTD if we know both ends
-    if row.get("commit_ts") and row.get("healthy_ts"):
+    if row.get("commit_ts") and row.get("ended_ts"):
         try:
             start = dt.datetime.fromisoformat(row["commit_ts"].replace("Z", ""))
-            end = dt.datetime.fromisoformat(row["healthy_ts"].replace("Z", ""))
+            end = dt.datetime.fromisoformat(row["ended_ts"].replace("Z", ""))
             ttd = (end - start).total_seconds()
             row["ttd_sec"] = str(ttd)
         except Exception:

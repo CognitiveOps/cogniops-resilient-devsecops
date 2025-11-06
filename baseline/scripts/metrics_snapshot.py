@@ -168,7 +168,7 @@ def build_per_run_rows(stage_rows: List[Dict]) -> List[Dict]:
                 parse_ts(rr.get("commit_ts")),
                 parse_ts(rr.get("test_ts")),
                 parse_ts(rr.get("deploy_ts")),
-                parse_ts(rr.get("healthy_ts")),
+                parse_ts(rr.get("ended_ts")),
                 parse_ts(rr.get("started_at")),
                 parse_ts(rr.get("ended_at")),
             ]
@@ -197,7 +197,7 @@ def build_per_run_rows(stage_rows: List[Dict]) -> List[Dict]:
                 t = parse_ts(rr.get(key))
                 if t:
                     ts_candidates_start.append(t)
-            for key in ("healthy_ts", "deploy_ts", "ended_at", "test_ts"):
+            for key in ("ended_ts", "deploy_ts", "ended_at", "test_ts"):
                 t = parse_ts(rr.get(key))
                 if t:
                     ts_candidates_end.append(t)
@@ -249,13 +249,13 @@ def build_per_run_rows(stage_rows: List[Dict]) -> List[Dict]:
     return per_run_rows
 
 def row_ts_start(r: Dict) -> Optional[dt.datetime]:
-    """Prefer commit_ts as run start; fallback to healthy_ts."""
-    return parse_ts(r.get("commit_ts")) or parse_ts(r.get("healthy_ts"))
+    """Prefer commit_ts as run start; fallback to ended_ts."""
+    return parse_ts(r.get("commit_ts")) or parse_ts(r.get("ended_ts"))
 
 
 def row_ts_end(r: Dict) -> Optional[dt.datetime]:
-    """Prefer healthy_ts as run end; fallback to commit_ts."""
-    return parse_ts(r.get("healthy_ts")) or parse_ts(r.get("commit_ts"))
+    """Prefer ended_ts as run end; fallback to commit_ts."""
+    return parse_ts(r.get("ended_ts")) or parse_ts(r.get("commit_ts"))
 
 
 def duration_days(start: Optional[dt.datetime],
