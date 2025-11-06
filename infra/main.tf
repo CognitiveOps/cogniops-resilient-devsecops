@@ -77,12 +77,12 @@ resource "google_bigquery_dataset" "metrics" {
 
 # One row per GitHub Actions run, matching s1_pipeline_runs.csv
 resource "google_bigquery_table" "s1_runs" {
-  dataset_id          = google_bigquery_dataset.metrics.dataset_id
-  table_id            = "s1_pipeline_runs"
+  dataset_id = google_bigquery_dataset.metrics.dataset_id
+  table_id   = "s1_pipeline_runs"
 
   time_partitioning {
     type  = "DAY"
-    field = "ended_ts"
+    field = "ended_ts"   # partition by final pipeline timestamp
   }
 
   clustering = ["status", "service"]
@@ -134,7 +134,7 @@ resource "google_bigquery_table" "s1_runs" {
       name        = "failure_stage"
       type        = "STRING"
       mode        = "NULLABLE"
-      description = "Stage where failure occurred (test / deploy / health); null if success"
+      description = "Stage where failure occurred; null if overall success"
     },
     {
       name        = "commit_sha"
@@ -167,6 +167,12 @@ resource "google_bigquery_table" "s1_runs" {
       description = "Pipeline start time (UTC)"
     },
     {
+      name        = "test_ts"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Unit test completion time (UTC)"
+    },
+    {
       name        = "push_ts"
       type        = "TIMESTAMP"
       mode        = "NULLABLE"
@@ -182,13 +188,13 @@ resource "google_bigquery_table" "s1_runs" {
       name        = "ended_ts"
       type        = "TIMESTAMP"
       mode        = "NULLABLE"
-      description = "Health check OK time (UTC)"
+      description = "Final pipeline completion time (UTC)"
     },
     {
       name        = "ttd_sec"
       type        = "FLOAT"
       mode        = "NULLABLE"
-      description = "Time-to-deploy in seconds (commit_ts → ended_ts)"
+      description = "Time to deploy in seconds (commit_ts → ended_ts)"
     },
     {
       name        = "inserted_at"
@@ -198,7 +204,6 @@ resource "google_bigquery_table" "s1_runs" {
     },
   ])
 }
-
 
 #####################
 # Service Accounts

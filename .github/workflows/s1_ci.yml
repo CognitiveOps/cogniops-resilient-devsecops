@@ -1,19 +1,19 @@
-# S1 CI/CD Baseline — Build → Test → Build Image → Push → Deploy → Health Check → Metrics
+# S1 CI/CD Baseline — Build → Test → Build Image → Push → Deploy → Finalize Metrics
 name: S1 CI/CD Baseline
 
 on:
-  # Run S1 only after infra workflow completes
+  # Run S1 automatically after infra workflow completes
   workflow_run:
     workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
 
-  # Run automatically on app code changes (if infra already exists)
+  # Run automatically on app code changes (if infra is already up)
   push:
     paths:
       - "baseline/services/app/**"
       - ".github/workflows/s1_ci.yml"
 
-  # Optional: still allow manual runs
+  # Optional: manual runs
   workflow_dispatch:
 
 env:
@@ -36,6 +36,7 @@ concurrency:
 
 jobs:
   build-test-push-deploy:
+    # Only run if WIF is configured and, in workflow_run, if infra apply succeeded
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -95,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install pytest httpx
+          pip install pytest httpx requests
 
       # --- Prepare metrics context (scenario/branch/env) ----------------------
       - name: Set run context (scenario/branch/env)
@@ -184,7 +185,8 @@ jobs:
             --scenario_id "${{ env.SCENARIO_ID }}" \
             --branch "${{ env.BRANCH }}" \
             --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}"
+            --service "${SERVICE}" \
+            --image "${IMAGE}@${DIGEST}"
 
       # --- Deploy to Cloud Run ------------------------------------------------
       - name: Deploy to Cloud Run
@@ -239,8 +241,8 @@ jobs:
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # --- Finalize metrics + BigQuery ingest (health stage) ------------------
-      - name: "S1 metrics: health (final + ingest)"
+      # --- Finalize metrics (final stage – overall pipeline result + ingest) ---
+      - name: "S1 metrics: final (overall)"
         if: always()
         env:
           METRICS_INGEST_URL: ${{ env.METRICS_INGEST_URL }}
@@ -259,7 +261,7 @@ jobs:
             --outfile baseline/metrics/s1_pipeline_runs.csv \
             --run_id "${{ github.run_id }}" \
             --commit_sha "${{ github.sha }}" \
-            --stage health \
+            --stage final \
             --status "${{ job.status }}" \
             --workflow "s1_ci" \
             --scenario_id "${{ env.SCENARIO_ID }}" \
@@ -270,7 +272,7 @@ jobs:
             --post-to "${METRICS_INGEST_URL}" \
             --auth-token "$TOKEN"
 
-      # --- Install deps for metrics_snapshot (requests) -----------------------
+      # --- Install deps for metrics_snapshot (safe even if already installed) --
       - name: Install Python dependencies for snapshot
         if: always()
         run: |
