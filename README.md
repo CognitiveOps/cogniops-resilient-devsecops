@@ -46,7 +46,8 @@ cogniops-resilient-devsecops/
 | ID | Scenario | Purpose |
 |----|-----------|----------|
 | **S1** | Cloud → Pipeline CI/CD Baseline | Measure build–test–push–deploy TTD, CFR, DF metrics via GitHub Actions + GCP. |
-| **S2** | Pipeline → Edge Deployment | OTA deployment to simulated edge devices with latency & integrity metrics. |
+| **S2** | Pipeline → Edge Deployment (Functional OTA Baseline) |
+|        | OTA deployment to simulated edge devices measuring latency (TDL) and deployment success rate (DSR). No security or PQC yet. |
 | **S3** | Rollback & Hotfix Resilience | Fault injection → manual recovery → measure MTTD & MTTR. |
 | **S4** | Security & PQC Validation | Validate update authenticity using NIST PQC algorithms (FIPS 203–205). |
 | **S5** | Explainability & Human-in-the-Loop | Measure approval latency (AL) and audit completeness (ACR). |
@@ -58,9 +59,9 @@ cogniops-resilient-devsecops/
 ## 🧮 Scenario–Metric Matrix
 
 | Scenario | Operational | Resilience | Security | Explainability |
-|:--|:--:|:--:|:--:|:--:|
+|-----------|--------------|-------------|-----------|----------------|
 | **S1** | **TTD**, **CFR**, **DF** | – | – | – |
-| **S2** | **TTD** | – | **VSR**, **TTV** | – |
+| **S2** | **TDL**, **DSR** | – | – | – |
 | **S3** | – | **MTTD**, **MTTR** | – | – |
 | **S4** | – | – | **TTV**, **VSR**, **FDR** | – |
 | **S5** | – | – | – | **AL**, **ACR** |
@@ -141,15 +142,15 @@ It captures operational metrics — **TTD**, **CFR**, and **DF** — directly fr
 | **commit_ts** | TIMESTAMP | Stage commit | Pipeline start. |
 | **push_ts** | TIMESTAMP | Stage push | Docker image push. |
 | **deploy_ts** | TIMESTAMP | Stage deploy | Cloud Run deployment end. |
-| **healthy_ts** | TIMESTAMP | Stage health | Service healthy (HTTP 200). |
-| **ttd_sec** | FLOAT | Derived | Time-to-Deploy = `healthy_ts − commit_ts`. |
+| **ended_ts** | TIMESTAMP | Stage health | Service healthy (HTTP 200). |
+| **ttd_sec** | FLOAT | Derived | Time-to-Deploy = `ended_ts − commit_ts`. |
 | **inserted_at** | TIMESTAMP | BigQuery | Server ingestion timestamp. |
 
 ### 🧮 Derived Metrics
 
 | Metric | Formula | Interpretation |
 |:--|:--|:--|
-| **TTD** | `healthy_ts − commit_ts` | End-to-end CI/CD agility. |
+| **TTD** | `ended_ts − commit_ts` | End-to-end CI/CD agility. |
 | **CFR** | `failed runs / total runs × 100` | Deployment stability. |
 | **DF** | `successful runs / days(active)` | Deployment throughput. |
 
