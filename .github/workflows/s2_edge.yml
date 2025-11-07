@@ -27,9 +27,9 @@ jobs:
       SCENARIO: s2
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       # Change these for your GCP project/region
-      GCP_PROJECT: <PROJECT_ID>
-      GCP_REGION: <REGION>            # e.g. europe-west1
-      AR_REPO: devsecops              # Artifact Registry repo name
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_REPO: apps              # Artifact Registry repo name
       IMAGE_NAME: edge-cv-app
       # URL of the generic metrics ingest CF (scenario-runs-ingest)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
