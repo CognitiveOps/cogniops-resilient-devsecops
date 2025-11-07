@@ -11,8 +11,7 @@ Data sources:
 Outputs:
 - A canonical *per-run ledger* (CSV) aligned with BigQuery schema:
     run_id, commit_sha, scenario_id, branch, env, service,
-    started_at, ended_at, duration_sec, status, tests_total, tests_failed,
-    cfr, df_per_day
+    started_at, ended_at, duration_sec, status, tests_total, tests_failed
 
 - A snapshot JSON file (lifetime + per-scenario aggregates):
     lifetime.cfr / lifetime.df_per_day / total_runs, etc.
@@ -47,7 +46,7 @@ except Exception:
     requests = None
 
 
-# --- Canonical per-run schema ---
+# --- Canonical per-run schema (NO CFR/DF COLUMNS HERE) ---
 LEDGER_FIELDS = [
     "run_id",
     "commit_sha",
@@ -61,8 +60,6 @@ LEDGER_FIELDS = [
     "status",
     "tests_total",
     "tests_failed",
-    "cfr",
-    "df_per_day",
 ]
 
 
@@ -124,7 +121,7 @@ def merge_stage_rows(primary: Path, merge_glob: str) -> List[Dict]:
 
 def build_per_run_rows(stage_rows: List[Dict]) -> List[Dict]:
     """
-    Converts stage-level rows (commit/test/push/deploy/health)
+    Converts stage-level rows (commit/test/push/deploy/final)
     into one canonical per-run row with LEDGER_FIELDS.
     """
     by_run: Dict[str, List[Dict]] = collections.defaultdict(list)
@@ -154,17 +151,25 @@ def build_per_run_rows(stage_rows: List[Dict]) -> List[Dict]:
         service = latest.get("service")
 
         # Compute timestamps
-        ts_start = [parse_ts(r.get("commit_ts") or r.get("started_at")) for r in rows_sorted if parse_ts(r.get("commit_ts") or r.get("started_at"))]
-        ts_end = [parse_ts(r.get("ended_ts") or r.get("ended_at") or r.get("deploy_ts")) for r in rows_sorted if parse_ts(r.get("ended_ts") or r.get("ended_at") or r.get("deploy_ts"))]
+        ts_start = [
+            parse_ts(r.get("commit_ts") or r.get("started_at"))
+            for r in rows_sorted
+            if parse_ts(r.get("commit_ts") or r.get("started_at"))
+        ]
+        ts_end = [
+            parse_ts(r.get("ended_ts") or r.get("ended_at") or r.get("deploy_ts"))
+            for r in rows_sorted
+            if parse_ts(r.get("ended_ts") or r.get("ended_at") or r.get("deploy_ts"))
+        ]
         start = min(ts_start) if ts_start else None
         end = max(ts_end) if ts_end else None
 
         duration_sec = (end - start).total_seconds() if start and end and end >= start else None
 
-        # Status logic
+        # Status logic: prefer final stage, then last non-empty status
         status = None
         for rr in rows_sorted:
-            if rr.get("stage") == "health" and rr.get("status"):
+            if rr.get("stage") == "final" and rr.get("status"):
                 status = rr["status"]
         if not status:
             for rr in rows_sorted:
@@ -238,11 +243,18 @@ def github_fetch_runs(repo: str, token: str, workflow: str = "", max_pages: int 
         print("[metrics_snapshot] requests not available, skipping GitHub sync")
         return []
 
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
     runs: List[Dict] = []
 
     for page in range(1, max_pages + 1):
-        url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs" if workflow else f"https://api.github.com/repos/{repo}/actions/runs"
+        if workflow:
+            url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs"
+        else:
+            url = f"https://api.github.com/repos/{repo}/actions/runs"
+
         params = {"per_page": 100, "page": page}
 
         resp = requests.get(url, headers=headers, params=params, timeout=10)
@@ -254,6 +266,7 @@ def github_fetch_runs(repo: str, token: str, workflow: str = "", max_pages: int 
         page_runs = data.get("workflow_runs") or data.get("runs") or []
         if not page_runs:
             break
+
         runs.extend(page_runs)
         if len(page_runs) < 100:
             break
@@ -272,8 +285,10 @@ def github_runs_to_per_run_rows(gh_runs: List[Dict], existing_ids: set, scenario
         if not rid or rid in existing_ids:
             continue
 
-        created_at, updated_at = run.get("created_at"), run.get("updated_at")
-        start_ts, end_ts = parse_ts(created_at), parse_ts(updated_at)
+        created_at = run.get("created_at")
+        updated_at = run.get("updated_at")
+        start_ts = parse_ts(created_at)
+        end_ts = parse_ts(updated_at)
         duration = (end_ts - start_ts).total_seconds() if start_ts and end_ts else None
         status = (run.get("conclusion") or run.get("status") or "unknown").lower()
 
@@ -297,60 +312,80 @@ def github_runs_to_per_run_rows(gh_runs: List[Dict], existing_ids: set, scenario
 
 def build_snapshot(per_run_rows: List[Dict], group_by: str, scenario_default: str, min_days: float) -> Dict:
     lifetime = aggregate(per_run_rows, min_days)
-    snap: Dict = {"generated_at": dt.datetime.utcnow().isoformat() + "Z", "lifetime": lifetime}
+    snap: Dict = {
+        "generated_at": dt.datetime.utcnow().isoformat() + "Z",
+        "lifetime": lifetime,
+    }
 
     if group_by == "scenario":
         by_scn = collections.defaultdict(list)
         for r in per_run_rows:
             scn = r.get("scenario_id") or scenario_default
             by_scn[scn].append(r)
-        snap["per_scenario"] = {scn: aggregate(rs, min_days) for scn, rs in by_scn.items()}
+        snap["per_scenario"] = {
+            scn: aggregate(rs, min_days) for scn, rs in by_scn.items()
+        }
     return snap
 
 
 def main():
     args = parse_args()
-    csv_path, out_path = Path(args.infile), Path(args.outfile)
+    csv_path = Path(args.infile)
+    out_path = Path(args.outfile)
 
     # Empty skeleton if no data exists
     if not csv_path.exists() and not args.merge_from:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps({
             "generated_at": dt.datetime.utcnow().isoformat() + "Z",
-            "lifetime": {"total_runs": 0, "success": 0, "fail": 0, "cfr": 0.0, "df_per_day": 0.0, "start": None, "end": None, "days": 0.0},
+            "lifetime": {
+                "total_runs": 0,
+                "success": 0,
+                "fail": 0,
+                "cfr": 0.0,
+                "df_per_day": 0.0,
+                "start": None,
+                "end": None,
+                "days": 0.0,
+            },
             "per_scenario": {} if args.group_by == "scenario" else None,
         }, indent=2))
         print(f"[metrics_snapshot] Snapshot written (empty): {out_path}")
         return
 
-    # Merge and aggregate runs
+    # 1) merge CSV stage rows
     stage_rows = merge_stage_rows(csv_path, args.merge_from)
     per_run_rows = build_per_run_rows(stage_rows)
     existing_ids = {r["run_id"] for r in per_run_rows if r.get("run_id")}
 
-    # GitHub sync for missing runs
+    # 2) sync with GitHub for missing runs
     if args.github_repo and args.github_token:
-        gh_runs = github_fetch_runs(args.github_repo, args.github_token, args.github_workflow, args.github_max_pages)
-        per_run_rows.extend(github_runs_to_per_run_rows(gh_runs, existing_ids, args.scenario_default))
-        per_run_rows.sort(key=lambda r: parse_ts(r.get("started_at")) or dt.datetime.utcfromtimestamp(0), reverse=True)
+        gh_runs = github_fetch_runs(
+            args.github_repo,
+            args.github_token,
+            args.github_workflow,
+            args.github_max_pages,
+        )
+        per_run_rows.extend(
+            github_runs_to_per_run_rows(gh_runs, existing_ids, args.scenario_default)
+        )
+        per_run_rows.sort(
+            key=lambda r: parse_ts(r.get("started_at")) or dt.datetime.utcfromtimestamp(0),
+            reverse=True,
+        )
 
-    # Compute global CFR/DF and add as fields to each row
-    global_metrics = aggregate(per_run_rows, args.min_days)
-    cfr, df_per_day = global_metrics["cfr"], global_metrics["df_per_day"]
-    for r in per_run_rows:
-        r["cfr"], r["df_per_day"] = cfr, df_per_day
-
-    # Write merged CSV
+    # 3) write merged per-run CSV (NO CFR/DF COLUMNS)
     if args.write_merged_to:
         dest = Path(args.write_merged_to)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=LEDGER_FIELDS)
             writer.writeheader()
-            writer.writerows(per_run_rows)
+            for r in per_run_rows:
+                writer.writerow({k: r.get(k) for k in LEDGER_FIELDS})
         print(f"[metrics_snapshot] Per-run ledger written to: {dest}")
 
-    # Build and write snapshot JSON
+    # 4) build & write snapshot JSON (CFR/DF live here)
     snap = build_snapshot(per_run_rows, args.group_by, args.scenario_default, args.min_days)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(snap, indent=2))
