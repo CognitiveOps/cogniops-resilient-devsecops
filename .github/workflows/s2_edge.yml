@@ -29,6 +29,7 @@ jobs:
       # Change these for your GCP project/region
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
       AR_REPO: apps              # Artifact Registry repo name
       IMAGE_NAME: edge-cv-app
       # URL of the generic metrics ingest CF (scenario-runs-ingest)
@@ -57,7 +58,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure docker to Artifact Registry
-        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev -q
+        run: gcloud auth configure-docker ${{ env.AR_LOCATION  }}-docker.pkg.dev -q
 
       # ------------------------------------------
       # 2) Buildx multi-arch image
@@ -68,7 +69,7 @@ jobs:
       - name: Compute image refs
         id: refs
         run: |
-          echo "ar_repo=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          echo "ar_repo=${{ env.AR_LOCATION}}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
           echo "tag=${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
       - name: Build & Push multi-arch to AR
