@@ -99,7 +99,7 @@ jobs:
           pip install pytest httpx requests
 
       # --- Prepare metrics context (scenario/branch/env) ----------------------
-      - name: Set run context (scenario/branch/env)
+      - name: Set run context (scenario/branch/env) 
         run: |
           echo "SCENARIO_ID=S1" >> $GITHUB_ENV
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
