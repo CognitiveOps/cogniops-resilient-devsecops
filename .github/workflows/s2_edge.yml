@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read       
   id-token: write      # required for OIDC
+
+concurrency:
+  group: s1-baseline-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   s2:
     runs-on: ubuntu-latest
@@ -45,8 +49,10 @@ jobs:
       # ------------------------------------------
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github/providers/github
-          service_account: github-ci@${{ env.GCP_PROJECT }}.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
 
       - uses: google-github-actions/setup-gcloud@v2
 
