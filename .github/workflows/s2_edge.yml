@@ -1,0 +1,199 @@
+name: S2 Edge Deployment (OTA)
+
+on:
+  # Run S2 automatically after infra workflow completes
+  workflow_run:
+    workflows: ["admin - Terraform Apply (GCP infra)"]
+    types: [completed]
+     # Run automatically on app code changes (if infra is already up)
+  push:
+    paths:
+      - "baseline/services/edge_cv_app/**"
+      - ".github/workflows/s2_edge.yml"
+  workflow_dispatch:
+
+jobs:
+  s2:
+    runs-on: ubuntu-latest
+
+    env:
+      SCENARIO: s2
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      # Change these for your GCP project/region
+      GCP_PROJECT: <PROJECT_ID>
+      GCP_REGION: <REGION>            # e.g. europe-west1
+      AR_REPO: devsecops              # Artifact Registry repo name
+      IMAGE_NAME: edge-cv-app
+      # URL of the generic metrics ingest CF (scenario-runs-ingest)
+      METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ------------------------------------------
+      # 0) Start overall S2 timer (for TTD_edge)
+      # ------------------------------------------
+      - name: Start timer
+        id: t0
+        run: echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 1) GCP OIDC AUTH (no static secrets)
+      # ------------------------------------------
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github/providers/github
+          service_account: github-ci@${{ env.GCP_PROJECT }}.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure docker to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev -q
+
+      # ------------------------------------------
+      # 2) Buildx multi-arch image
+      # ------------------------------------------
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          echo "ar_repo=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push multi-arch to AR
+        id: buildpush
+        run: |
+          IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t "$IMG" \
+            --push baseline/services/edge_cv_app
+
+          # extract digest of the pushed manifest list (multi-arch)
+          DIGEST=$(docker buildx imagetools inspect "$IMG" | awk '/Digest: sha256/ {print $2; exit}')
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "image=$IMG" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 3) Create OTA manifest (no security layer yet)
+      # ------------------------------------------
+      - name: Create OTA manifest
+        id: ota
+        run: |
+          mkdir -p baseline/metrics/s2/artifacts
+          python baseline/scripts/make_ota_manifest.py \
+            --image "${{ steps.buildpush.outputs.image }}" \
+            --digest "${{ steps.buildpush.outputs.digest }}" \
+            --outdir baseline/metrics/s2/artifacts \
+            --version "${{ steps.refs.outputs.tag }}"
+          ls -la baseline/metrics/s2/artifacts
+          echo "manifest=$(ls baseline/metrics/s2/artifacts/ota_*.json | tail -n1)" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 4) Edge deploy simulation (runner)
+      #    - OTA activation window (TDL)
+      # ------------------------------------------
+      - name: Edge activate (sim)
+        id: activate
+        run: |
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+
+          # T0 = start of OTA activation (for TDL)
+          T0=$(date +%s)
+          bash baseline/services/edge_cv_app/edge_pull_and_activate.sh \
+            "${{ steps.ota.outputs.manifest }}" \
+            "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          # T1 = edge healthy (or script exit)
+          T1=$(date +%s)
+
+          # pure OTA latency (TDL)
+          echo "ota_latency=$((T1 - T0))" >> $GITHUB_OUTPUT
+          # store start/end for later metrics ingest
+          echo "t_ota_start=$T0" >> $GITHUB_OUTPUT
+          echo "t_edge_end=$T1" >> $GITHUB_OUTPUT
+
+      # ------------------------------------------
+      # 5) Send S2 metrics to BigQuery ingest (generic runs table)
+      #    - s2_activate  → TDL (OTA latency)
+      #    - s2_ttd_edge  → overall S2 job (Start → edge healthy)
+      # ------------------------------------------
+      - name: Send S2 metrics to BigQuery ingest
+        run: |
+          set -euo pipefail
+
+          RUN_ID="${{ env.RUN_ID }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SCENARIO_ID="${{ env.SCENARIO }}"
+          MODE="baseline"
+          STATUS="success"
+
+          T0=${{ steps.t0.outputs.ts }}
+          T_OTA_START=${{ steps.activate.outputs.t_ota_start }}
+          T_EDGE_END=${{ steps.activate.outputs.t_edge_end }}
+          TDL=${{ steps.activate.outputs.ota_latency }}
+
+          echo "S2 metrics:"
+          echo "  RUN_ID=$RUN_ID"
+          echo "  COMMIT=$COMMIT_SHA"
+          echo "  TDL=$TDL sec"
+          echo "  T0=$T0, T_OTA_START=$T_OTA_START, T_EDGE_END=$T_EDGE_END"
+
+          # 1) Event: s2_activate (TDL = OTA latency)
+          curl -sS -X POST "$METRICS_INGEST_URL" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "$RUN_ID",
+            "scenario_id": "$SCENARIO_ID",
+            "stage": "s2_activate",
+            "mode": "$MODE",
+            "status": "$STATUS",
+            "commit_sha": "$COMMIT_SHA",
+            "t_start": $T_OTA_START,
+            "t_end": $T_EDGE_END,
+            "metrics": {
+              "tdl_sec": $TDL
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "edge_device": "gh-runner"
+            }
+          }
+EOF
+
+          # 2) Event: s2_ttd_edge (overall S2 pipeline start -> edge healthy)
+          curl -sS -X POST "$METRICS_INGEST_URL" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "$RUN_ID",
+            "scenario_id": "$SCENARIO_ID",
+            "stage": "s2_ttd_edge",
+            "mode": "$MODE",
+            "status": "$STATUS",
+            "commit_sha": "$COMMIT_SHA",
+            "t_start": $T0,
+            "t_end": $T_EDGE_END,
+            "metrics": {
+              "ttd_edge_source": "s2_pipeline"
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "edge_device": "gh-runner"
+            }
+          }
+EOF
+
+      # ------------------------------------------
+      # 6) Upload S2 artifacts (manifest, checksum)
+      #    (optional, for debugging & traceability)
+      # ------------------------------------------
+      - name: Upload S2 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: s2_${{ env.RUN_ID }}
+          path: |
+            baseline/metrics/s2/artifacts/ota_*.json
+            baseline/metrics/s2/artifacts/ota_*.json.sha256

@@ -110,6 +110,91 @@ resource "google_bigquery_table" "s1_runs" {
   ])
 }
 
+# Generic metrics table for S2+ (flexible JSON metrics per scenario/stage)
+resource "google_bigquery_table" "runs" {
+  dataset_id = google_bigquery_dataset.metrics.dataset_id
+  table_id   = "runs"
+
+  time_partitioning {
+    type  = "DAY"
+    field = "t_end"
+  }
+
+  schema = jsonencode([
+    {
+      name        = "run_id"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "GitHub Actions run ID or logical run identifier"
+    },
+    {
+      name        = "scenario_id"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Scenario identifier (s2, s3, s4, s5, etc.)"
+    },
+    {
+      name        = "stage"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Stage name within the scenario (e.g. s2_activate)"
+    },
+    {
+      name        = "mode"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "baseline / shadow / enforce"
+    },
+    {
+      name        = "status"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "success / failed / cancelled"
+    },
+    {
+      name        = "commit_sha"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Git commit SHA for this run"
+    },
+    {
+      name        = "t_start"
+      type        = "TIMESTAMP"
+      mode        = "REQUIRED"
+      description = "Start timestamp of this stage (UTC)"
+    },
+    {
+      name        = "t_end"
+      type        = "TIMESTAMP"
+      mode        = "REQUIRED"
+      description = "End timestamp of this stage (UTC)"
+    },
+    {
+      name        = "duration_sec"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Stage duration in seconds (t_end - t_start)"
+    },
+    {
+      name        = "labels"
+      type        = "JSON"
+      mode        = "NULLABLE"
+      description = "Free-form labels (service, edge_device, env, etc.)"
+    },
+    {
+      name        = "metrics"
+      type        = "JSON"
+      mode        = "NULLABLE"
+      description = "Scenario-specific metrics (e.g. tdl_sec, mttd_sec, etc.)"
+    },
+    {
+      name        = "ingested_at"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Row ingestion timestamp (set by ingest function)"
+    }
+  ])
+}
 
 #####################
 # Service Accounts
@@ -464,6 +549,76 @@ resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
   member             = "allUsers"
 }
 
+# --- Generic metrics ingest for S2+ (runs table) ---
+
+data "archive_file" "runs_ingest_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../functions/ingest_runs"
+  output_path = "${path.module}/.tf-build/ingest-runs.zip"
+}
+
+resource "google_storage_bucket_object" "runs_ingest_object" {
+  name   = "ingest-runs-${data.archive_file.runs_ingest_zip.output_md5}.zip"
+  bucket = google_storage_bucket.src.name
+  source = data.archive_file.runs_ingest_zip.output_path
+
+  depends_on = [
+    google_storage_bucket_iam_member.src_uploader_admin,
+    google_storage_bucket_iam_member.src_uploader_view,
+  ]
+}
+
+resource "google_cloudfunctions2_function" "runs_ingest" {
+  name     = "scenario-runs-ingest"
+  location = var.region
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "ingest_runs" # entrypoint στο functions/ingest_runs/main.py
+    source {
+      storage_source {
+        bucket = google_storage_bucket.src.name
+        object = google_storage_bucket_object.runs_ingest_object.name
+      }
+    }
+  }
+
+  service_config {
+    service_account_email = google_service_account.cf_ingest.email
+    max_instance_count    = 1
+    available_memory      = "256M"
+    ingress_settings      = "ALLOW_ALL"
+    environment_variables = {
+      BQ_DATASET = google_bigquery_dataset.metrics.dataset_id
+      BQ_TABLE   = google_bigquery_table.runs.table_id
+    }
+  }
+
+  depends_on = [
+    google_service_account.cf_ingest,
+    google_bigquery_dataset_iam_member.cf_ingest_bq_writer,
+    google_project_iam_member.cf_can_deploy_run,
+  ]
+}
+
+resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" {
+  count              = var.cf_ingest_public ? 0 : 1
+  project            = var.project_id
+  location           = var.region
+  cloud_function     = google_cloudfunctions2_function.runs_ingest.name
+  role               = "roles/cloudfunctions.invoker"
+  member             = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_public" {
+  count              = var.cf_ingest_public ? 1 : 0
+  project            = var.project_id
+  location           = var.region
+  cloud_function     = google_cloudfunctions2_function.runs_ingest.name
+  role               = "roles/cloudfunctions.invoker"
+  member             = "allUsers"
+}
+
 ############
 # Outputs
 ############
@@ -482,4 +637,9 @@ output "cloud_run_service_url" {
 output "metrics_function_url" {
   value       = google_cloudfunctions2_function.ingest.service_config[0].uri
   description = "HTTP trigger URL for the ingest function (use ID token if private)."
+}
+
+output "scenario_runs_function_url" {
+  value       = google_cloudfunctions2_function.runs_ingest.service_config[0].uri
+  description = "HTTP trigger URL for the generic scenario runs ingest function."
 }
