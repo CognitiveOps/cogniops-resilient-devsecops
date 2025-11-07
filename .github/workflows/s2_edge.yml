@@ -161,7 +161,7 @@ jobs:
               "edge_device": "gh-runner"
             }
           }
-EOF
+          EOF
 
           # 2) Event: s2_ttd_edge (overall S2 pipeline start -> edge healthy)
           curl -sS -X POST "$METRICS_INGEST_URL" \
@@ -184,7 +184,7 @@ EOF
               "edge_device": "gh-runner"
             }
           }
-EOF
+          EOF
 
       # ------------------------------------------
       # 6) Upload S2 artifacts (manifest, checksum)
