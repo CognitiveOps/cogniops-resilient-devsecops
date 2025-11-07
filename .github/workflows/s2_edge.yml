@@ -12,6 +12,9 @@ on:
       - ".github/workflows/s2_edge.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read       
+  id-token: write      # required for OIDC
 jobs:
   s2:
     runs-on: ubuntu-latest
