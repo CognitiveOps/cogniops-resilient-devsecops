@@ -100,6 +100,86 @@ cogniops-resilient-devsecops/
 
 ---
 
+## 🧩 Metrics Collected
+
+| Category | Metric | Description |
+|-----------|---------|-------------|
+| Operational | **TTD**, **CFR**, **DF** | Time-to-Deploy, Change Failure Rate, Deployment Frequency |
+| Resilience | **MTTD**, **MTTR** | Mean Time to Detect / Recover failures |
+| Security | **TTV**, **VSR**, **FDR** | PQC verification time & success rates |
+| Explainability | **AL**, **ACR** | Approval Latency & Audit Completeness Rate |
+
+---
+
+## 🚀 S1 – Hybrid Baseline (GitHub Actions + GCP)
+
+### 🎯 Objective
+Establish a fully automated CI/CD baseline with real **deploy** to Cloud Run and quantitative metrics for TTD, DF, CFR.
+
+### 🧱 Pipeline stages
+1. **Build → Test → Push → Deploy → Measure**
+2. Source: GitHub  
+   → Build/Test with Docker + pytest  
+   → Push image to **Artifact Registry**  
+   → Deploy to **Cloud Run (Managed)**  
+   → Poll `/status` for health OK  
+   → Write metrics to CSV (`baseline/metrics/s1_pipeline_runs.csv`)
+
+### 🪣 GCP Resources
+| Resource | Purpose |
+|-----------|----------|
+| **Artifact Registry** | Docker image storage (`apps`) |
+| **Cloud Run** | Service deployment (`baseline-app`) |
+| **BigQuery (optional)** | Ingest metrics for later analysis |
+| **Service Accounts** | `gha-infra`, `gha-app`, `run-exec` with OIDC auth |
+| **Storage Bucket** | Terraform state + function source (`*-fn-src`) |
+
+---
+
+## 🧠 Authentication (GitHub → GCP OIDC)
+
+| Component | Description |
+|------------|--------------|
+| **Workload Identity Federation** | Trust link between GitHub and GCP (issuer `https://token.actions.githubusercontent.com`) |
+| **Infra SA (`gha-infra`)** | Used by Terraform to provision infrastructure |
+| **App SA (`gha-app`)** | Used by CI pipeline to build/push/deploy |
+| **Runtime SA (`run-exec`)** | Used by Cloud Run to execute the app |
+
+No service keys are stored — only short-lived OIDC tokens are used.
+
+---
+
+## 🧪 Running S1
+
+1. Ensure repository variables are set:
+
+GCP_PROJECT_ID, GCP_REGION,
+GCP_WIF_PROVIDER,
+GCP_SA_APP_EMAIL,
+GCP_SA_INFRA_EMAIL,
+METRICS_INGEST_URL (optional),
+TF_STATE_BUCKET (optional)
+
+2. Push any change to `baseline/services/app/`
+3. The **S1 CI/CD Baseline** workflow runs automatically.
+4. Watch under **Actions → S1 CI/CD Baseline**
+5. Check Summary for status + TTD + service URL.
+
+Example summary:
+
+S1 CI (with deploy)
+
+Status: success
+
+Service URL: https://baseline-app-ew.a.run.app
+
+Full TTD (commit→healthy): 132 sec
+
+Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
+
+
+---
+
 ## 🧩 Metrics Collection Pipeline (Per-Scenario)
 
 | Script | Purpose |
@@ -178,6 +258,304 @@ Future scenarios (S2–S5, SS1–SS2) will extend the schema with additional fie
 
 ---
 
+# 🚀 S2 – Pipeline → Edge Deployment (OTA Baseline)
+
+## 🎯 Objective
+
+Extend the baseline CI/CD with a **functional over-the-air (OTA) deployment** path from the cloud pipeline to an **edge device** (simulated on the GitHub runner), and measure:
+
+- **TDL** – pure OTA latency (manifest → pull → service healthy on edge)
+- **DSR** – Deployment Success Rate for OTA activations
+- **TTD_edge (optional)** – overall time from S2 job start → edge healthy
+
+This is a **non-secure baseline**: no PQC or cryptographic validation yet. Security and PQC metrics are introduced later in **S4 / SS2**.
+
+---
+
+## 🧱 Architecture Overview
+
+```text
+GitHub Actions (S2 workflow)
+        │
+        ▼
+Build & Push edge_cv_app image (Artifact Registry)
+        │
+        ▼
+Create OTA manifest (make_ota_manifest.py)
+        │
+        ▼
+Edge Simulation on GitHub Runner
+  └─ edge_pull_and_activate.sh:
+        - read manifest
+        - docker pull & run edge_cv_app
+        - health check on /status
+```
+
+⚙️ Components
+CI/CD
+
+.github/workflows/s2_edge.yml
+
+Builds a multi-arch image for edge_cv_app
+
+Pushes to Artifact Registry
+
+Generates an OTA manifest (JSON) with image, digest, version
+
+Simulates edge activation on the runner via a shell script
+
+Sends metrics events to Cloud Function → BigQuery
+
+Registry
+${AR_LOCATION}-docker.pkg.dev/<PROJECT_ID>/apps/edge-cv-app:<sha>
+
+Edge App (simulated device)
+
+baseline/services/edge_cv_app
+Dockerized computer vision service with /status endpoint.
+
+Edge Activation Script
+
+edge_pull_and_activate.sh
+
+Downloads/pulls the image from Artifact Registry
+
+Starts the container
+
+Polls /status until healthy or timeout
+
+Metrics Ingest (S2+)
+
+Cloud Function Gen2: scenario-runs-ingest
+
+Writes to agent_metrics.runs (BigQuery)
+
+🧮 Metrics Collected (S2 Baseline)
+
+All S2 metrics are stored centrally in BigQuery (agent_metrics.runs), not as primary CSV files.
+
+Category	Metric	Description
+Operational	TDL	OTA latency: manifest → edge service healthy (s2_activate).
+Operational	TTD_edge (opt)	Overall S2 job: workflow start → edge healthy (s2_ttd_edge).
+Reliability	DSR	Deployment Success Rate: success ratio of OTA activations.
+Security	–	No security/PQC metrics in S2 baseline (introduced in S4/SS2).
+Resilience	–	No MTTD/MTTR yet; rollback & faults belong to S3.
+🧩 Workflow Summary (s2_edge.yml)
+Trigger
+
+On changes to baseline/services/edge_cv_app/** or .github/workflows/s2_edge.yml
+
+Optionally after infra workflow completion
+
+Auth to GCP (OIDC)
+
+Uses Workload Identity Federation with:
+
+GCP_WIF_PROVIDER
+
+GCP_SA_APP_EMAIL
+
+Build & Push Edge Image
+
+Configure Docker for Artifact Registry:
+
+${AR_LOCATION}-docker.pkg.dev
+
+
+Build multi-arch:
+
+docker buildx build --platform linux/amd64,linux/arm64
+
+
+Tag:
+
+${AR_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/apps/edge-cv-app:${GITHUB_SHA}
+
+
+Push multi-arch image and extract digest.
+
+Create OTA Manifest
+
+baseline/scripts/make_ota_manifest.py
+
+Inputs: --image, --digest, --version
+
+Output: baseline/metrics/s2/artifacts/ota_<timestamp>.json
+
+Also produces a .sha256 checksum.
+
+Manifest path exported as ota.manifest step output.
+
+Edge Activation (Simulated)
+
+Copies manifest into baseline/services/edge_cv_app/
+
+Executes edge_pull_and_activate.sh
+
+Reads manifest
+
+Pulls the image from Artifact Registry
+
+Runs the container
+
+Polls http://localhost:8080/status
+
+Measurements
+
+T0 → start of OTA activation
+
+T1 → edge service healthy
+
+ota_latency = T1 − T0 (this is TDL)
+
+Exports
+
+t_ota_start, t_edge_end, ota_latency as step outputs.
+
+Metrics → BigQuery (scenario-runs-ingest)
+
+The workflow sends two JSON events via HTTP POST to:
+${{ vars.SCENARIO_RUNS_INGEST_URL }}
+
+a) s2_activate event
+{
+  "run_id": "<RUN_ID>",
+  "scenario_id": "s2",
+  "stage": "s2_activate",
+  "mode": "baseline",
+  "status": "success",
+  "commit_sha": "<COMMIT_SHA>",
+  "t_start": <T_OTA_START>,
+  "t_end": <T_EDGE_END>,
+  "metrics": {
+    "tdl_sec": <TDL>
+  },
+  "labels": {
+    "service": "edge_cv_app",
+    "edge_device": "gh-runner"
+  }
+}
+
+b) s2_ttd_edge event (optional)
+{
+  "run_id": "<RUN_ID>",
+  "scenario_id": "s2",
+  "stage": "s2_ttd_edge",
+  "mode": "baseline",
+  "status": "success",
+  "commit_sha": "<COMMIT_SHA>",
+  "t_start": <T0>,
+  "t_end": <T_EDGE_END>,
+  "metrics": {
+    "ttd_edge_source": "s2_pipeline"
+  },
+  "labels": {
+    "service": "edge_cv_app",
+    "edge_device": "gh-runner"
+  }
+}
+
+🪣 Repository Paths (S2)
+baseline/
+  services/
+    edge_cv_app/
+      Dockerfile
+      app.py
+      edge_pull_and_activate.sh
+      ...              # CV model, requirements, etc.
+  scripts/
+    make_ota_manifest.py
+  metrics/
+    s2/
+      artifacts/
+        ota_*.json
+        ota_*.json.sha256
+.github/
+  workflows/
+    s2_edge.yml        # S2 Edge Deployment workflow
+
+
+Local files under baseline/metrics/s2/ are kept as artifacts for traceability.
+The source of truth for S2 metrics is BigQuery agent_metrics.runs.
+
+📡 BigQuery – S2 Rows (agent_metrics.runs)
+
+Each S2 run generates at least two rows in BigQuery:
+
+scenario_id = 's2', stage = 's2_activate'
+
+scenario_id = 's2', stage = 's2_ttd_edge' (optional)
+
+Key Columns:
+
+Column	Description
+scenario_id	Always "s2" for this scenario.
+stage	"s2_activate" or "s2_ttd_edge".
+status	"success" / "failed".
+t_start, t_end	Epoch seconds converted to TIMESTAMP by ingest function.
+duration_sec	Computed by ingest (t_end - t_start).
+metrics	JSON object (e.g., { "tdl_sec": 25.0 }).
+labels	JSON metadata (e.g., { "service": "edge_cv_app" }).
+🧮 Derived Metrics (S2)
+
+Using rows where scenario_id = 's2':
+
+Metric	Definition	Filter
+TDL	Median/mean duration_sec where stage = 's2_activate' and status = 'success'.	stage='s2_activate'
+TTD_edge (opt)	duration_sec for overall workflow → edge healthy.	stage='s2_ttd_edge'
+DSR	COUNTIF(status='success') / COUNT(*).	stage='s2_activate'
+
+Security metrics (TTV, VSR, FDR) belong to S4/SS2, not part of S2.
+
+🧪 Running S2
+
+Ensure Infra Applied:
+
+Artifact Registry exists.
+
+Cloud Function scenario-runs-ingest & BigQuery agent_metrics.runs deployed.
+
+Repository variables set:
+
+GCP_PROJECT_ID, GCP_REGION, GCP_REPO_LOCATION
+
+GCP_WIF_PROVIDER, GCP_SA_APP_EMAIL
+
+SCENARIO_RUNS_INGEST_URL
+
+Trigger the Workflow
+
+Commit to baseline/services/edge_cv_app/**
+
+or run manually: Actions → S2 Edge Deployment (OTA) → Run workflow
+
+Monitor
+
+Build & push to Artifact Registry ✅
+
+Edge activation /status healthy ✅
+
+Metrics POSTs to Cloud Function ✅
+
+Query Results
+
+BigQuery Dataset: agent_metrics
+
+Table: runs
+
+Filter: scenario_id = 's2'
+
+📈 Evaluation Purpose
+Aspect	Baseline S2 (no agent)	Future S2′ (with agent)
+Update Logic	Static OTA pipeline	Agent-driven OTA orchestration
+Security Layer	None (no crypto/PQC)	PQC-aware OTA (S4)
+Fault Handling	Manual recovery (S3 covers this)	Autonomous mitigation
+Metrics	TDL, DSR, optional TTD_edge	Same + reasoning metrics
+
+S2 establishes the pure operational baseline for cloud-to-edge OTA delivery, providing a quantitative benchmark before introducing the cognitive agent’s adaptive reasoning and resilience capabilities.
+
+---
+
 ## 📈 Timeline
 
 | Month | Focus | Deliverable |
@@ -191,7 +569,6 @@ Future scenarios (S2–S5, SS1–SS2) will extend the schema with additional fie
 ---
 
 ## 🧠 Next Steps
-- **S2:** Edge deployment + OTA simulation  
 - **S3:** Rollback & hotfix resilience  
 - **S4:** Security & PQC validation tests  
 - **S5:** Explainability / Human-in-the-Loop metrics  
