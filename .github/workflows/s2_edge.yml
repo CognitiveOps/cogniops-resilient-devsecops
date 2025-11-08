@@ -108,19 +108,29 @@ jobs:
       - name: Edge activate (sim)
         id: activate
         run: |
+          set -euo pipefail
+
+          MANIFEST_PATH="${{ steps.ota.outputs.manifest }}"
+          MANIFEST_FILE="$(basename "$MANIFEST_PATH")"
+
+          # Αντέγραψε το manifest εκεί που περιμένει το script
+          cp "$MANIFEST_PATH" baseline/services/edge_cv_app/
+
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+
+          cd baseline/services/edge_cv_app
 
           # T0 = start of OTA activation (for TDL)
           T0=$(date +%s)
-          bash baseline/services/edge_cv_app/edge_pull_and_activate.sh \
-            "${{ steps.ota.outputs.manifest }}" \
+          ./edge_pull_and_activate.sh \
+            "$MANIFEST_FILE" \
             "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
-          # T1 = edge healthy (or script exit)
+          # T1 = edge healthy (ή script exit)
           T1=$(date +%s)
 
           # pure OTA latency (TDL)
           echo "ota_latency=$((T1 - T0))" >> $GITHUB_OUTPUT
-          # store start/end for later metrics ingest
+          # store start/end για τα metrics
           echo "t_ota_start=$T0" >> $GITHUB_OUTPUT
           echo "t_edge_end=$T1" >> $GITHUB_OUTPUT
 
