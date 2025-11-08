@@ -58,7 +58,11 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure docker to Artifact Registry
-        run: gcloud auth configure-docker ${{ env.AR_LOCATION  }}-docker.pkg.dev -q
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          echo "Configuring Docker for AR host: $AR_HOST"
+          gcloud auth configure-docker "$AR_HOST" -q
 
       # ------------------------------------------
       # 2) Buildx multi-arch image
@@ -69,22 +73,57 @@ jobs:
       - name: Compute image refs
         id: refs
         run: |
-          echo "ar_repo=${{ env.AR_LOCATION}}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
-          echo "tag=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          echo "Using AR_LOCATION=${AR_LOCATION}"
+          echo "Using GCP_PROJECT=${GCP_PROJECT}"
+          echo "Using AR_REPO=${AR_REPO}"
+          echo "Using IMAGE_NAME=${IMAGE_NAME}"
+
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          IMAGE_TAG="${GITHUB_SHA}"
+
+          echo "Full image repo: $IMAGE_REPO"
+          echo "Tag: $IMAGE_TAG"
+
+          echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build & Push multi-arch to AR
         id: buildpush
         run: |
+          set -euo pipefail
+
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
+          echo "Building image: $IMG"
+
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             -t "$IMG" \
             --push baseline/services/edge_cv_app
 
-          # extract digest of the pushed manifest list (multi-arch)
-          DIGEST=$(docker buildx imagetools inspect "$IMG" | awk '/Digest: sha256/ {print $2; exit}')
-          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-          echo "image=$IMG" >> $GITHUB_OUTPUT
+          echo "Inspecting manifest index for $IMG"
+
+          # Χρειαζόμαστε jq για να διαβάσουμε το JSON
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y jq >/dev/null
+
+          # Παίρνουμε το JSON του .Manifest και εξάγουμε το digest του index
+          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
+          echo "Manifest JSON:"
+          echo "$RAW_MANIFEST" | jq '.'
+
+          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          echo "Resolved digest: ${DIGEST:-<empty>}"
+
+          if [ -z "$DIGEST" ]; then
+            echo "ERROR: Failed to resolve image digest for $IMG"
+            exit 1
+          fi
+
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------
       # 3) Create OTA manifest (no security layer yet)
@@ -113,7 +152,6 @@ jobs:
           MANIFEST_PATH="${{ steps.ota.outputs.manifest }}"
           MANIFEST_FILE="$(basename "$MANIFEST_PATH")"
 
-          # Αντέγραψε το manifest εκεί που περιμένει το script
           cp "$MANIFEST_PATH" baseline/services/edge_cv_app/
 
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh

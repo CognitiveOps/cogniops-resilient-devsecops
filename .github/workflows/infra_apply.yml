@@ -14,6 +14,7 @@ on:
       - "infra/**"
       - ".github/workflows/infra_apply.yml"
       - "functions/ingest/**"
+      - "functions/ingest_runs/**"   # 🔹 trigger επίσης όταν αλλάξει το 2ο endpoint
 
 permissions:
   id-token: write
@@ -171,7 +172,6 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -234,6 +234,7 @@ jobs:
           echo "sa_infra=$(jq -r '.gha_infra_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "metrics_url=$(jq -r '.metrics_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "scenario_runs_url=$(jq -r '.scenario_runs_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT   # 🔹 2ο endpoint
 
       - name: Upsert repository variables
         uses: actions/github-script@v7
@@ -250,7 +251,8 @@ jobs:
               GCP_WIF_PROVIDER:      '${{ steps.tfout.outputs.wif_provider }}',
               GCP_SA_INFRA_EMAIL:    '${{ steps.tfout.outputs.sa_infra }}',
               GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',
-              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.metrics_url }}'
+              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.metrics_url }}',
+              SCENARIO_RUNS_INGEST_URL: '${{ steps.tfout.outputs.scenario_runs_url }}'   // 🔹 νέο variable
             };
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
@@ -276,8 +278,9 @@ jobs:
         run: |
           {
             echo "### Terraform Outputs → Repo Variables"
-            echo "- GCP_WIF_PROVIDER   = ${{ steps.tfout.outputs.wif_provider }}";
-            echo "- GCP_SA_INFRA_EMAIL = ${{ steps.tfout.outputs.sa_infra }}";
-            echo "- GCP_SA_APP_EMAIL   = ${{ steps.tfout.outputs.sa_app }}";
-            echo "- METRICS_INGEST_URL = ${{ steps.tfout.outputs.metrics_url }}";
+            echo "- GCP_WIF_PROVIDER        = ${{ steps.tfout.outputs.wif_provider }}";
+            echo "- GCP_SA_INFRA_EMAIL      = ${{ steps.tfout.outputs.sa_infra }}";
+            echo "- GCP_SA_APP_EMAIL        = ${{ steps.tfout.outputs.sa_app }}";
+            echo "- METRICS_INGEST_URL      = ${{ steps.tfout.outputs.metrics_url }}";
+            echo "- SCENARIO_RUNS_INGEST_URL = ${{ steps.tfout.outputs.scenario_runs_url }}";
           } >> $GITHUB_STEP_SUMMARY
