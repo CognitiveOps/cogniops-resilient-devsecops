@@ -1,24 +1,28 @@
 name: S2 Edge Deployment (OTA)
 
 on:
-  # Run S2 automatically after infra workflow completes
+  # 1) Τρέχει όταν ολοκληρώνεται το Terraform infra
   workflow_run:
     workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
-     # Run automatically on app code changes (if infra is already up)
+
+  # 2) Τρέχει όταν αλλάζει ο edge CV κώδικας ή το ίδιο το workflow
   push:
     paths:
       - "baseline/services/edge_cv_app/**"
       - ".github/workflows/s2_edge.yml"
+
+  # 3) Manual run από Actions UI
   workflow_dispatch:
 
 permissions:
-  contents: read       
-  id-token: write      # required for OIDC
+  contents: read
+  id-token: write   # απαραίτητο για WIF → GCP
 
 concurrency:
-  group: s1-baseline-${{ github.ref }}
+  group: s2-baseline-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   s2:
     runs-on: ubuntu-latest
@@ -26,27 +30,27 @@ jobs:
     env:
       SCENARIO: s2
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      # Change these for your GCP project/region
+      # από repo variables (γράφονται από infra_apply)
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_REGION:  ${{ vars.GCP_REGION }}
       AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
-      AR_REPO: apps              # Artifact Registry repo name
-      IMAGE_NAME: edge-cv-app
-      # URL of the generic metrics ingest CF (scenario-runs-ingest)
+      AR_REPO:     apps              # Artifact Registry repo name
+      IMAGE_NAME:  edge-cv-app
+      # URL του generic ingest CF (scenario-runs-ingest)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
 
     steps:
       - uses: actions/checkout@v4
 
       # ------------------------------------------
-      # 0) Start overall S2 timer (for TTD_edge)
+      # 0) Start overall S2 timer (για TTD_edge)
       # ------------------------------------------
       - name: Start timer
         id: t0
-        run: echo "ts=$(date +%s)" >> $GITHUB_OUTPUT
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------
-      # 1) GCP OIDC AUTH (no static secrets)
+      # 1) GCP OIDC AUTH (WIF, χωρίς static secrets)
       # ------------------------------------------
       - uses: google-github-actions/auth@v2
         with:
@@ -105,11 +109,10 @@ jobs:
 
           echo "Inspecting manifest index for $IMG"
 
-          # Χρειαζόμαστε jq για να διαβάσουμε το JSON
           sudo apt-get update -y >/dev/null
           sudo apt-get install -y jq >/dev/null
 
-          # Παίρνουμε το JSON του .Manifest και εξάγουμε το digest του index
+          # Παίρνουμε το JSON του manifest index
           RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
           echo "Manifest JSON:"
           echo "$RAW_MANIFEST" | jq '.'
@@ -123,26 +126,28 @@ jobs:
           fi
 
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG"    >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------
-      # 3) Create OTA manifest (no security layer yet)
+      # 3) Create OTA manifest (χωρίς security/PQC ακόμη)
       # ------------------------------------------
       - name: Create OTA manifest
         id: ota
         run: |
+          set -euo pipefail
+
           mkdir -p baseline/metrics/s2/artifacts
           python baseline/scripts/make_ota_manifest.py \
-            --image "${{ steps.buildpush.outputs.image }}" \
+            --image  "${{ steps.buildpush.outputs.image }}" \
             --digest "${{ steps.buildpush.outputs.digest }}" \
             --outdir baseline/metrics/s2/artifacts \
             --version "${{ steps.refs.outputs.tag }}"
+
           ls -la baseline/metrics/s2/artifacts
-          echo "manifest=$(ls baseline/metrics/s2/artifacts/ota_*.json | tail -n1)" >> $GITHUB_OUTPUT
+          echo "manifest=$(ls baseline/metrics/s2/artifacts/ota_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------
-      # 4) Edge deploy simulation (runner)
-      #    - OTA activation window (TDL)
+      # 4) Edge deploy simulation (runner) – μετράμε TDL
       # ------------------------------------------
       - name: Edge activate (sim)
         id: activate
@@ -152,13 +157,13 @@ jobs:
           MANIFEST_PATH="${{ steps.ota.outputs.manifest }}"
           MANIFEST_FILE="$(basename "$MANIFEST_PATH")"
 
+          # Αντιγράφουμε το manifest δίπλα στο script
           cp "$MANIFEST_PATH" baseline/services/edge_cv_app/
 
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
-
           cd baseline/services/edge_cv_app
 
-          # T0 = start of OTA activation (for TDL)
+          # T0 = start of OTA activation (για TDL)
           T0=$(date +%s)
           ./edge_pull_and_activate.sh \
             "$MANIFEST_FILE" \
@@ -167,15 +172,37 @@ jobs:
           T1=$(date +%s)
 
           # pure OTA latency (TDL)
-          echo "ota_latency=$((T1 - T0))" >> $GITHUB_OUTPUT
+          echo "ota_latency=$((T1 - T0))" >> "$GITHUB_OUTPUT"
           # store start/end για τα metrics
-          echo "t_ota_start=$T0" >> $GITHUB_OUTPUT
-          echo "t_edge_end=$T1" >> $GITHUB_OUTPUT
+          echo "t_ota_start=$T0" >> "$GITHUB_OUTPUT"
+          echo "t_edge_end=$T1"  >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------
-      # 5) Send S2 metrics to BigQuery ingest (generic runs table)
+      # 5) Get ID token για το scenario-runs-ingest (IAM protected)
+      #    Χρησιμοποιούμε impersonation του gha-app@... SA
+      # ------------------------------------------
+      - name: Get ID token for scenario-runs-ingest
+        id: idtoken
+        run: |
+          set -euo pipefail
+
+          echo "Getting ID token for ${METRICS_INGEST_URL} using SA: ${{ vars.GCP_SA_APP_EMAIL }}"
+
+          TOKEN=$(gcloud auth print-identity-token \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
+            --audiences="${METRICS_INGEST_URL}")
+
+          if [ -z "${TOKEN}" ]; then
+            echo "Failed to obtain identity token"
+            exit 1
+          fi
+
+          echo "id_token=${TOKEN}" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------
+      # 6) Στέλνουμε S2 metrics στο BigQuery ingest (agent_metrics.runs)
       #    - s2_activate  → TDL (OTA latency)
-      #    - s2_ttd_edge  → overall S2 job (Start → edge healthy)
+      #    - s2_ttd_edge  → συνολικό S2 TTD_edge
       # ------------------------------------------
       - name: Send S2 metrics to BigQuery ingest
         run: |
@@ -191,6 +218,7 @@ jobs:
           T_OTA_START=${{ steps.activate.outputs.t_ota_start }}
           T_EDGE_END=${{ steps.activate.outputs.t_edge_end }}
           TDL=${{ steps.activate.outputs.ota_latency }}
+          ID_TOKEN="${{ steps.idtoken.outputs.id_token }}"
 
           echo "S2 metrics:"
           echo "  RUN_ID=$RUN_ID"
@@ -201,6 +229,7 @@ jobs:
           # 1) Event: s2_activate (TDL = OTA latency)
           curl -sS -X POST "$METRICS_INGEST_URL" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ID_TOKEN" \
             -d @- <<EOF
           {
             "run_id": "$RUN_ID",
@@ -224,6 +253,7 @@ jobs:
           # 2) Event: s2_ttd_edge (overall S2 pipeline start -> edge healthy)
           curl -sS -X POST "$METRICS_INGEST_URL" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ID_TOKEN" \
             -d @- <<EOF
           {
             "run_id": "$RUN_ID",
@@ -245,8 +275,8 @@ jobs:
           EOF
 
       # ------------------------------------------
-      # 6) Upload S2 artifacts (manifest, checksum)
-      #    (optional, for debugging & traceability)
+      # 7) Upload S2 artifacts (manifest, checksum)
+      #    (optionally, for debugging & traceability)
       # ------------------------------------------
       - name: Upload S2 artifacts
         uses: actions/upload-artifact@v4

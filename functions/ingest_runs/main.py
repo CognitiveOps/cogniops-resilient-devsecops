@@ -1,130 +1,145 @@
 import json
 import os
 from datetime import datetime, timezone
+from typing import Any, Dict
 
-import functions_framework
 from google.cloud import bigquery
-
-# Configure BigQuery destination via env vars
-BQ_DATASET = os.getenv("BQ_DATASET", "agent_metrics")
-BQ_TABLE = os.getenv("BQ_TABLE", "runs")
-
-_client = bigquery.Client()
+from flask import Request, make_response
 
 
-def _parse_ts(value):
-    """Accepts epoch seconds (int/str) or ISO8601 string and returns aware datetime."""
-    if value is None:
-        return None
+# These come from Terraform environment variables:
+#   BQ_DATASET = "agent_metrics"
+#   BQ_TABLE   = "runs"
+PROJECT_ID = os.environ.get("GCP_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+BQ_DATASET = os.environ.get("BQ_DATASET", "agent_metrics")
+BQ_TABLE = os.environ.get("BQ_TABLE", "runs")
 
-    # Already datetime?
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
+bq_client = bigquery.Client()
 
-    # Epoch seconds (int / float / digit string)
+
+def _epoch_to_datetime(value: Any) -> datetime:
+    """
+    Converts t_start / t_end fields into timezone-aware datetime objects.
+
+    Accepts:
+      - int / float (epoch seconds)
+      - string representing epoch seconds
+      - string ISO8601 format (e.g. 2025-11-09T10:12:00Z)
+    """
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, tz=timezone.utc)
 
     if isinstance(value, str):
-        v = value.strip()
-        # plain integer seconds
-        if v.isdigit():
-            return datetime.fromtimestamp(int(v), tz=timezone.utc)
-        # ISO 8601 (e.g., 2025-11-07T20:01:05Z)
         try:
-            # normalize trailing Z
-            if v.endswith("Z"):
-                v = v[:-1] + "+00:00"
-            return datetime.fromisoformat(v)
-        except Exception as e:
-            raise ValueError(f"Cannot parse timestamp: {value!r} ({e})")
+            v = float(value)
+            return datetime.fromtimestamp(v, tz=timezone.utc)
+        except ValueError:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except Exception as e:
+                raise ValueError(f"Invalid t_start/t_end string format: {value}") from e
 
-    raise ValueError(f"Unsupported timestamp type: {type(value)}")
+    raise ValueError(f"Unsupported t_start/t_end type: {type(value)}")
 
 
-@functions_framework.http
-def ingest_runs(request):
-    """HTTP endpoint to ingest generic scenario metrics into BigQuery.
+def ingest_runs(request: Request):
+    """
+    HTTP Cloud Function (Gen2) for generic scenario metric ingestion.
 
-    Expected JSON body:
+    Expected JSON payload (from GitHub Actions):
     {
-      "run_id": "12345-1",
+      "run_id": "19198654726-1",
       "scenario_id": "s2",
       "stage": "s2_activate",
       "mode": "baseline",
       "status": "success",
-      "commit_sha": "abc123",
-      "t_start": 1731009600,            # epoch seconds OR ISO8601 string
-      "t_end":   1731009625,
-      "duration_sec": 25.0,            # optional; computed if missing
-      "labels":  { ... },              # optional
-      "metrics": { "tdl_sec": 25.0 }   # required for useful data
+      "commit_sha": "b88ad87720bcbb7c6b470b1f4c4ce621d7312e25",
+      "t_start": 1762636493,
+      "t_end": 1762636510,
+      "metrics": { "tdl_sec": 25 },
+      "labels": { "service": "edge_cv_app", "edge_device": "gh-runner" }
     }
     """
+
     if request.method != "POST":
-        return ("Only POST is allowed", 405)
+        return make_response(("Method not allowed", 405))
 
     try:
         payload = request.get_json(force=True, silent=False)
     except Exception as e:
-        return (f"Invalid JSON: {e}", 400)
+        return make_response((f"Invalid JSON body: {e}", 400))
 
     if not isinstance(payload, dict):
-        return ("JSON body must be an object", 400)
+        return make_response(("Expected JSON object", 400))
 
+    # Required fields based on the schema
     required_fields = [
         "run_id",
         "scenario_id",
         "stage",
-        "mode",
         "status",
         "commit_sha",
         "t_start",
         "t_end",
-        "metrics",
     ]
     missing = [f for f in required_fields if f not in payload]
     if missing:
-        return (f"Missing required fields: {', '.join(missing)}", 400)
+        return make_response((f"Missing required fields: {', '.join(missing)}", 400))
 
+    run_id = str(payload["run_id"])
+    scenario_id = str(payload["scenario_id"])
+    stage = str(payload["stage"])
+    status = str(payload["status"])
+    commit_sha = str(payload["commit_sha"])
+    mode = str(payload.get("mode", "")) or None
+
+    # Convert timestamps
     try:
-        t_start = _parse_ts(payload["t_start"])
-        t_end = _parse_ts(payload["t_end"])
+        t_start_dt = _epoch_to_datetime(payload["t_start"])
+        t_end_dt = _epoch_to_datetime(payload["t_end"])
     except ValueError as e:
-        return (f"Invalid timestamp: {e}", 400)
+        return make_response((f"Invalid t_start/t_end: {e}", 400))
 
-    if t_start is None or t_end is None:
-        return ("t_start and t_end must be non-null", 400)
-
+    # Compute duration if not provided
     duration_sec = payload.get("duration_sec")
     if duration_sec is None:
-        duration_sec = (t_end - t_start).total_seconds()
+        duration_sec = (t_end_dt - t_start_dt).total_seconds()
 
+    # Labels and metrics are flexible JSON fields
     labels = payload.get("labels") or {}
     metrics = payload.get("metrics") or {}
 
-    # Build BQ row
-    row = {
-        "run_id": str(payload["run_id"]),
-        "scenario_id": str(payload["scenario_id"]),
-        "stage": str(payload["stage"]),
-        "mode": str(payload["mode"]),
-        "status": str(payload["status"]),
-        "commit_sha": str(payload["commit_sha"]),
-        "t_start": t_start,
-        "t_end": t_end,
+    if not isinstance(labels, dict):
+        return make_response(("labels must be a JSON object", 400))
+    if not isinstance(metrics, dict):
+        return make_response(("metrics must be a JSON object", 400))
+
+    # Construct BigQuery row
+    row: Dict[str, Any] = {
+        "run_id": run_id,
+        "scenario_id": scenario_id,
+        "stage": stage,
+        "mode": mode,
+        "status": status,
+        "commit_sha": commit_sha,
+        "t_start": t_start_dt.isoformat(),
+        "t_end": t_end_dt.isoformat(),
         "duration_sec": float(duration_sec),
         "labels": labels,
         "metrics": metrics,
-        # ingested_at handled by DEFAULT in table
+        "ingested_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 
-    table_id = f"{_client.project}.{BQ_DATASET}.{BQ_TABLE}"
-    errors = _client.insert_rows_json(table_id, [row])
-    if errors:
-        # errors is a list of error dicts
-        return (f"BigQuery insert errors: {errors}", 500)
+    table_id = f"{PROJECT_ID}.{BQ_DATASET}.{BQ_TABLE}"
 
-    return ("OK", 200)
+    try:
+        errors = bq_client.insert_rows_json(table_id, [row])
+    except Exception as e:
+        # Logged to Cloud Logging for debugging
+        return make_response((f"BigQuery insert failed: {e}", 500))
+
+    if errors:
+        # BigQuery insert can return structured errors (list of dicts)
+        return make_response((f"BigQuery insert errors: {errors}", 500))
+
+    return make_response(("OK", 200))
