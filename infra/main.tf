@@ -65,17 +65,16 @@ resource "google_artifact_registry_repository" "docker" {
 }
 
 #############################
-# BigQuery (dataset + table)
+# BigQuery (dataset + tables)
 #############################
 
-# Dataset that holds all S1 pipeline runs
 resource "google_bigquery_dataset" "metrics" {
   dataset_id                 = "agent_metrics"
   location                   = var.bigquery_location
   delete_contents_on_destroy = false
 }
 
-# One row per GitHub Actions run, matching s1_pipeline_runs.csv
+# S1-only table (CI/CD baseline)
 resource "google_bigquery_table" "s1_runs" {
   dataset_id = google_bigquery_dataset.metrics.dataset_id
   table_id   = "s1_pipeline_runs"
@@ -110,7 +109,7 @@ resource "google_bigquery_table" "s1_runs" {
   ])
 }
 
-# Generic metrics table for S2+ (flexible JSON metrics per scenario/stage)
+# Generic runs table for S2+ (flexible JSON)
 resource "google_bigquery_table" "runs" {
   dataset_id = google_bigquery_dataset.metrics.dataset_id
   table_id   = "runs"
@@ -131,7 +130,7 @@ resource "google_bigquery_table" "runs" {
       name        = "scenario_id"
       type        = "STRING"
       mode        = "REQUIRED"
-      description = "Scenario identifier (s2, s3, s4, s5, etc.)"
+      description = "Scenario identifier (s2, s3, s4, s5, ss1, ss2, etc.)"
     },
     {
       name        = "stage"
@@ -214,7 +213,6 @@ resource "google_service_account" "run_exec" {
   display_name = "Cloud Run runtime SA"
 }
 
-# Runtime SA -> writers
 resource "google_project_iam_member" "run_exec_writers" {
   for_each = toset(["roles/logging.logWriter", "roles/monitoring.metricWriter"])
   project  = var.project_id
@@ -222,7 +220,6 @@ resource "google_project_iam_member" "run_exec_writers" {
   member   = "serviceAccount:${google_service_account.run_exec.email}"
 }
 
-# App CI can view logs (optional but handy for diagnostics in CI)
 resource "google_project_iam_member" "app_logging_viewer" {
   project = var.project_id
   role    = "roles/logging.viewer"
@@ -255,11 +252,9 @@ resource "google_iam_workload_identity_pool_provider" "provider" {
     "attribute.ref"        = "assertion.ref"
   }
 
-  # Bind only this repository; add ref filter if needed
   attribute_condition = "attribute.repository == \"${var.github_repo}\""
 }
 
-# Allow GitHub principal to impersonate the SAs (WIF)
 resource "google_service_account_iam_member" "wif_infra" {
   service_account_id = google_service_account.gha_infra.name
   role               = "roles/iam.workloadIdentityUser"
@@ -275,9 +270,6 @@ resource "google_service_account_iam_member" "wif_app" {
 ########################
 # IAM Roles to Service Accounts
 ########################
-
-# Infra SA (Terraform runner) — has broad admin permissions for bootstrapping.
-# You can later reduce privileges if you split infra responsibilities.
 resource "google_project_iam_member" "infra_roles" {
   for_each = toset([
     "roles/artifactregistry.admin",
@@ -295,7 +287,6 @@ resource "google_project_iam_member" "infra_roles" {
   member  = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-# App CI — minimal roles to build/push images and deploy to Cloud Run.
 resource "google_project_iam_member" "app_roles" {
   for_each = toset([
     "roles/artifactregistry.writer",
@@ -306,14 +297,12 @@ resource "google_project_iam_member" "app_roles" {
   member  = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Cloud Run runtime SA — needs to pull container images from Artifact Registry.
 resource "google_project_iam_member" "run_exec_ar_reader" {
   project = var.project_id
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.run_exec.email}"
 }
 
-# Token minting (for impersonation / ID token generation)
 resource "google_service_account_iam_member" "app_can_mint_tokens" {
   service_account_id = google_service_account.gha_app.name
   role               = "roles/iam.serviceAccountTokenCreator"
@@ -326,7 +315,6 @@ resource "google_service_account_iam_member" "infra_can_mint_tokens" {
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-# Cloud Functions (Gen2) service agent must be able to deploy Cloud Run services.
 resource "google_project_iam_member" "cf_can_deploy_run" {
   project = var.project_id
   role    = "roles/run.developer"
@@ -345,30 +333,24 @@ resource "google_service_account_iam_member" "user_can_mint_tokens" {
   member             = "user:ykoutroum@gmail.com"
 }
 
-# --- ACT-AS bindings (roles/iam.serviceAccountUser) ---
-
-# Allow Infra SA (Terraform runner) to "act as" the Cloud Run runtime SA.
 resource "google_service_account_iam_member" "infra_can_actas_run_exec" {
   service_account_id = google_service_account.run_exec.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-# Allow App CI to "act as" the Cloud Run runtime SA (for deploy actions).
 resource "google_service_account_iam_member" "app_can_actas_run_exec" {
   service_account_id = google_service_account.run_exec.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Allow Infra SA (Terraform runner) to act as the Cloud Function SA (cf-ingest).
 resource "google_service_account_iam_member" "infra_can_actas_cf_ingest" {
   service_account_id = google_service_account.cf_ingest.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-# Optional — if Terraform is executed via a bootstrap SA, allow it too.
 resource "google_service_account_iam_member" "bootstrap_can_actas_cf_ingest" {
   count              = var.bootstrap_sa_email != "" ? 1 : 0
   service_account_id = google_service_account.cf_ingest.name
@@ -376,27 +358,23 @@ resource "google_service_account_iam_member" "bootstrap_can_actas_cf_ingest" {
   member             = "serviceAccount:${var.bootstrap_sa_email}"
 }
 
-# Allow Cloud Functions internal agent to impersonate cf-ingest.
 resource "google_service_account_iam_member" "gcf_admin_can_actas_cf_ingest" {
   service_account_id = google_service_account.cf_ingest.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
 
-# Allow Serverless runtime (Cloud Run’s serverless-robot-prod) to impersonate cf-ingest.
 resource "google_service_account_iam_member" "serverless_can_actas_cf_ingest" {
   service_account_id = google_service_account.cf_ingest.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:service-${data.google_project.current.number}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
-# Allow Infra SA to act as the default Compute Engine SA (for CF update transition)
 resource "google_service_account_iam_member" "infra_can_actas_default_compute" {
   service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}-compute@developer.gserviceaccount.com"
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
 }
-
 
 ########################
 # Cloud Run (v2)
@@ -425,12 +403,10 @@ resource "google_cloud_run_v2_service" "app" {
     }
   }
 
-  # Allow traffic from everywhere (you still control auth via IAM)
   ingress    = "INGRESS_TRAFFIC_ALL"
   depends_on = [google_project_service.services]
 }
 
-# Public access toggle: roles/run.invoker to allUsers
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   count    = var.cloud_run_public ? 1 : 0
   project  = var.project_id
@@ -449,7 +425,6 @@ resource "google_storage_bucket" "src" {
   uniform_bucket_level_access = true
 }
 
-# Bootstrap SA & CI have object access (to upload function zip)
 resource "google_storage_bucket_iam_member" "src_uploader_admin" {
   bucket = google_storage_bucket.src.name
   role   = "roles/storage.objectAdmin"
@@ -468,7 +443,6 @@ resource "google_storage_bucket_iam_member" "src_uploader_view" {
   member = "serviceAccount:${var.bootstrap_sa_email}"
 }
 
-# Builders/readers (CF & Cloud Build)
 resource "google_storage_bucket_iam_member" "src_cb_read" {
   bucket = google_storage_bucket.src.name
   role   = "roles/storage.objectViewer"
@@ -497,6 +471,7 @@ resource "google_storage_bucket_object" "ingest_object" {
     google_storage_bucket_iam_member.src_uploader_view,
   ]
 }
+
 resource "google_cloudfunctions2_function" "ingest" {
   name     = "s1-metrics-ingest"
   location = var.region
@@ -516,7 +491,7 @@ resource "google_cloudfunctions2_function" "ingest" {
     service_account_email = google_service_account.cf_ingest.email
     max_instance_count    = 1
     available_memory      = "256M"
-    ingress_settings      = "ALLOW_ALL" # Public ingress (auth still enforced via IAM)
+    ingress_settings      = "ALLOW_ALL"
   }
 
   depends_on = [
@@ -529,7 +504,6 @@ resource "google_cloudfunctions2_function" "ingest" {
   ]
 }
 
-# CF Gen2 IAM: Invoker (private by default)
 resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_app" {
   count              = var.cf_ingest_public ? 0 : 1
   project            = var.project_id
@@ -539,7 +513,6 @@ resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_app" {
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Optional public toggle for ingest (rare; prefer private)
 resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
   count              = var.cf_ingest_public ? 1 : 0
   project            = var.project_id
@@ -550,7 +523,6 @@ resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
 }
 
 # --- Generic metrics ingest for S2+ (runs table) ---
-
 data "archive_file" "runs_ingest_zip" {
   type        = "zip"
   source_dir  = "${path.module}/../functions/ingest_runs"
@@ -627,16 +599,14 @@ output "gha_infra_sa_email"             { value = google_service_account.gha_inf
 output "gha_app_sa_email"               { value = google_service_account.gha_app.email }
 output "run_exec_sa_email"              { value = google_service_account.run_exec.email }
 
-# Cloud Run service URL (handy for health-checks)
 output "cloud_run_service_url" {
   value       = "https://${google_cloud_run_v2_service.app.name}-${var.region}.a.run.app"
   description = "Public URL of the Cloud Run service (hostname pattern)."
 }
 
-# CF Gen2 correct HTTPS URI (from provider attribute)
 output "metrics_function_url" {
   value       = google_cloudfunctions2_function.ingest.service_config[0].uri
-  description = "HTTP trigger URL for the ingest function (use ID token if private)."
+  description = "HTTP trigger URL for the S1 metrics ingest function."
 }
 
 output "scenario_runs_function_url" {
