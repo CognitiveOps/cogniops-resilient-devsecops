@@ -520,7 +520,6 @@ resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
   role               = "roles/cloudfunctions.invoker"
   member             = "allUsers"
 }
-
 ###############################
 # Cloud Functions Gen2 (generic runs ingest for S2+)
 ###############################
@@ -551,7 +550,7 @@ resource "google_cloudfunctions2_function" "runs_ingest" {
 
   build_config {
     runtime     = "python312"
-    entry_point = "ingest_runs" # main.py entrypoint inside functions/ingest_runs/
+    entry_point = "ingest_runs"
     source {
       storage_source {
         bucket = google_storage_bucket.src.name
@@ -582,9 +581,9 @@ resource "google_cloudfunctions2_function" "runs_ingest" {
   ]
 }
 
-# Private invoker (GitHub Actions SA only)
+# Private invoker (GitHub Actions SA only) – used if scenario_runs_public = false
 resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" {
-  count              = var.cf_ingest_public ? 0 : 1
+  count              = var.scenario_runs_public ? 0 : 1
   project            = var.project_id
   location           = var.region
   cloud_function     = google_cloudfunctions2_function.runs_ingest.name
@@ -592,9 +591,9 @@ resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" 
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Optional public invoker (for baseline testing or open access)
+# Optional public invoker (for S2 baseline – default = true)
 resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_public" {
-  count              = var.cf_ingest_public ? 1 : 0
+  count              = var.scenario_runs_public ? 1 : 0
   project            = var.project_id
   location           = var.region
   cloud_function     = google_cloudfunctions2_function.runs_ingest.name

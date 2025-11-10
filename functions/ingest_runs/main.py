@@ -6,17 +6,21 @@ from typing import Any, Dict
 from google.cloud import bigquery
 from flask import Request, make_response
 
-# BigQuery client uses the Cloud Function's project by default
-bq_client = bigquery.Client()
-
-# Use the client project as the source of truth
-PROJECT_ID = bq_client.project
 
 # These come from Terraform environment variables:
-#   BQ_DATASET = "agent_metrics"
-#   BQ_TABLE   = "runs"
+#   BQ_DATASET  = "agent_metrics"
+#   BQ_TABLE    = "runs"
+#   GCP_PROJECT = "<your-project-id>"
+PROJECT_ID = (
+    os.environ.get("GCP_PROJECT")
+    or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    or os.environ.get("GCLOUD_PROJECT")
+)
+
 BQ_DATASET = os.environ.get("BQ_DATASET", "agent_metrics")
 BQ_TABLE = os.environ.get("BQ_TABLE", "runs")
+
+bq_client = bigquery.Client()
 
 
 def _epoch_to_datetime(value: Any) -> datetime:
@@ -32,10 +36,12 @@ def _epoch_to_datetime(value: Any) -> datetime:
         return datetime.fromtimestamp(value, tz=timezone.utc)
 
     if isinstance(value, str):
+        # Try to parse as epoch seconds
         try:
             v = float(value)
             return datetime.fromtimestamp(v, tz=timezone.utc)
         except ValueError:
+            # Then try ISO8601
             try:
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except Exception as e:
@@ -66,6 +72,10 @@ def ingest_runs(request: Request):
     if request.method != "POST":
         return make_response(("Method not allowed", 405))
 
+    # Basic project check (defensive)
+    if not PROJECT_ID:
+        return make_response(("GCP project ID is not set in environment", 500))
+
     try:
         payload = request.get_json(force=True, silent=False)
     except Exception as e:
@@ -74,7 +84,7 @@ def ingest_runs(request: Request):
     if not isinstance(payload, dict):
         return make_response(("Expected JSON object", 400))
 
-    # Required fields based on the schema
+    # Required fields based on the BigQuery schema
     required_fields = [
         "run_id",
         "scenario_id",
@@ -107,7 +117,7 @@ def ingest_runs(request: Request):
     if duration_sec is None:
         duration_sec = (t_end_dt - t_start_dt).total_seconds()
 
-    # Labels and metrics are flexible JSON fields
+    # Flexible JSON fields
     labels = payload.get("labels") or {}
     metrics = payload.get("metrics") or {}
 
@@ -115,6 +125,10 @@ def ingest_runs(request: Request):
         return make_response(("labels must be a JSON object", 400))
     if not isinstance(metrics, dict):
         return make_response(("metrics must be a JSON object", 400))
+
+    # BigQuery JSON type expects JSON-encoded string values.
+    labels_json = json.dumps(labels) if labels else None
+    metrics_json = json.dumps(metrics) if metrics else None
 
     # Construct BigQuery row
     row: Dict[str, Any] = {
@@ -127,8 +141,8 @@ def ingest_runs(request: Request):
         "t_start": t_start_dt.isoformat(),
         "t_end": t_end_dt.isoformat(),
         "duration_sec": float(duration_sec),
-        "labels": labels,
-        "metrics": metrics,
+        "labels": labels_json,
+        "metrics": metrics_json,
         "ingested_at": datetime.now(tz=timezone.utc).isoformat(),
     }
 
@@ -137,11 +151,11 @@ def ingest_runs(request: Request):
     try:
         errors = bq_client.insert_rows_json(table_id, [row])
     except Exception as e:
-        # Logged to Cloud Logging for debugging
+        # Logged to Cloud Logging
         return make_response((f"BigQuery insert failed: {e}", 500))
 
     if errors:
-        # BigQuery insert can return structured errors (list of dicts)
+        # Also logged as 500 to see the full structured errors
         return make_response((f"BigQuery insert errors: {errors}", 500))
 
     return make_response(("OK", 200))

@@ -56,6 +56,13 @@ variable "cloud_run_public" {
   description = "Public access to Cloud Run service (S1 baseline = true)."
 }
 
+# Whether the generic scenario-runs ingest CF (S2+) is public
+variable "scenario_runs_public" {
+  type        = bool
+  default     = true
+  description = "Whether to make the generic scenario-runs ingest Cloud Function public."
+}
+
 variable "cf_ingest_public" {
   type        = bool
   default     = true
