@@ -1,0 +1,272 @@
+name: S3 Rollback & Hotfix Resilience (edge_cv_app)
+
+on:
+  # Run S3 automatically after infra workflow completes
+  workflow_run:
+    workflows: ["admin - Terraform Apply (GCP infra)"]
+    types: [completed]
+
+  # Run automatically on app code changes (if infra is already up)
+  push:
+    paths:
+      - "baseline/services/edge_cv_app/**"
+      - ".github/workflows/s3_rollback.yml"
+
+  # Manual trigger (for testing)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for OIDC to GCP
+
+concurrency:
+  group: s3-resilience-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s3:
+    runs-on: ubuntu-latest
+
+    env:
+      SCENARIO: s3
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      # Cloud Run service for edge_cv_app
+      CR_SERVICE_NAME: edge-cv-app
+      # Artifact Registry config (same pattern as S2)
+      AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
+      AR_REPO: apps
+      IMAGE_NAME: edge-cv-app
+      # Scenario runs ingest endpoint (Cloud Function Gen2)
+      METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 0) Start S3 overall timer
+      - name: Start S3 timer
+        id: t0
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      # 1) Auth to GCP via WIF and also obtain ID token for metrics ingest
+      - name: Auth to GCP (WIF)
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # 1b) Configure Docker to Artifact Registry
+      - name: Configure docker to Artifact Registry
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          echo "Configuring Docker for AR host: $AR_HOST"
+          gcloud auth configure-docker "$AR_HOST" -q
+
+      # 1c) Build and push edge_cv_app image
+      - name: Build and push edge_cv_app image
+        id: build_image
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          IMG="${IMAGE_REPO}:${GITHUB_SHA}"
+
+          echo "Building image: $IMG"
+          docker build -t "$IMG" baseline/services/edge_cv_app
+          docker push "$IMG"
+
+          echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      # 1d) Deploy healthy edge_cv_app (baseline revision, no FAIL_MODE)
+      - name: Deploy healthy edge_cv_app (baseline)
+        id: deploy_healthy
+        run: |
+          set -euo pipefail
+          SERVICE="${CR_SERVICE_NAME}"
+          IMG="${{ steps.build_image.outputs.image }}"
+
+          echo "Deploying healthy service $SERVICE with image $IMG"
+          gcloud run deploy "$SERVICE" \
+            --image="$IMG" \
+            --region="${GCP_REGION}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account="${{ vars.GCP_SA_APP_EMAIL }}"
+
+          URL=$(gcloud run services describe "$SERVICE" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
+
+          echo "Deployed service URL: $URL"
+          echo "service_url=$URL" >> "$GITHUB_OUTPUT"
+
+      # 2) Inject failure and detect it (MTTD sample)
+      - name: Inject fault and detect failure
+        id: s3fault
+        run: |
+          set -euo pipefail
+
+          SERVICE_URL="${{ steps.deploy_healthy.outputs.service_url }}"
+
+          echo "Using Cloud Run service URL: ${SERVICE_URL}"
+
+          # T_inject = when we start the fault injection
+          T_INJECT=$(date +%s)
+
+          echo "Injecting failure by setting FAIL_MODE=1 on edge_cv_app..."
+          gcloud run services update "${CR_SERVICE_NAME}" \
+            --region="${GCP_REGION}" \
+            --set-env-vars FAIL_MODE=1 \
+            --platform=managed
+
+          echo "Waiting for service to become unhealthy at /status..."
+
+          DETECTED=0
+          while true; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
+            NOW=$(date +%s)
+            echo "[$NOW] /status -> ${HTTP_CODE}"
+
+            if [ "${HTTP_CODE}" != "200" ]; then
+              T_DETECT=${NOW}
+              DETECTED=1
+              echo "Failure detected at ${T_DETECT} (HTTP ${HTTP_CODE})"
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [ "${DETECTED}" -ne 1 ]; then
+            echo "Failure was not detected"
+            exit 1
+          fi
+
+          MTTD=$((T_DETECT - T_INJECT))
+          echo "MTTD sample (sec) = ${MTTD}"
+
+          echo "t_inject=${T_INJECT}" >> "$GITHUB_OUTPUT"
+          echo "t_detect=${T_DETECT}" >> "$GITHUB_OUTPUT"
+          echo "mttd_sample=${MTTD}" >> "$GITHUB_OUTPUT"
+
+      # 3) Recover (rollback) and measure MTTR
+      - name: Rollback and recover service
+        id: s3recover
+        run: |
+          set -euo pipefail
+
+          SERVICE_URL="${{ steps.deploy_healthy.outputs.service_url }}"
+
+          T_DETECT=${{ steps.s3fault.outputs.t_detect }}
+          echo "Starting rollback from detection time: ${T_DETECT}"
+
+          echo "Clearing FAIL_MODE env var on Cloud Run service..."
+          gcloud run services update "${CR_SERVICE_NAME}" \
+            --region="${GCP_REGION}" \
+            --clear-env-vars FAIL_MODE \
+            --platform=managed
+
+          echo "Waiting for service to become healthy (HTTP 200)..."
+
+          while true; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
+            NOW=$(date +%s)
+            echo "[$NOW] /status -> ${HTTP_CODE}"
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              T_RECOVER_END=${NOW}
+              echo "Service recovered at ${T_RECOVER_END}"
+              break
+            fi
+
+            sleep 5
+          done
+
+          MTTR=$((T_RECOVER_END - T_DETECT))
+          echo "MTTR sample (sec) = ${MTTR}"
+
+          echo "t_recover_end=${T_RECOVER_END}" >> "$GITHUB_OUTPUT"
+          echo "mttr_sample=${MTTR}" >> "$GITHUB_OUTPUT"
+
+      # 4) Send S3 metrics to BigQuery ingest (runs table)
+      - name: Send S3 metrics to BigQuery ingest
+        run: |
+          set -euo pipefail
+
+          RUN_ID="${{ env.RUN_ID }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SCENARIO_ID="${{ env.SCENARIO }}"
+          MODE="baseline"
+          STATUS="success"
+          ID_TOKEN="${{ steps.gcp-auth.outputs.id_token }}"
+
+          T0=${{ steps.t0.outputs.ts }}
+          T_INJECT=${{ steps.s3fault.outputs.t_inject }}
+          T_DETECT=${{ steps.s3fault.outputs.t_detect }}
+          T_RECOVER_END=${{ steps.s3recover.outputs.t_recover_end }}
+          MTTD=${{ steps.s3fault.outputs.mttd_sample }}
+          MTTR=${{ steps.s3recover.outputs.mttr_sample }}
+
+          echo "S3 metrics:"
+          echo "  RUN_ID=${RUN_ID}"
+          echo "  COMMIT=${COMMIT_SHA}"
+          echo "  MTTD=${MTTD} sec, MTTR=${MTTR} sec"
+          echo "  T0=${T0}, T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
+
+          # 1) Event: s3_detect (MTTD sample)
+          curl -sS -X POST "${METRICS_INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "${SCENARIO_ID}",
+            "stage": "s3_detect",
+            "mode": "${MODE}",
+            "status": "${STATUS}",
+            "commit_sha": "${COMMIT_SHA}",
+            "t_start": ${T_INJECT},
+            "t_end": ${T_DETECT},
+            "metrics": {
+              "mttd_sec": ${MTTD}
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "env": "cloud-run"
+            }
+          }
+          EOF
+
+          # 2) Event: s3_recover (MTTR sample)
+          curl -sS -X POST "${METRICS_INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "${SCENARIO_ID}",
+            "stage": "s3_recover",
+            "mode": "${MODE}",
+            "status": "${STATUS}",
+            "commit_sha": "${COMMIT_SHA}",
+            "t_start": ${T_DETECT},
+            "t_end": ${T_RECOVER_END},
+            "metrics": {
+              "mttr_sec": ${MTTR}
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "env": "cloud-run"
+            }
+          }
+          EOF
