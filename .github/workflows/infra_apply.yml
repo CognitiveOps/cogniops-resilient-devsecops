@@ -233,6 +233,7 @@ jobs:
           echo "wif_provider=$(jq -r '.workload_identity_provider_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_infra=$(jq -r '.gha_infra_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "sa_run_exec=$(jq -r '.run_exec_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "metrics_url=$(jq -r '.metrics_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "scenario_runs_url=$(jq -r '.scenario_runs_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
 
@@ -250,7 +251,8 @@ jobs:
               TF_STATE_BUCKET:       process.env.TF_STATE_BUCKET,
               GCP_WIF_PROVIDER:      '${{ steps.tfout.outputs.wif_provider }}',
               GCP_SA_INFRA_EMAIL:    '${{ steps.tfout.outputs.sa_infra }}',
-              GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',
+              GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',              
+              RUN_EXEC_SA_EMAIL:      '${{ steps.tfout.outputs.sa_run_exec }}',
               METRICS_INGEST_URL:    '${{ steps.tfout.outputs.metrics_url }}',
               SCENARIO_RUNS_INGEST_URL: '${{ steps.tfout.outputs.scenario_runs_url }}'
             };

@@ -34,10 +34,10 @@ jobs:
       GCP_REGION: ${{ vars.GCP_REGION }}
       # Cloud Run service for edge_cv_app
       CR_SERVICE_NAME: edge-cv-app
-      # Artifact Registry config (same pattern as S2)
       AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
       AR_REPO: apps
       IMAGE_NAME: edge-cv-app
+      RUN_EXEC_SA_EMAIL: ${{ vars.RUN_EXEC_SA_EMAIL }}
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
 
@@ -49,7 +49,7 @@ jobs:
         id: t0
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # 1) Auth to GCP via WIF and also obtain ID token for metrics ingest
+      # 1) Auth to GCP via WIF + ID token for ingest
       - name: Auth to GCP (WIF)
         id: gcp-auth
         uses: google-github-actions/auth@v2
@@ -58,6 +58,9 @@ jobs:
           service_account: ${{ vars.GCP_SA_APP_EMAIL }}
           create_credentials_file: true
           export_environment_variables: true
+          token_format: id_token
+          id_token_audience: ${{ env.METRICS_INGEST_URL }}
+          id_token_include_email: false
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -87,21 +90,20 @@ jobs:
           echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
-      # 1d) Deploy healthy edge_cv_app (baseline revision, no FAIL_MODE)
-      - name: Deploy healthy edge_cv_app (baseline)
+      # 1d) Deploy healthy edge_cv_app (no FAIL_MODE)
+      - name: Deploy healthy edge_cv_app to Cloud Run
         id: deploy_healthy
         run: |
           set -euo pipefail
           SERVICE="${CR_SERVICE_NAME}"
-          IMG="${{ steps.build_image.outputs.image }}"
+          IMG="${{ env.AR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
 
           echo "Deploying healthy service $SERVICE with image $IMG"
           gcloud run deploy "$SERVICE" \
             --image="$IMG" \
             --region="${GCP_REGION}" \
             --platform=managed \
-            --allow-unauthenticated \
-            --service-account="${{ vars.GCP_SA_APP_EMAIL }}"
+            --allow-unauthenticated
 
           URL=$(gcloud run services describe "$SERVICE" \
             --region="${GCP_REGION}" \
@@ -110,33 +112,44 @@ jobs:
           echo "Deployed service URL: $URL"
           echo "service_url=$URL" >> "$GITHUB_OUTPUT"
 
-      # 2) Inject failure and detect it (MTTD sample)
+      # 2) Inject failure and detect it (MTTD)
       - name: Inject fault and detect failure
         id: s3fault
         run: |
           set -euo pipefail
 
-          SERVICE_URL="${{ steps.deploy_healthy.outputs.service_url }}"
+          # Always read the real URL from Cloud Run (avoids mismatches)
+          SERVICE_URL=$(gcloud run services describe "${CR_SERVICE_NAME}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
 
           echo "Using Cloud Run service URL: ${SERVICE_URL}"
 
-          # T_inject = when we start the fault injection
           T_INJECT=$(date +%s)
 
           echo "Injecting failure by setting FAIL_MODE=1 on edge_cv_app..."
           gcloud run services update "${CR_SERVICE_NAME}" \
             --region="${GCP_REGION}" \
-            --set-env-vars FAIL_MODE=1 \
-            --platform=managed
+            --platform=managed \
+            --set-env-vars FAIL_MODE=1
 
           echo "Waiting for service to become unhealthy at /status..."
 
           DETECTED=0
+          DEADLINE=$((T_INJECT + 300)) # 5 minutes
+
           while true; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
             NOW=$(date +%s)
+
+            if [ "$NOW" -ge "$DEADLINE" ]; then
+              echo "Timeout while waiting for failure; aborting."
+              break
+            fi
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
             echo "[$NOW] /status -> ${HTTP_CODE}"
 
+            # Any non-200 (403/500/000) counts as failure for S3
             if [ "${HTTP_CODE}" != "200" ]; then
               T_DETECT=${NOW}
               DETECTED=1
@@ -165,22 +178,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          SERVICE_URL="${{ steps.deploy_healthy.outputs.service_url }}"
+          SERVICE_URL=$(gcloud run services describe "${CR_SERVICE_NAME}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
 
           T_DETECT=${{ steps.s3fault.outputs.t_detect }}
           echo "Starting rollback from detection time: ${T_DETECT}"
 
-          echo "Clearing FAIL_MODE env var on Cloud Run service..."
+          echo "Clearing FAIL_MODE env var on Cloud Run service (set FAIL_MODE=0)..."
           gcloud run services update "${CR_SERVICE_NAME}" \
             --region="${GCP_REGION}" \
-            --clear-env-vars FAIL_MODE \
-            --platform=managed
+            --platform=managed \
+            --update-env-vars FAIL_MODE=0
 
           echo "Waiting for service to become healthy (HTTP 200)..."
 
+          DEADLINE=$((T_DETECT + 600)) # 10 minutes
+
           while true; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
             NOW=$(date +%s)
+
+            if [ "$NOW" -ge "$DEADLINE" ]; then
+              echo "Timeout while waiting for recovery; aborting."
+              exit 1
+            fi
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
             echo "[$NOW] /status -> ${HTTP_CODE}"
 
             if [ "${HTTP_CODE}" = "200" ]; then
