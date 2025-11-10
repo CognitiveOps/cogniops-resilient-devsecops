@@ -58,6 +58,6 @@ variable "cloud_run_public" {
 
 variable "cf_ingest_public" {
   type        = bool
-  default     = false
+  default     = true
   description = "Whether to make the ingest Cloud Function public (keep false)."
 }

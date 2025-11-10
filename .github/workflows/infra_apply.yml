@@ -14,7 +14,9 @@ on:
       - "infra/**"
       - ".github/workflows/infra_apply.yml"
       - "functions/ingest/**"
-      - "functions/ingest_runs/**"
+      - "functions/ingest_runs/**" 
+
+permissions:
   id-token: write
   contents: write
   actions: write
