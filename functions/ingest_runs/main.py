@@ -6,15 +6,17 @@ from typing import Any, Dict
 from google.cloud import bigquery
 from flask import Request, make_response
 
+# BigQuery client uses the Cloud Function's project by default
+bq_client = bigquery.Client()
+
+# Use the client project as the source of truth
+PROJECT_ID = bq_client.project
 
 # These come from Terraform environment variables:
 #   BQ_DATASET = "agent_metrics"
 #   BQ_TABLE   = "runs"
-PROJECT_ID = os.environ.get("GCP_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
 BQ_DATASET = os.environ.get("BQ_DATASET", "agent_metrics")
 BQ_TABLE = os.environ.get("BQ_TABLE", "runs")
-
-bq_client = bigquery.Client()
 
 
 def _epoch_to_datetime(value: Any) -> datetime:

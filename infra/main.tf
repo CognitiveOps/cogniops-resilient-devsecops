@@ -67,7 +67,6 @@ resource "google_artifact_registry_repository" "docker" {
 #############################
 # BigQuery (dataset + tables)
 #############################
-
 resource "google_bigquery_dataset" "metrics" {
   dataset_id                 = "agent_metrics"
   location                   = var.bigquery_location
@@ -417,7 +416,7 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
 }
 
 ###############################
-# Cloud Functions Gen2 (ingest)
+# Cloud Functions Gen2 (S1 ingest)
 ###############################
 resource "google_storage_bucket" "src" {
   name                        = "${var.project_id}-fn-src"
@@ -522,13 +521,18 @@ resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
   member             = "allUsers"
 }
 
-# --- Generic metrics ingest for S2+ (runs table) ---
+###############################
+# Cloud Functions Gen2 (generic runs ingest for S2+)
+###############################
+
+# Package the ingest_runs function code into a zip
 data "archive_file" "runs_ingest_zip" {
   type        = "zip"
   source_dir  = "${path.module}/../functions/ingest_runs"
   output_path = "${path.module}/.tf-build/ingest-runs.zip"
 }
 
+# Upload the packaged zip to the source bucket
 resource "google_storage_bucket_object" "runs_ingest_object" {
   name   = "ingest-runs-${data.archive_file.runs_ingest_zip.output_md5}.zip"
   bucket = google_storage_bucket.src.name
@@ -540,13 +544,14 @@ resource "google_storage_bucket_object" "runs_ingest_object" {
   ]
 }
 
+# Deploy the Cloud Function Gen2 for S2+ metrics ingestion
 resource "google_cloudfunctions2_function" "runs_ingest" {
   name     = "scenario-runs-ingest"
   location = var.region
 
   build_config {
     runtime     = "python312"
-    entry_point = "ingest_runs" # entrypoint στο functions/ingest_runs/main.py
+    entry_point = "ingest_runs" # main.py entrypoint inside functions/ingest_runs/
     source {
       storage_source {
         bucket = google_storage_bucket.src.name
@@ -559,20 +564,25 @@ resource "google_cloudfunctions2_function" "runs_ingest" {
     service_account_email = google_service_account.cf_ingest.email
     max_instance_count    = 1
     available_memory      = "256M"
-    ingress_settings      = "ALLOW_ALL"
+    ingress_settings      = "ALLOW_ALL" # allow external POSTs; IAM still controls access
     environment_variables = {
-      BQ_DATASET = google_bigquery_dataset.metrics.dataset_id
-      BQ_TABLE   = google_bigquery_table.runs.table_id
+      BQ_DATASET  = google_bigquery_dataset.metrics.dataset_id
+      BQ_TABLE    = google_bigquery_table.runs.table_id
+      GCP_PROJECT = var.project_id
     }
   }
 
   depends_on = [
     google_service_account.cf_ingest,
-    google_bigquery_dataset_iam_member.cf_ingest_bq_writer,
+    google_service_account_iam_member.infra_can_actas_cf_ingest,
+    google_service_account_iam_member.gcf_admin_can_actas_cf_ingest,
+    google_service_account_iam_member.serverless_can_actas_cf_ingest,
     google_project_iam_member.cf_can_deploy_run,
+    google_bigquery_dataset_iam_member.cf_ingest_bq_writer,
   ]
 }
 
+# Private invoker (GitHub Actions SA only)
 resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" {
   count              = var.cf_ingest_public ? 0 : 1
   project            = var.project_id
@@ -582,6 +592,7 @@ resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" 
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
+# Optional public invoker (for baseline testing or open access)
 resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_public" {
   count              = var.cf_ingest_public ? 1 : 0
   project            = var.project_id
@@ -591,13 +602,25 @@ resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_publi
   member             = "allUsers"
 }
 
+
 ############
 # Outputs
 ############
-output "workload_identity_provider_name" { value = google_iam_workload_identity_pool_provider.provider.name }
-output "gha_infra_sa_email"             { value = google_service_account.gha_infra.email }
-output "gha_app_sa_email"               { value = google_service_account.gha_app.email }
-output "run_exec_sa_email"              { value = google_service_account.run_exec.email }
+output "workload_identity_provider_name" {
+  value = google_iam_workload_identity_pool_provider.provider.name
+}
+
+output "gha_infra_sa_email" {
+  value = google_service_account.gha_infra.email
+}
+
+output "gha_app_sa_email" {
+  value = google_service_account.gha_app.email
+}
+
+output "run_exec_sa_email" {
+  value = google_service_account.run_exec.email
+}
 
 output "cloud_run_service_url" {
   value       = "https://${google_cloud_run_v2_service.app.name}-${var.region}.a.run.app"
