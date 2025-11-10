@@ -597,12 +597,214 @@ Filter: `scenario_id = 's2'`
 
 ---
 
+````markdown
+## 🚧 S3 – Rollback & Hotfix Resilience (`edge_cv_app`)
+
+### 🎯 Objective
+
+Use the same edge workload (`edge_cv_app`) to evaluate **resilience**:
+
+- Inject a **faulty version** of `edge_cv_app` that passes basic CI tests but fails under edge conditions.
+- Let the **edge** detect the fault via health/inference checks.
+- Roll back to the **last-known-good** version.
+- Measure:
+  - **MTTD** – time from faulted deployment to detection on the edge  
+  - **MTTR** – time from detection to full recovery (previous version healthy)
+
+This reflects realistic issues **not caught by CI**, that only appear under edge load or for specific inputs.
+
+---
+
+### 🧱 Architecture Overview (S3)
+
+```text
+GitHub Actions (S3 workflow: s3_rollback.yml)
+        │
+        ▼
+Build & push "faulty" edge_cv_app image (Artifact Registry)
+        │
+        ▼
+Create OTA manifest for faulty version
+        │
+        ▼
+Edge pulls & activates faulty manifest (edge_pull_and_activate.sh)
+        │
+        ▼
+Fault Injection & Detection on Edge
+  └─ s3_fault_probe.py / test_infer.py:
+        - send inference requests to /infer
+        - detect failures (HTTP 5xx, invalid payloads, high latency)
+        - record t_detect
+        │
+        ▼
+Rollback
+  └─ edge_rollback.sh:
+        - redeploy last-known-good image (stored OTA manifest)
+        - wait for /status healthy
+        - record t_recover
+        │
+        ▼
+Metrics → Cloud Function (scenario-runs-ingest) → BigQuery agent_metrics.runs
+````
+
+---
+
+### 💻 Workload: `edge_cv_app`
+
+Edge app (already used in S2):
+
+* `GET /status` – health endpoint
+* `POST /infer` – OpenCV Haar-cascade face detection endpoint
+
+Faults can be simulated by, for example:
+
+* Environment variable (e.g. `FAULT_MODE=1`) causing `/infer` to raise errors or sleep.
+* A code branch that misbehaves only for specific payloads (e.g. certain image sizes).
+
+---
+
+### 🧮 Metrics Collected (S3)
+
+S3 uses the same generic table **`agent_metrics.runs`** with **two main stages per run**:
+
+#### 1️⃣ `s3_detect` – fault detection on edge
+
+* `t_start`: moment we start probing the faulty version.
+* `t_end`: moment detection condition is met (e.g. N consecutive failures or timeout).
+* `duration_sec` ≈ **MTTD** for that run.
+* `metrics.mttd_sec` mirrors `duration_sec` (for convenience).
+
+#### 2️⃣ `s3_recover` – rollback / hotfix recovery
+
+* `t_start`: moment rollback is triggered.
+* `t_end`: edge service back to healthy on previous version.
+* `duration_sec` ≈ **MTTR** for that run.
+* `metrics.mttr_sec` mirrors `duration_sec`.
+
+---
+
+### 📡 Example payloads to `scenario-runs-ingest`
+
+```json
+{
+  "run_id": "<RUN_ID>",
+  "scenario_id": "s3",
+  "stage": "s3_detect",
+  "mode": "baseline",
+  "status": "success",
+  "commit_sha": "<FAULTY_COMMIT_SHA>",
+  "t_start": 1762720000,
+  "t_end": 1762720035,
+  "metrics": {
+    "mttd_sec": 35.0
+  },
+  "labels": {
+    "service": "edge_cv_app",
+    "edge_device": "gh-runner",
+    "fault_type": "latent_inference_bug"
+  }
+}
+```
+
+```json
+{
+  "run_id": "<RUN_ID>",
+  "scenario_id": "s3",
+  "stage": "s3_recover",
+  "mode": "baseline",
+  "status": "success",
+  "commit_sha": "<FAULTY_COMMIT_SHA>",
+  "t_start": 1762720035,
+  "t_end": 1762720090,
+  "metrics": {
+    "mttr_sec": 55.0
+  },
+  "labels": {
+    "service": "edge_cv_app",
+    "edge_device": "gh-runner",
+    "rollback_version": "<LAST_KNOWN_GOOD_DIGEST>"
+  }
+}
+```
+
+---
+
+### 🧮 BigQuery – MTTD / MTTR Query (S3)
+
+Example query to extract **per-run** and **summary** resilience metrics:
+
+```sql
+WITH s3_runs AS (
+  SELECT
+    run_id,
+    MAX(
+      IF(stage = 's3_detect' AND status = 'success', duration_sec, NULL)
+    ) AS mttd_sec,
+    MAX(
+      IF(stage = 's3_recover' AND status = 'success', duration_sec, NULL)
+    ) AS mttr_sec
+  FROM `PROJECT_ID.agent_metrics.runs`
+  WHERE
+    scenario_id = 's3'
+    AND status = 'success'
+  GROUP BY
+    run_id
+),
+
+summary AS (
+  SELECT
+    COUNT(*) AS successful_runs,
+    AVG(mttd_sec) AS mttd_avg_sec,
+    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(50)] AS mttd_p50_sec,
+    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(95)] AS mttd_p95_sec,
+    AVG(mttr_sec) AS mttr_avg_sec,
+    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(50)] AS mttr_p50_sec,
+    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(95)] AS mttr_p95_sec
+  FROM s3_runs
+)
+
+-- Final result: per-run metrics + one summary row
+SELECT
+  'per_run' AS row_type,
+  r.run_id,
+  r.mttd_sec,
+  r.mttr_sec,
+  NULL AS successful_runs,
+  NULL AS mttd_avg_sec,
+  NULL AS mttd_p50_sec,
+  NULL AS mttd_p95_sec,
+  NULL AS mttr_avg_sec,
+  NULL AS mttr_p50_sec,
+  NULL AS mttr_p95_sec
+FROM s3_runs r
+
+UNION ALL
+
+SELECT
+  'summary' AS row_type,
+  NULL AS run_id,
+  NULL AS mttd_sec,
+  NULL AS mttr_sec,
+  s.successful_runs,
+  s.mttd_avg_sec,
+  s.mttd_p50_sec,
+  s.mttd_p95_sec,
+  s.mttr_avg_sec,
+  s.mttr_p50_sec,
+  s.mttr_p95_sec
+FROM summary s;
+```
+
+> Replace `PROJECT_ID` with your actual GCP project ID.
+> This yields one row **per S3 run** plus one **summary row** with aggregate MTTD/MTTR.
+
+---
 
 ## 📈 Timeline
 
 | Month | Focus | Deliverable |
 |:--:|--|--|
-| **1** | Baseline & Metrics | S1 CI/CD Pipeline + initial TTD/CFR/DF metrics |
+| **1** | **Full Baseline Implementation (S1–S5, SS1–SS2)** | Implement all baseline scenarios end-to-end: **S1 (CI/CD)**, **S2 (Edge OTA)**, **S3 (Rollback)**, **S4 (Security/PQC)**, **S5 (Explainability)**, plus **SS1/SS2 (Security & Adaptive Mitigation)**. Collect the complete set of metrics — **TTD, CFR, DF, TDL, DSR, MTTD, MTTR, TTV, VSR, FDR, AL, ACR** — and store them centrally in **BigQuery**. Deliver a unified **Baseline Metrics Report** establishing quantitative reference values before introducing the agent. |
 | **2** | Baseline Consolidation | Statistical analysis & report |
 | **3** | Agent Development | Reasoning engine + PQC modules |
 | **4** | Evaluation | Baseline vs Agent quantitative comparison |
@@ -611,7 +813,6 @@ Filter: `scenario_id = 's2'`
 ---
 
 ## 🧠 Next Steps
-- **S3:** Rollback & hotfix resilience  
 - **S4:** Security & PQC validation tests  
 - **S5:** Explainability / Human-in-the-Loop metrics  
 - **SS1:** Policy audit & compliance trace  
