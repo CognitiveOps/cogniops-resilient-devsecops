@@ -1,23 +1,23 @@
 name: S2 Edge Deployment (OTA)
 
 on:
-  # 1) Τρέχει όταν ολοκληρώνεται το Terraform infra
+  # Run S2 automatically after infra workflow completes
   workflow_run:
     workflows: ["admin - Terraform Apply (GCP infra)"]
     types: [completed]
 
-  # 2) Τρέχει όταν αλλάζει ο edge CV κώδικας ή το ίδιο το workflow
+  # Run automatically on app code changes (if infra is already up)
   push:
     paths:
       - "baseline/services/edge_cv_app/**"
       - ".github/workflows/s2_edge.yml"
 
-  # 3) Manual run από Actions UI
+  # Manual trigger (for testing)
   workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write   # απαραίτητο για WIF → GCP
+  id-token: write   # required for OIDC auth to GCP
 
 concurrency:
   group: s2-baseline-${{ github.ref }}
@@ -30,47 +30,44 @@ jobs:
     env:
       SCENARIO: s2
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      # από repo variables (γράφονται από infra_apply)
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
-      GCP_REGION:  ${{ vars.GCP_REGION }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
       AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
-      AR_REPO:     apps              # Artifact Registry repo name
-      IMAGE_NAME:  edge-cv-app
-      # URL του generic ingest CF (scenario-runs-ingest)
+      AR_REPO: apps
+      IMAGE_NAME: edge-cv-app
+      # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
 
     steps:
       - uses: actions/checkout@v4
 
-      # ------------------------------------------
-      # 0) Start overall S2 timer (για TTD_edge)
-      # ------------------------------------------
+      # 0️⃣ Start overall timer (used for TTD_edge)
       - name: Start timer
         id: t0
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------
-      # 1) GCP OIDC AUTH (WIF, χωρίς static secrets)
-      # ------------------------------------------
-      - uses: google-github-actions/auth@v2
+      # 1️⃣ Authenticate to GCP via Workload Identity Federation (OIDC)
+      #    We also ask this step to mint an ID token for the CF audience (Option B).
+      - name: Auth to GCP via WIF
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SA_APP_EMAIL }}
           create_credentials_file: true
           export_environment_variables: true
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure docker to Artifact Registry
+      - name: Configure Docker for Artifact Registry
         run: |
           set -euo pipefail
           AR_HOST="${AR_LOCATION}-docker.pkg.dev"
           echo "Configuring Docker for AR host: $AR_HOST"
           gcloud auth configure-docker "$AR_HOST" -q
 
-      # ------------------------------------------
-      # 2) Buildx multi-arch image
-      # ------------------------------------------
+      # 2️⃣ Build and Push Multi-Arch Image (amd64 + arm64)
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -78,132 +75,70 @@ jobs:
         id: refs
         run: |
           set -euo pipefail
-
-          echo "Using AR_LOCATION=${AR_LOCATION}"
-          echo "Using GCP_PROJECT=${GCP_PROJECT}"
-          echo "Using AR_REPO=${AR_REPO}"
-          echo "Using IMAGE_NAME=${IMAGE_NAME}"
-
           AR_HOST="${AR_LOCATION}-docker.pkg.dev"
           IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
           IMAGE_TAG="${GITHUB_SHA}"
-
-          echo "Full image repo: $IMAGE_REPO"
-          echo "Tag: $IMAGE_TAG"
-
           echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
           echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build & Push multi-arch to AR
+      - name: Build & Push to Artifact Registry
         id: buildpush
         run: |
           set -euo pipefail
-
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
           echo "Building image: $IMG"
-
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            -t "$IMG" \
-            --push baseline/services/edge_cv_app
-
-          echo "Inspecting manifest index for $IMG"
+            -t "$IMG" --push baseline/services/edge_cv_app
 
           sudo apt-get update -y >/dev/null
           sudo apt-get install -y jq >/dev/null
-
-          # Παίρνουμε το JSON του manifest index
           RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
-          echo "Manifest JSON:"
-          echo "$RAW_MANIFEST" | jq '.'
-
           DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
-          echo "Resolved digest: ${DIGEST:-<empty>}"
-
           if [ -z "$DIGEST" ]; then
-            echo "ERROR: Failed to resolve image digest for $IMG"
+            echo "❌ Failed to resolve image digest for $IMG"
             exit 1
           fi
-
+          echo "✅ Resolved digest: $DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "image=$IMG"    >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------
-      # 3) Create OTA manifest (χωρίς security/PQC ακόμη)
-      # ------------------------------------------
+      # 3️⃣ Create OTA manifest (no PQC security layer yet)
       - name: Create OTA manifest
         id: ota
         run: |
           set -euo pipefail
-
           mkdir -p baseline/metrics/s2/artifacts
           python baseline/scripts/make_ota_manifest.py \
-            --image  "${{ steps.buildpush.outputs.image }}" \
+            --image "${{ steps.buildpush.outputs.image }}" \
             --digest "${{ steps.buildpush.outputs.digest }}" \
             --outdir baseline/metrics/s2/artifacts \
             --version "${{ steps.refs.outputs.tag }}"
-
-          ls -la baseline/metrics/s2/artifacts
           echo "manifest=$(ls baseline/metrics/s2/artifacts/ota_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------
-      # 4) Edge deploy simulation (runner) – μετράμε TDL
-      # ------------------------------------------
+      # 4️⃣ Edge OTA activation simulation (measures TDL)
       - name: Edge activate (sim)
         id: activate
         run: |
           set -euo pipefail
-
           MANIFEST_PATH="${{ steps.ota.outputs.manifest }}"
           MANIFEST_FILE="$(basename "$MANIFEST_PATH")"
 
-          # Αντιγράφουμε το manifest δίπλα στο script
           cp "$MANIFEST_PATH" baseline/services/edge_cv_app/
-
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
           cd baseline/services/edge_cv_app
 
-          # T0 = start of OTA activation (για TDL)
           T0=$(date +%s)
           ./edge_pull_and_activate.sh \
             "$MANIFEST_FILE" \
             "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
-          # T1 = edge healthy (ή script exit)
           T1=$(date +%s)
 
-          # pure OTA latency (TDL)
           echo "ota_latency=$((T1 - T0))" >> "$GITHUB_OUTPUT"
-          # store start/end για τα metrics
           echo "t_ota_start=$T0" >> "$GITHUB_OUTPUT"
-          echo "t_edge_end=$T1"  >> "$GITHUB_OUTPUT"
+          echo "t_edge_end=$T1" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------
-      # 5) Get ID token για το scenario-runs-ingest (IAM protected)
-      #    Χρησιμοποιούμε impersonation του gha-app@... SA
-      # ------------------------------------------
-      - name: Get ID token for scenario-runs-ingest
-        id: idtoken
-        run: |
-          set -euo pipefail
-
-          echo "Getting ID token for ${METRICS_INGEST_URL} using SA: ${{ vars.GCP_SA_APP_EMAIL }}"
-
-          TOKEN=$(gcloud auth print-identity-token \
-            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
-            --audiences="${METRICS_INGEST_URL}")
-
-          if [ -z "${TOKEN}" ]; then
-            echo "Failed to obtain identity token"
-            exit 1
-          fi
-
-          echo "id_token=${TOKEN}" >> "$GITHUB_OUTPUT"
-
-      # ------------------------------------------
-      # 6) Στέλνουμε S2 metrics στο BigQuery ingest (agent_metrics.runs)
-      #    - s2_activate  → TDL (OTA latency)
-      #    - s2_ttd_edge  → συνολικό S2 TTD_edge
-      # ------------------------------------------
+      # 5️⃣ Send metrics to Cloud Function (BigQuery ingest) using the ID token from auth@v2
       - name: Send S2 metrics to BigQuery ingest
         run: |
           set -euo pipefail
@@ -213,23 +148,20 @@ jobs:
           SCENARIO_ID="${{ env.SCENARIO }}"
           MODE="baseline"
           STATUS="success"
-
           T0=${{ steps.t0.outputs.ts }}
           T_OTA_START=${{ steps.activate.outputs.t_ota_start }}
           T_EDGE_END=${{ steps.activate.outputs.t_edge_end }}
           TDL=${{ steps.activate.outputs.ota_latency }}
-          ID_TOKEN="${{ steps.idtoken.outputs.id_token }}"
 
-          echo "S2 metrics:"
+          echo "📊 S2 Metrics:"
           echo "  RUN_ID=$RUN_ID"
           echo "  COMMIT=$COMMIT_SHA"
-          echo "  TDL=$TDL sec"
+          echo "  OTA Latency (TDL)=$TDL sec"
           echo "  T0=$T0, T_OTA_START=$T_OTA_START, T_EDGE_END=$T_EDGE_END"
 
           # 1) Event: s2_activate (TDL = OTA latency)
           curl -sS -X POST "$METRICS_INGEST_URL" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $ID_TOKEN" \
             -d @- <<EOF
           {
             "run_id": "$RUN_ID",
@@ -253,7 +185,6 @@ jobs:
           # 2) Event: s2_ttd_edge (overall S2 pipeline start -> edge healthy)
           curl -sS -X POST "$METRICS_INGEST_URL" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $ID_TOKEN" \
             -d @- <<EOF
           {
             "run_id": "$RUN_ID",
@@ -274,10 +205,7 @@ jobs:
           }
           EOF
 
-      # ------------------------------------------
-      # 7) Upload S2 artifacts (manifest, checksum)
-      #    (optionally, for debugging & traceability)
-      # ------------------------------------------
+      # 6️⃣ Upload artifacts (manifest + checksum)
       - name: Upload S2 artifacts
         uses: actions/upload-artifact@v4
         with:
