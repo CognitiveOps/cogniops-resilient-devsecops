@@ -38,76 +38,69 @@ cogniops-resilient-devsecops/
 ├── docs/ # architecture diagrams & thesis documentation
 └── README.md
 
-
 ---
 
 ## 🔹 Evaluation Scenarios (S1–S5 + SS1–SS2)
 
-| ID | Scenario | Purpose |
-|----|-----------|----------|
-| **S1** | Cloud → Pipeline CI/CD Baseline | Measure build–test–push–deploy TTD, CFR, DF metrics via GitHub Actions + GCP. |
-| **S2** | Pipeline → Edge Deployment (Functional OTA Baseline) |
-|        | OTA deployment to simulated edge devices measuring latency (TDL) and deployment success rate (DSR). No security or PQC yet. |
-| **S3** | Rollback & Hotfix Resilience | Fault injection → manual recovery → measure MTTD & MTTR. |
-| **S4** | Security & PQC Validation | Validate update authenticity using NIST PQC algorithms (FIPS 203–205). |
-| **S5** | Explainability & Human-in-the-Loop | Measure approval latency (AL) and audit completeness (ACR). |
-| **SS1** | End-to-End Security Policy Audit | Execute full-pipeline OPA/Kyverno policy enforcement with ISO/NIST trace. |
-| **SS2** | Adaptive Threat Mitigation | Simulate anomaly injection; agent performs autonomous mitigation with PQC trust chain. |
+| ID      | Scenario                                                 | Purpose                                                                                                                                                                     |
+| ------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S1**  | **Cloud → Pipeline CI/CD Baseline**                      | Measure build–test–push–deploy agility and reliability using GitHub Actions + GCP (metrics: TTD, CFR, DF).                                                                  |
+| **S2**  | **Pipeline → Edge Deployment (Functional OTA Baseline)** | Perform OTA deployment to simulated edge devices measuring OTA latency (TDL), end-to-end deploy time (TTD_edge), and deployment success rate (DSR). No security or PQC yet. |
+| **S3**  | **Rollback & Hotfix Resilience**                         | Inject controlled faults and validate manual/hybrid recovery. Measure MTTD & MTTR.                                                                                          |
+| **S4**  | **Security & PQC Validation**                            | Validate update authenticity and PQC signature verification using NIST FIPS 203–205 algorithms.                                                                             |
+| **S5**  | **Explainability & Human-in-the-Loop**                   | Measure human approval latency (AL) and audit completeness rate (ACR).                                                                                                      |
+| **SS1** | **End-to-End Security Policy Audit**                     | Execute full-pipeline OPA/Kyverno policy enforcement and ISO/NIST audit traceability.                                                                                       |
+| **SS2** | **Adaptive Threat Mitigation**                           | Simulate anomaly injection; the agent performs autonomous mitigation with PQC trust chain validation.                                                                       |
 
 ---
 
 ## 🧮 Scenario–Metric Matrix
 
-| Scenario | Operational | Resilience | Security | Explainability |
-|-----------|--------------|-------------|-----------|----------------|
-| **S1** | **TTD**, **CFR**, **DF** | – | – | – |
-| **S2** | **TDL**, **DSR**, **TTD<sub>edge</sub>** | – | – | – |
-| **S3** | – | **MTTD**, **MTTR** | – | – |
-| **S4** | – | – | **TTV**, **VSR**, **FDR** | – |
-| **S5** | – | – | – | **AL**, **ACR** |
-| **SS1** | **CFR**, **DF** | – | **FDR**, **ACR** | **ACR** |
-| **SS2** | – | **MTTD**, **MTTR** | **TTV**, **VSR**, **FDR** | **AL** |
+| Scenario | Operational                    | Resilience         | Security                  | Explainability  |
+| -------- | ------------------------------ | ------------------ | ------------------------- | --------------- |
+| **S1**   | **TTD**, **CFR**, **DF**       | –                  | –                         | –               |
+| **S2**   | **TDL**, **DSR**, **TTD_edge** | –                  | –                         | –               |
+| **S3**   | –                              | **MTTD**, **MTTR** | –                         | –               |
+| **S4**   | –                              | –                  | **TTV**, **VSR**, **FDR** | –               |
+| **S5**   | –                              | –                  | –                         | **AL**, **ACR** |
+| **SS1**  | **CFR**, **DF**                | –                  | **FDR**, **ACR**          | **ACR**         |
+| **SS2**  | –                              | **MTTD**, **MTTR** | **TTV**, **VSR**, **FDR** | **AL**          |
 
 ---
 
 ## 🧩 Metric Definitions
 
-| Category | Metric | Description |
-|-----------|---------|-------------|
-| **Operational** | **TTD** – Time to Deploy | Time from commit to healthy deployment (agility). |
-|  | **CFR** – Change Failure Rate | % of failed deployments over total attempts. |
-|  | **DF** – Deployment Frequency | Successful deployments per unit time (lifetime). |
-| **Resilience** | **MTTD** – Mean Time to Detect | Avg time to detect a fault or anomaly. |
-|  | **MTTR** – Mean Time to Recover | Avg time to restore system functionality. |
-| **Security** | **TTV** – Time to Verify | Time for PQC signature validation. |
-|  | **VSR** – Verification Success Rate | % of successful PQC verifications. |
-|  | **FDR** – Failure Detection Rate | % of tampered artifacts detected. |
-| **Explainability** | **AL** – Approval Latency | Delay in human decision loop. |
-|  | **ACR** – Audit Completeness Rate | % of actions with full explainable logs. |
+| Category           | Metric                                   | Description                                                       |
+| ------------------ | ---------------------------------------- | ----------------------------------------------------------------- |
+| **Operational**    | **TTD – Time to Deploy**                 | Time from commit to healthy deployment (agility indicator).       |
+|                    | **CFR – Change Failure Rate**            | % of failed deployments over total attempts.                      |
+|                    | **DF – Deployment Frequency**            | Successful deployments per unit time.                             |
+|                    | **TDL – Time to Download (OTA Latency)** | Time for OTA update to reach and activate on the edge device.     |
+|                    | **DSR – Deployment Success Rate**        | % of edge deployments completing successfully.                    |
+|                    | **TTD_edge – Edge Time to Deploy**       | End-to-end latency from pipeline start to edge app healthy state. |
+| **Resilience**     | **MTTD – Mean Time to Detect**           | Average time to detect a fault or anomaly.                        |
+|                    | **MTTR – Mean Time to Recover**          | Average time to restore service after a failure.                  |
+| **Security**       | **TTV – Time to Verify**                 | Time required for PQC signature validation (FIPS 203–205).        |
+|                    | **VSR – Verification Success Rate**      | % of valid PQC verifications over total attempts.                 |
+|                    | **FDR – Failure Detection Rate**         | % of tampered or invalid artifacts detected.                      |
+| **Explainability** | **AL – Approval Latency**                | Time between agent recommendation and human approval.             |
+|                    | **ACR – Audit Completeness Rate**        | % of actions with full explainable trace and metadata logs.       |
 
 ---
 
 ## ⚙️ Tech Stack
-**Cloud:** Google Cloud Platform (GCP)  
-**CI/CD:** GitHub Actions + OIDC Workload Identity Federation  
-**IaC:** Terraform (v1.8+) for Artifact Registry, Cloud Run, BigQuery, IAM  
-**Runtime:** Cloud Run (Managed) + Artifact Registry images  
-**Edge:** Docker Compose on Raspberry Pi / Jetson Nano (simulated OTA)  
-**Monitoring:** Prometheus + Grafana (+ Loki for logs)  
-**Security:** Post-Quantum Crypto Validation (FIPS 203–205 – Dilithium, SPHINCS+)  
-**Explainability:** Structured JSON logs + Markdown/PDF XAI reports  
-**Language:** Python 3.11 / FastAPI / pytest
 
----
-
-## 🧩 Metrics Collected
-
-| Category | Metric | Description |
-|-----------|---------|-------------|
-| Operational | **TTD**, **CFR**, **DF** | Time-to-Deploy, Change Failure Rate, Deployment Frequency |
-| Resilience | **MTTD**, **MTTR** | Mean Time to Detect / Recover failures |
-| Security | **TTV**, **VSR**, **FDR** | PQC verification time & success rates |
-| Explainability | **AL**, **ACR** | Approval Latency & Audit Completeness Rate |
+| Layer                     | Tools / Components                                              |
+| ------------------------- | --------------------------------------------------------------- |
+| **Cloud**                 | Google Cloud Platform (GCP)                                     |
+| **CI/CD**                 | GitHub Actions + OIDC Workload Identity Federation              |
+| **IaC**                   | Terraform (v1.8+) – Artifact Registry, Cloud Run, BigQuery, IAM |
+| **Runtime**               | Cloud Run (Managed) + Artifact Registry Images                  |
+| **Edge**                  | Docker Compose (Raspberry Pi / Jetson Nano OTA simulation)      |
+| **Monitoring**            | Prometheus + Grafana (+ Loki for logs)                          |
+| **Security**              | Post-Quantum Crypto (FIPS 203 – 205 : Dilithium, SPHINCS+)      |
+| **Explainability**        | Structured JSON logs + Markdown/PDF Explainability Reports      |
+| **Language / Frameworks** | Python 3.11 / FastAPI / pytest                                  |
 
 ---
 
@@ -252,9 +245,6 @@ It captures operational metrics — **TTD**, **CFR**, and **DF** — directly fr
 | **TTD = 118 s** | Avg commit → healthy deployment. |
 | **CFR = 10 %** | 1 failed run in 10. |
 | **DF = 3.4 /day** | Successful deployments per day. |
-
-🟦 **Note:** Currently only **S1** produces operational telemetry.  
-Future scenarios (S2–S5, SS1–SS2) will extend the schema with additional fields (e.g., `edge_latency_ms`, `pqc_verify_time_ms`, `xai_latency_ms`, `audit_score`) to capture security, resilience, and explainability metrics.
 
 ---
 
@@ -473,34 +463,6 @@ Workflow sends JSON via HTTP POST to `${{ vars.SCENARIO_RUNS_INGEST_URL }}`
   }
 }
 ```
-
----
-
-## 🪣 Repository Paths (S2)
-
-```
-baseline/
-  services/
-    edge_cv_app/
-      Dockerfile
-      app.py
-      edge_pull_and_activate.sh
-      ...              # CV model, requirements, etc.
-  scripts/
-    make_ota_manifest.py
-  metrics/
-    s2/
-      artifacts/
-        ota_*.json
-        ota_*.json.sha256
-.github/
-  workflows/
-    s2_edge.yml        # S2 Edge Deployment workflow
-```
-
-Local files under `baseline/metrics/s2/` are kept as artifacts for traceability.
-The **source of truth** for S2 metrics is **BigQuery** (`agent_metrics.runs`).
-
 ---
 
 ## 📡 BigQuery – S2 Rows (`agent_metrics.runs`)
@@ -597,7 +559,6 @@ Filter: `scenario_id = 's2'`
 
 ---
 
-````markdown
 ## 🚧 S3 – Rollback & Hotfix Resilience (`edge_cv_app`)
 
 ### 🎯 Objective
