@@ -107,7 +107,7 @@ cogniops-resilient-devsecops/
 ## 🚀 S1 – Hybrid Baseline (GitHub Actions + GCP)
 
 ### 🎯 Objective
-Establish a fully automated CI/CD baseline with real **deploy** to Cloud Run and quantitative metrics for TTD, DF, CFR.
+Establish a fully automated CI/CD baseline with real **deploy** to Cloud Run and quantitative metrics for TTD, DF, CFR. The deployed application is a lightweight web server, exposed via HTTP, used for health checking and status polling.
 
 ### 🧱 Pipeline stages
 1. **Build → Test → Push → Deploy → Measure**
@@ -252,13 +252,18 @@ It captures operational metrics — **TTD**, **CFR**, and **DF** — directly fr
 
 ## 🎯 Objective
 
-Extend the baseline CI/CD with a **functional over-the-air (OTA) deployment** path from the cloud pipeline to an **edge device** (simulated on the GitHub runner), and measure:
+Extend the baseline CI/CD with a **functional over-the-air (OTA) deployment** path from the cloud pipeline to an **edge computer-vision web service** (the `edge_cv_app`, simulated on the GitHub runner), and measure:
 
-* **TDL** – pure OTA latency (manifest → pull → service healthy on edge)
-* **DSR** – Deployment Success Rate for OTA activations
-* **TTD_edge (optional)** – overall time from S2 job start → edge healthy
+* **TDL** – pure OTA latency (manifest → pull → `edge_cv_app` healthy on edge via `/status`)
+* **DSR** – Deployment Success Rate for OTA activations of the `edge_cv_app` container
+* **TTD_edge (optional)** – overall time from S2 job start → edge web service healthy
 
-This is a **non-secure baseline**: no PQC or cryptographic validation yet.
+The edge application is a **FastAPI web server** that:
+
+* exposes `/status` for health checks (used by S2 OTA and later S3 resilience), and  
+* exposes `/infer` to run a simple **computer-vision inference** (face detection using OpenCV Haar cascades) on uploaded images.
+
+This is a **non-secure baseline**: no PQC or cryptographic validation yet.  
 Security and PQC metrics are introduced later in **S4 / SS2**.
 
 ---
@@ -695,36 +700,42 @@ S3 uses the same generic table **`agent_metrics.runs`** with **two main stages p
 Example query to extract **per-run** and **summary** resilience metrics:
 
 ```sql
+-- S3 – MTTD / MTTR metrics for edge_cv_app (scenario_id = 's3')
+-- Source of truth: agent_metrics.runs
+
 WITH s3_runs AS (
   SELECT
     run_id,
-    MAX(
-      IF(stage = 's3_detect' AND status = 'success', duration_sec, NULL)
+
+    -- Prefer duration_sec of the stage rows; if missing, fall back to metrics JSON
+    COALESCE(
+      MAX(IF(stage = 's3_detect'  AND status = 'success', duration_sec, NULL)),
+      MAX(CAST(JSON_VALUE(metrics, '$.mttd_sec') AS FLOAT64))
     ) AS mttd_sec,
-    MAX(
-      IF(stage = 's3_recover' AND status = 'success', duration_sec, NULL)
+
+    COALESCE(
+      MAX(IF(stage = 's3_recover' AND status = 'success', duration_sec, NULL)),
+      MAX(CAST(JSON_VALUE(metrics, '$.mttr_sec') AS FLOAT64))
     ) AS mttr_sec
-  FROM `PROJECT_ID.agent_metrics.runs`
-  WHERE
-    scenario_id = 's3'
-    AND status = 'success'
-  GROUP BY
-    run_id
+
+  FROM `cogent-wall-445012-h5.agent_metrics.runs`
+  WHERE scenario_id = 's3'
+  GROUP BY run_id
 ),
 
 summary AS (
   SELECT
-    COUNT(*) AS successful_runs,
-    AVG(mttd_sec) AS mttd_avg_sec,
-    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(50)] AS mttd_p50_sec,
-    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(95)] AS mttd_p95_sec,
-    AVG(mttr_sec) AS mttr_avg_sec,
-    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(50)] AS mttr_p50_sec,
-    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(95)] AS mttr_p95_sec
+    COUNTIF(mttd_sec IS NOT NULL OR mttr_sec IS NOT NULL)                AS successful_runs,
+    AVG(mttd_sec)                                                        AS mttd_avg_sec,
+    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(50)]                          AS mttd_p50_sec,
+    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(95)]                          AS mttd_p95_sec,
+    AVG(mttr_sec)                                                        AS mttr_avg_sec,
+    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(50)]                          AS mttr_p50_sec,
+    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(95)]                          AS mttr_p95_sec
   FROM s3_runs
 )
 
--- Final result: per-run metrics + one summary row
+-- Final output: per-run rows + one summary row
 SELECT
   'per_run' AS row_type,
   r.run_id,

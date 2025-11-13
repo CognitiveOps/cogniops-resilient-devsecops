@@ -15,9 +15,7 @@ terraform {
   required_version = ">= 1.6"
   required_providers {
     google      = { source = "hashicorp/google",      version = "~> 5.37" }
-    google-beta = { source = "hashicorp/google-beta", version = "~> 5.37" }
     archive     = { source = "hashicorp/archive",     version = "~> 2.4" }
-    time        = { source = "hashicorp/time",        version = "~> 0.9" }
   }
 }
 
@@ -26,10 +24,6 @@ provider "google" {
   region  = var.region
 }
 
-provider "google-beta" {
-  project = var.project_id
-  region  = var.region
-}
 
 #############################
 # Enable Required GCP APIs
@@ -212,22 +206,16 @@ resource "google_service_account" "run_exec" {
   display_name = "Cloud Run runtime SA"
 }
 
+resource "google_service_account" "cf_ingest" {
+  account_id   = "cf-ingest"
+  display_name = "Cloud Functions (Gen2) - Metrics Ingest"
+}
+
 resource "google_project_iam_member" "run_exec_writers" {
   for_each = toset(["roles/logging.logWriter", "roles/monitoring.metricWriter"])
   project  = var.project_id
   role     = each.key
   member   = "serviceAccount:${google_service_account.run_exec.email}"
-}
-
-resource "google_project_iam_member" "app_logging_viewer" {
-  project = var.project_id
-  role    = "roles/logging.viewer"
-  member  = "serviceAccount:${google_service_account.gha_app.email}"
-}
-
-resource "google_service_account" "cf_ingest" {
-  account_id   = "cf-ingest"
-  display_name = "Cloud Functions (Gen2) - Metrics Ingest"
 }
 
 ##############################
@@ -326,11 +314,6 @@ resource "google_bigquery_dataset_iam_member" "cf_ingest_bq_writer" {
   member     = "serviceAccount:${google_service_account.cf_ingest.email}"
 }
 
-resource "google_service_account_iam_member" "user_can_mint_tokens" {
-  service_account_id = google_service_account.gha_app.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "user:ykoutroum@gmail.com"
-}
 
 resource "google_service_account_iam_member" "infra_can_actas_run_exec" {
   service_account_id = google_service_account.run_exec.name
@@ -369,14 +352,8 @@ resource "google_service_account_iam_member" "serverless_can_actas_cf_ingest" {
   member             = "serviceAccount:service-${data.google_project.current.number}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
-resource "google_service_account_iam_member" "infra_can_actas_default_compute" {
-  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}-compute@developer.gserviceaccount.com"
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.gha_infra.email}"
-}
-
 ########################
-# Cloud Run (v2)
+# Cloud Run (v2) - baseline-app
 ########################
 resource "google_cloud_run_v2_service" "app" {
   name     = "baseline-app"
@@ -392,7 +369,9 @@ resource "google_cloud_run_v2_service" "app" {
 
     containers {
       image = "us-docker.pkg.dev/cloudrun/container/hello"
-      ports { container_port = 8080 }
+      ports {
+        container_port = 8080
+      }
       resources {
         limits = {
           cpu    = "1"
@@ -406,11 +385,53 @@ resource "google_cloud_run_v2_service" "app" {
   depends_on = [google_project_service.services]
 }
 
-resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "baseline_public_invoker" {
   count    = var.cloud_run_public ? 1 : 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.app.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+########################
+# Cloud Run (v2) - edge-cv-app
+########################
+resource "google_cloud_run_v2_service" "edge_cv_app" {
+  name     = "edge-cv-app"
+  location = var.region
+
+  template {
+    service_account = google_service_account.run_exec.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      ports {
+        container_port = 8080
+      }
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+    }
+  }
+
+  ingress    = "INGRESS_TRAFFIC_ALL"
+  depends_on = [google_project_service.services]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "edge_cv_public_invoker" {
+  count    = var.cloud_run_public ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.edge_cv_app.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
@@ -436,11 +457,11 @@ resource "google_storage_bucket_iam_member" "tf_state_infra_access" {
   member = "serviceAccount:${google_service_account.gha_infra.email}"
 }
 
-resource "google_storage_bucket_iam_member" "src_uploader_view" {
-  bucket = google_storage_bucket.src.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${var.bootstrap_sa_email}"
-}
+# resource "google_storage_bucket_iam_member" "src_uploader_view" {
+#   bucket = google_storage_bucket.src.name
+#   role   = "roles/storage.objectViewer"
+#   member = "serviceAccount:${var.bootstrap_sa_email}"
+# }
 
 resource "google_storage_bucket_iam_member" "src_cb_read" {
   bucket = google_storage_bucket.src.name
@@ -466,8 +487,7 @@ resource "google_storage_bucket_object" "ingest_object" {
   source = data.archive_file.ingest_zip.output_path
 
   depends_on = [
-    google_storage_bucket_iam_member.src_uploader_admin,
-    google_storage_bucket_iam_member.src_uploader_view,
+    google_storage_bucket_iam_member.src_uploader_admin
   ]
 }
 
@@ -538,8 +558,7 @@ resource "google_storage_bucket_object" "runs_ingest_object" {
   source = data.archive_file.runs_ingest_zip.output_path
 
   depends_on = [
-    google_storage_bucket_iam_member.src_uploader_admin,
-    google_storage_bucket_iam_member.src_uploader_view,
+    google_storage_bucket_iam_member.src_uploader_admin
   ]
 }
 
