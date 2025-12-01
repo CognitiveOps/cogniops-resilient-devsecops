@@ -9,10 +9,10 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY app.py /app/app.py
+COPY . /app/
 
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=2s --retries=6 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/status')" || exit 1
 
-CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8080"]
+CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8080"]

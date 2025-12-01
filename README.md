@@ -277,7 +277,7 @@ GitHub Actions (S2 workflow)
 Build & Push edge_cv_app image (Artifact Registry)
         │
         ▼
-Create OTA manifest (make_ota_manifest.py)
+Create OTA manifest (s2_make_ota_manifest.py)
         │
         ▼
 Edge Simulation on GitHub Runner
@@ -381,7 +381,7 @@ Extract digest and store.
 
 ### Create OTA Manifest
 
-Script: `baseline/scripts/make_ota_manifest.py`
+Script: `baseline/scripts/s2_make_ota_manifest.py`
 
 Inputs:
 
@@ -579,6 +579,19 @@ Use the same edge workload (`edge_cv_app`) to evaluate **resilience**:
 
 This reflects realistic issues **not caught by CI**, that only appear under edge load or for specific inputs.
 
+### 🧩 How S3 models stochastic, intermittent, multi-state faults
+
+- **Fault models (A/B):** Bernoulli per-frame events + Poisson bursts/spikes (network, CPU), time-to-full ramp with Bernoulli write errors (disk), Bernoulli missing frames (camera), deterministic + retry cycle (wrong-arch), growing Bernoulli corruption with gradual degradation (weights).  
+- **State-level:** a 3-state Markov stepper (healthy → degraded → failed → recovering) shapes base metrics before fault injection to reflect multi-state reliability.  
+- **Detection (C):** non-200 responses, latency budgets, and metrics thresholds on `/status` (`fps_min`, `detection_rate_min`, `healthy` flag) drive MTTD. MTTR is time to healthy after rollback.
+
+Threshold rationale (per matrix in `.github/workflows/s3_rollback.yml`):
+- `latency_budget_sec` — used for network/CPU faults to catch slow `/status` responses from jitter/spikes (e.g., 2s for net, 3s for CPU).  
+- `fps_min` — tighter for CPU (`15`) to flag throttling; relaxed (`10`) elsewhere to avoid false positives.  
+- `detection_rate_min` — near-zero for camera (`0.001`) to detect black frames; default (`0.01`) for others.  
+- **Calibration:** before faults, the workflow polls the healthy service and derives thresholds from observed noise (p95 latency × 3, p5 fps × 0.7, p5 detection_rate × 0.5). These calibrated values override defaults and are stored as labels in BigQuery.  
+- All other metrics stay identical so baseline vs agent comparisons remain schema-compatible.
+
 ---
 
 ### 🧱 Architecture Overview (S3)
@@ -637,15 +650,17 @@ S3 uses the same generic table **`agent_metrics.runs`** with **two main stages p
 
 * `t_start`: moment we start probing the faulty version.
 * `t_end`: moment detection condition is met (e.g. N consecutive failures or timeout).
-* `duration_sec` ≈ **MTTD** for that run.
-* `metrics.mttd_sec` mirrors `duration_sec` (for convenience).
+* `duration_sec` ≈ **TTD_sample** for that run.
+* `metrics.ttd_sample_sec` mirrors `duration_sec` (per-run sample; mean is computed later in BQ).
+* `metrics.metrics_raw` (optional) carries the `/status` snapshot when detection fired (for XAI/forensics).
 
 #### 2️⃣ `s3_recover` – rollback / hotfix recovery
 
 * `t_start`: moment rollback is triggered.
 * `t_end`: edge service back to healthy on previous version.
-* `duration_sec` ≈ **MTTR** for that run.
-* `metrics.mttr_sec` mirrors `duration_sec`.
+* `duration_sec` ≈ **TTR_sample** for that run.
+* `metrics.ttr_sample_sec` mirrors `duration_sec` (per-run sample; mean is computed later in BQ).
+* `metrics.metrics_raw` (optional) carries the `/status` snapshot when recovery completed.
 
 ---
 
@@ -662,12 +677,25 @@ S3 uses the same generic table **`agent_metrics.runs`** with **two main stages p
   "t_start": 1762720000,
   "t_end": 1762720035,
   "metrics": {
-    "mttd_sec": 35.0
+    "ttd_sample_sec": 35.0,
+    "metrics_raw": {
+      "fps": 8.5,
+      "detection_rate": 0.0,
+      "queue_latency_ms": 120.0,
+      "inference_ms": 60.0,
+      "healthy": false,
+      "state": "failed",
+      "frame_idx": 1234,
+      "ts": 1762720035
+    }
   },
   "labels": {
     "service": "edge_cv_app",
-    "edge_device": "gh-runner",
-    "fault_type": "latent_inference_bug"
+    "env": "cloud-run",
+    "fault_type": "cpu-starvation",
+    "latency_budget_sec": "3",
+    "fps_min": "15",
+    "detection_rate_min": "0.05"
   }
 }
 ```
@@ -683,12 +711,25 @@ S3 uses the same generic table **`agent_metrics.runs`** with **two main stages p
   "t_start": 1762720035,
   "t_end": 1762720090,
   "metrics": {
-    "mttr_sec": 55.0
+    "ttr_sample_sec": 55.0,
+    "metrics_raw": {
+      "fps": 24.0,
+      "detection_rate": 0.82,
+      "queue_latency_ms": 18.0,
+      "inference_ms": 22.0,
+      "healthy": true,
+      "state": "healthy",
+      "frame_idx": 1500,
+      "ts": 1762720090
+    }
   },
   "labels": {
     "service": "edge_cv_app",
-    "edge_device": "gh-runner",
-    "rollback_version": "<LAST_KNOWN_GOOD_DIGEST>"
+    "env": "cloud-run",
+    "fault_type": "cpu-starvation",
+    "latency_budget_sec": "3",
+    "fps_min": "15",
+    "detection_rate_min": "0.05"
   }
 }
 ```
@@ -707,16 +748,16 @@ WITH s3_runs AS (
   SELECT
     run_id,
 
-    -- Prefer duration_sec of the stage rows; if missing, fall back to metrics JSON
+    -- Prefer duration_sec of the stage rows; if missing, fall back to metrics JSON (per-run samples)
     COALESCE(
       MAX(IF(stage = 's3_detect'  AND status = 'success', duration_sec, NULL)),
-      MAX(CAST(JSON_VALUE(metrics, '$.mttd_sec') AS FLOAT64))
-    ) AS mttd_sec,
+      MAX(CAST(JSON_VALUE(metrics, '$.ttd_sample_sec') AS FLOAT64))
+    ) AS ttd_sample_sec,
 
     COALESCE(
       MAX(IF(stage = 's3_recover' AND status = 'success', duration_sec, NULL)),
-      MAX(CAST(JSON_VALUE(metrics, '$.mttr_sec') AS FLOAT64))
-    ) AS mttr_sec
+      MAX(CAST(JSON_VALUE(metrics, '$.ttr_sample_sec') AS FLOAT64))
+    ) AS ttr_sample_sec
 
   FROM `cogent-wall-445012-h5.agent_metrics.runs`
   WHERE scenario_id = 's3'
@@ -725,13 +766,13 @@ WITH s3_runs AS (
 
 summary AS (
   SELECT
-    COUNTIF(mttd_sec IS NOT NULL OR mttr_sec IS NOT NULL)                AS successful_runs,
-    AVG(mttd_sec)                                                        AS mttd_avg_sec,
-    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(50)]                          AS mttd_p50_sec,
-    APPROX_QUANTILES(mttd_sec, 101)[OFFSET(95)]                          AS mttd_p95_sec,
-    AVG(mttr_sec)                                                        AS mttr_avg_sec,
-    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(50)]                          AS mttr_p50_sec,
-    APPROX_QUANTILES(mttr_sec, 101)[OFFSET(95)]                          AS mttr_p95_sec
+    COUNTIF(ttd_sample_sec IS NOT NULL OR ttr_sample_sec IS NOT NULL)     AS successful_runs,
+    AVG(ttd_sample_sec)                                                   AS mttd_avg_sec,
+    APPROX_QUANTILES(ttd_sample_sec, 101)[OFFSET(50)]                     AS mttd_p50_sec,
+    APPROX_QUANTILES(ttd_sample_sec, 101)[OFFSET(95)]                     AS mttd_p95_sec,
+    AVG(ttr_sample_sec)                                                   AS mttr_avg_sec,
+    APPROX_QUANTILES(ttr_sample_sec, 101)[OFFSET(50)]                     AS mttr_p50_sec,
+    APPROX_QUANTILES(ttr_sample_sec, 101)[OFFSET(95)]                     AS mttr_p95_sec
   FROM s3_runs
 )
 
@@ -739,8 +780,8 @@ summary AS (
 SELECT
   'per_run' AS row_type,
   r.run_id,
-  r.mttd_sec,
-  r.mttr_sec,
+  r.ttd_sample_sec,
+  r.ttr_sample_sec,
   NULL AS successful_runs,
   NULL AS mttd_avg_sec,
   NULL AS mttd_p50_sec,
@@ -792,6 +833,12 @@ Modeling layers used for automation and analysis:
 - Event-level: Bernoulli `FAIL_P` for binary intermittent events (frame/healthcheck/write).
 - Time-level: Poisson arrivals (Exponential inter-arrival) for random fault timing.
 - State-level: 3-state Markov chain — Healthy → Degraded → Failed → Recovering (multistate reliability).
+
+Implementation (real edge + twin):
+- `baseline/services/edge_cv_app/metrics.py` — unified `EdgeMetrics` contract returned by `/status`.
+- `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
+- `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
+- `baseline/s3/run_s3_single_scenario.py` + `baseline/s3/detector.py` — polls `/status`, computes MTTD/MTTR, and posts to BigQuery ingest.
 
 ---
 
