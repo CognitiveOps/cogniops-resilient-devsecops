@@ -43,8 +43,13 @@ fi
 # 5) stop old container
 docker rm -f edge_cv_app || true
 
-# 6) run new container
-docker run -d --restart=always --name edge_cv_app -p 8080:8080 "$FINAL_REF"
+# 6) run new container (explicitly force real mode / no faults for S2 baseline)
+docker run -d --restart=always \
+  --name edge_cv_app \
+  -p 8080:8080 \
+  -e MODE=real \
+  -e FAIL_MODE=0 \
+  "$FINAL_REF"
 
 # 7) health probe
 for i in {1..20}; do

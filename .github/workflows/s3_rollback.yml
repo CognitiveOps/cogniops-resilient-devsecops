@@ -25,6 +25,23 @@ concurrency:
 
 jobs:
   s3:
+    name: S3 resilience – ${{ matrix.fault.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        fault:
+          # net: detect on latency or non-200; keep lax fps/detection thresholds
+          - { name: net-unstable, fail_mode: net_unstable, latency_budget_sec: 2, fps_min: 10, detection_rate_min: 0.01 }
+          # disk-full: deterministic error; thresholds unused but kept default
+          - { name: disk-full, fail_mode: disk_full, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          # cpu: detect via fps drop + latency; tighten fps_min
+          - { name: cpu-starvation, fail_mode: cpu_starvation, latency_budget_sec: 3, fps_min: 15, detection_rate_min: 0.05 }
+          # camera: detect via detection_rate ~0
+          - { name: dead-camera, fail_mode: dead_camera, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.001 }
+          # wrong-arch: deterministic non-200
+          - { name: wrong-arch, fail_mode: wrong_arch, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          # corrupt model: deterministic 500 on inference/status
+          - { name: corrupt-weights, fail_mode: corrupt_weights, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
     runs-on: ubuntu-latest
 
     env:
@@ -38,6 +55,12 @@ jobs:
       AR_REPO: apps
       IMAGE_NAME: edge-cv-app
       RUN_EXEC_SA_EMAIL: ${{ vars.RUN_EXEC_SA_EMAIL }}
+      FAULT_NAME: ${{ matrix.fault.name }}
+      FAIL_MODE: ${{ matrix.fault.fail_mode }}
+      LATENCY_BUDGET_SEC: ${{ matrix.fault.latency_budget_sec }}
+      FPS_MIN: ${{ matrix.fault.fps_min }}
+      DETECTION_RATE_MIN: ${{ matrix.fault.detection_rate_min }}
+      MODE: twin
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
 
@@ -99,7 +122,8 @@ jobs:
           gcloud run deploy "$SERVICE" \
             --image="$IMG" \
             --region="${GCP_REGION}" \
-            --platform=managed
+            --platform=managed \
+            --set-env-vars MODE=real,FAIL_MODE=0
 
           URL=$(gcloud run services describe "$SERVICE" \
             --region="${GCP_REGION}" \
@@ -108,8 +132,29 @@ jobs:
           echo "Deployed service URL: $URL"
           echo "service_url=$URL" >> "$GITHUB_OUTPUT"
 
+      # 1e) Calibrate detection thresholds against healthy service
+      - name: Calibrate S3 detection thresholds
+        id: calibrate
+        run: |
+          set -euo pipefail
+          SERVICE_URL=$(gcloud run services describe "${CR_SERVICE_NAME}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
+          export SERVICE_URL
+          # Use healthy baseline to derive budgets; fallback to matrix defaults
+          python baseline/scripts/s3_calibrate_thresholds.py | tee /tmp/calib.txt
+          LAT_BUDGET=$(grep latency_budget_sec /tmp/calib.txt | cut -d= -f2)
+          FPS_MIN=$(grep fps_min /tmp/calib.txt | cut -d= -f2)
+          DR_MIN=$(grep detection_rate_min /tmp/calib.txt | cut -d= -f2)
+          echo "latency_budget_sec=${LAT_BUDGET}" >> "$GITHUB_ENV"
+          echo "fps_min=${FPS_MIN}" >> "$GITHUB_ENV"
+          echo "detection_rate_min=${DR_MIN}" >> "$GITHUB_ENV"
+          echo "cal_latency_budget_sec=${LAT_BUDGET}" >> "$GITHUB_OUTPUT"
+          echo "cal_fps_min=${FPS_MIN}" >> "$GITHUB_OUTPUT"
+          echo "cal_detection_rate_min=${DR_MIN}" >> "$GITHUB_OUTPUT"
+
       # 2) Inject failure and detect it (MTTD)
-      - name: Inject fault and detect failure
+      - name: Inject fault and detect failure (${{ env.FAULT_NAME }})
         id: s3fault
         run: |
           set -euo pipefail
@@ -123,11 +168,11 @@ jobs:
 
           T_INJECT=$(date +%s)
 
-          echo "Injecting failure by setting FAIL_MODE=1 on edge_cv_app..."
+          echo "Injecting failure by setting FAIL_MODE=${FAIL_MODE} on edge_cv_app (fault=${FAULT_NAME})..."
           gcloud run services update "${CR_SERVICE_NAME}" \
             --region="${GCP_REGION}" \
             --platform=managed \
-            --set-env-vars FAIL_MODE=1
+            --set-env-vars MODE=twin,FAIL_MODE="${FAIL_MODE}"
 
           echo "Waiting for service to become unhealthy at /status..."
 
@@ -142,14 +187,36 @@ jobs:
               break
             fi
 
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
-            echo "[$NOW] /status -> ${HTTP_CODE}"
+            HTTP_RESPONSE=$(curl -s -w "\n%{time_total} %{http_code}" "${SERVICE_URL}/status" || echo -e "{}\n10.0 000")
+            BODY=${HTTP_RESPONSE%$'\n'*}
+            read -r TIME_TOTAL HTTP_CODE <<<"${HTTP_RESPONSE##*$'\n'}"
+            echo "[$NOW] /status -> ${HTTP_CODE} (${TIME_TOTAL}s)"
+            export BODY
+
+            IS_SLOW=0
+            if [ -n "${LATENCY_BUDGET_SEC}" ] && awk "BEGIN {exit !(${TIME_TOTAL} > ${LATENCY_BUDGET_SEC})}"; then
+              IS_SLOW=1
+            fi
+
+            METRICS_TRIGGER=0
+            if [ "${HTTP_CODE}" = "200" ]; then
+              # Use helper script instead of inline python for detection thresholds.
+              METRICS_TRIGGER=$(echo "$BODY" | env FPS_MIN="${FPS_MIN}" DETECTION_RATE_MIN="${DETECTION_RATE_MIN}" python baseline/scripts/s3_detect_status.py)
+            fi
 
             # Any non-200 (403/500/000) counts as failure for S3
-            if [ "${HTTP_CODE}" != "200" ]; then
+            if [ "${HTTP_CODE}" != "200" ] || [ "${IS_SLOW}" -eq 1 ] || [ "${METRICS_TRIGGER}" -eq 1 ]; then
               T_DETECT=${NOW}
               DETECTED=1
-              echo "Failure detected at ${T_DETECT} (HTTP ${HTTP_CODE})"
+              DETECT_BODY=$(echo "$BODY" | tr -d '\n')
+              if [ "${HTTP_CODE}" != "200" ]; then
+                echo "Failure detected at ${T_DETECT} (HTTP ${HTTP_CODE})"
+              elif [ "${IS_SLOW}" -eq 1 ]; then
+                echo "Failure detected at ${T_DETECT} due to slow response (${TIME_TOTAL}s > ${LATENCY_BUDGET_SEC}s)"
+              else
+                echo "Failure detected at ${T_DETECT} due to metrics trigger (healthy/fps/detection_rate thresholds: fps_min=${FPS_MIN}, detection_rate_min=${DETECTION_RATE_MIN})"
+              fi
+              echo "detect_metrics_raw=${DETECT_BODY}" >> "$GITHUB_OUTPUT"
               break
             fi
 
@@ -161,12 +228,12 @@ jobs:
             exit 1
           fi
 
-          MTTD=$((T_DETECT - T_INJECT))
-          echo "MTTD sample (sec) = ${MTTD}"
+          TTD_SAMPLE=$((T_DETECT - T_INJECT))
+          echo "TTD sample (sec) = ${TTD_SAMPLE}"
 
           echo "t_inject=${T_INJECT}" >> "$GITHUB_OUTPUT"
           echo "t_detect=${T_DETECT}" >> "$GITHUB_OUTPUT"
-          echo "mttd_sample=${MTTD}" >> "$GITHUB_OUTPUT"
+          echo "ttd_sample=${TTD_SAMPLE}" >> "$GITHUB_OUTPUT"
 
       # 3) Recover (rollback) and measure MTTR
       - name: Rollback and recover service
@@ -185,7 +252,7 @@ jobs:
           gcloud run services update "${CR_SERVICE_NAME}" \
             --region="${GCP_REGION}" \
             --platform=managed \
-            --update-env-vars FAIL_MODE=0
+            --update-env-vars MODE=real,FAIL_MODE=0
 
           echo "Waiting for service to become healthy (HTTP 200)..."
 
@@ -205,17 +272,27 @@ jobs:
             if [ "${HTTP_CODE}" = "200" ]; then
               T_RECOVER_END=${NOW}
               echo "Service recovered at ${T_RECOVER_END}"
+              RECOVER_BODY=$(curl -s "${SERVICE_URL}/status" || echo "{}")
+              echo "recover_metrics_raw=$(echo "$RECOVER_BODY" | tr -d '\n')" >> "$GITHUB_OUTPUT"
               break
             fi
 
             sleep 5
           done
 
-          MTTR=$((T_RECOVER_END - T_DETECT))
-          echo "MTTR sample (sec) = ${MTTR}"
+          TTR_SAMPLE=$((T_RECOVER_END - T_DETECT))
+          echo "TTR sample (sec) = ${TTR_SAMPLE}"
 
           echo "t_recover_end=${T_RECOVER_END}" >> "$GITHUB_OUTPUT"
-          echo "mttr_sample=${MTTR}" >> "$GITHUB_OUTPUT"
+          echo "ttr_sample=${TTR_SAMPLE}" >> "$GITHUB_OUTPUT"
+
+      # 3b) Fetch identity token for ingest
+      - name: Fetch ID token
+        id: metrics-id
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-identity-token)
+          echo "id_token=${TOKEN}" >> "$GITHUB_OUTPUT"
 
       # 4) Send S3 metrics to BigQuery ingest (runs table)
       - name: Send S3 metrics to BigQuery ingest
@@ -228,18 +305,21 @@ jobs:
           MODE="baseline"
           STATUS="success"
           ID_TOKEN="${{ steps.metrics-id.outputs.id_token }}"
+          DETECT_METRICS_RAW='${{ steps.s3fault.outputs.detect_metrics_raw }}'
+          RECOVER_METRICS_RAW='${{ steps.s3recover.outputs.recover_metrics_raw }}'
 
           T0=${{ steps.t0.outputs.ts }}
           T_INJECT=${{ steps.s3fault.outputs.t_inject }}
           T_DETECT=${{ steps.s3fault.outputs.t_detect }}
           T_RECOVER_END=${{ steps.s3recover.outputs.t_recover_end }}
-          MTTD=${{ steps.s3fault.outputs.mttd_sample }}
-          MTTR=${{ steps.s3recover.outputs.mttr_sample }}
+          TTD_SAMPLE=${{ steps.s3fault.outputs.ttd_sample }}
+          TTR_SAMPLE=${{ steps.s3recover.outputs.ttr_sample }}
 
           echo "S3 metrics:"
           echo "  RUN_ID=${RUN_ID}"
           echo "  COMMIT=${COMMIT_SHA}"
-          echo "  MTTD=${MTTD} sec, MTTR=${MTTR} sec"
+          echo "  FAULT=${FAULT_NAME}"
+          echo "  TTD_sample=${TTD_SAMPLE} sec, TTR_sample=${TTR_SAMPLE} sec"
           echo "  T0=${T0}, T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
 
           # 1) Event: s3_detect (MTTD sample)
@@ -257,11 +337,16 @@ jobs:
             "t_start": ${T_INJECT},
             "t_end": ${T_DETECT},
             "metrics": {
-              "mttd_sec": ${MTTD}
+              "ttd_sample_sec": ${TTD_SAMPLE},
+              "metrics_raw": ${DETECT_METRICS_RAW:-"null"}
             },
             "labels": {
               "service": "edge_cv_app",
-              "env": "cloud-run"
+              "env": "cloud-run",
+              "fault_type": "${FAULT_NAME}",
+              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
+              "fps_min": "${FPS_MIN}",
+              "detection_rate_min": "${DETECTION_RATE_MIN}"
             }
           }
           EOF
@@ -281,11 +366,16 @@ jobs:
             "t_start": ${T_DETECT},
             "t_end": ${T_RECOVER_END},
             "metrics": {
-              "mttr_sec": ${MTTR}
+              "ttr_sample_sec": ${TTR_SAMPLE},
+              "metrics_raw": ${RECOVER_METRICS_RAW:-"null"}
             },
             "labels": {
               "service": "edge_cv_app",
-              "env": "cloud-run"
+              "env": "cloud-run",
+              "fault_type": "${FAULT_NAME}",
+              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
+              "fps_min": "${FPS_MIN}",
+              "detection_rate_min": "${DETECTION_RATE_MIN}"
             }
           }
           EOF
