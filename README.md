@@ -248,7 +248,7 @@ It captures operational metrics — **TTD**, **CFR**, and **DF** — directly fr
 
 ---
 
-# 🚀 S2 – Pipeline → Edge Deployment (OTA Baseline)
+## 🚀 S2 – Pipeline → Edge Deployment (OTA Baseline)
 
 ## 🎯 Objective
 
@@ -769,6 +769,29 @@ FROM summary s;
 
 > Replace `PROJECT_ID` with your actual GCP project ID.
 > This yields one row **per S3 run** plus one **summary row** with aggregate MTTD/MTTR.
+
+---
+
+### 🧨 Edge Fault Injection Scenarios (S3 focus)
+
+Structured view of the fault injections used to exercise resilience logic (A = injection, B = stochastic model, C = detection signal).
+
+| # | Fault Scenario | A – Injection | B – Stochastic Model | C – Detection | Metrics | Literature Support |
+|:-:| -------------- | ------------- | -------------------- | ------------- | ------- | ------------------- |
+| 1 | Network Instability | `tc netem` loss/latency/jitter | Bernoulli `FAIL_P`; Poisson bursts | Slow `/status`, timeouts, retries ↑ | MTTD / MTTR | Intermittent Failure Dynamics; Edge Fault Survey |
+| 2 | Disk Full / Read-Only FS | `/tmp/` fill until <5% space | Exponential time-to-full; Bernoulli write failure | Write error, crashloop | MTTD / MTTR | Multistate Reliability Model; Intermittent Stochastic Model Summary |
+| 3 | CPU Starvation | `stress-ng` (CPU 95%+) | Poisson CPU spikes; Bernoulli per-frame slow | FPS drop, inference latency ↑ | MTTD / MTTR | Non-homogeneous Markov Faults; Edge Fault Survey |
+| 4 | Dead Camera / Black Frames | Inject black or 0-byte frames | Bernoulli missing frames; gap process | `detection_rate = 0`, identical frames | MTTD / MTTR | Markov Sensor Failure (IoT); Random Telegraph Noise |
+| 5 | Wrong Arch Rollout | OTA x86 image to ARM | Deterministic fail; renewal attempts | Liveness/readiness fail | MTTD / MTTR | Markov Availability Models |
+| 6 | Corrupted Model Weights | Truncate `.pt` / `.onnx` files | Bernoulli corruption; Markov degradation | Model load exception | MTTD / MTTR | Intermittent Degradation Models; MSS Reliability |
+
+Edge faults έχουν 3 χαρακτηριστικά: intermittent (έρχονται και φεύγουν), bursty (clusters), multi-state (healthy → degraded → failed → recover).
+
+Modeling layers used for automation and analysis:
+
+- Event-level: Bernoulli `FAIL_P` for binary intermittent events (frame/healthcheck/write).
+- Time-level: Poisson arrivals (Exponential inter-arrival) for random fault timing.
+- State-level: 3-state Markov chain — Healthy → Degraded → Failed → Recovering (multistate reliability).
 
 ---
 

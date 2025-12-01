@@ -109,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p baseline/metrics/s2/artifacts
-          python baseline/scripts/make_ota_manifest.py \
+          python baseline/scripts/s2_make_ota_manifest.py \
             --image "${{ steps.buildpush.outputs.image }}" \
             --digest "${{ steps.buildpush.outputs.digest }}" \
             --outdir baseline/metrics/s2/artifacts \
