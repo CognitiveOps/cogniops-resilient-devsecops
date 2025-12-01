@@ -7,7 +7,7 @@ def sha256_file(path):
             h.update(chunk)
     return h.hexdigest()
 
-if __name__ == "__main__":
+def main():
     p = argparse.ArgumentParser()
     p.add_argument("--image", required=True)          # full image ref (e.g. REGION-docker.pkg.dev/PROJ/repo/app:sha)
     p.add_argument("--digest", required=True)         # image digest (sha256:...)
@@ -32,3 +32,7 @@ if __name__ == "__main__":
         f.write(chk + "  " + os.path.basename(path) + "\n")
 
     print(json.dumps({"manifest": path, "sha256": chk}))
+
+
+if __name__ == "__main__":
+    main()
