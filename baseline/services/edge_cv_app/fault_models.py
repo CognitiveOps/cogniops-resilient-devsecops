@@ -1,8 +1,16 @@
+import os
 import random
 import time
 from typing import Protocol, Optional
 
 from metrics import EdgeMetrics
+
+
+def _get_float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
 
 
 class FaultModel(Protocol):

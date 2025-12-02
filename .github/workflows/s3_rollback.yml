@@ -62,8 +62,22 @@ jobs:
       FPS_MIN: ${{ matrix.fault.fps_min }}
       DETECTION_RATE_MIN: ${{ matrix.fault.detection_rate_min }}
       MODE: twin
+      GCP_SA_APP_EMAIL: ${{ vars.GCP_SA_APP_EMAIL }}
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
+      # Tunable fault model parameters (override here or via secrets/vars)
+      S3_NET_FAIL_P: "0.1"
+      S3_NET_BURST_PROB: "0.05"
+      S3_CPU_DROP_FACTOR: "0.4"
+      S3_CPU_SPIKE_LAMBDA: "0.2"
+      S3_CAM_FAIL_P: "0.25"
+      S3_MODEL_BASE_FAIL_P: "0.05"
+      S3_MODEL_GROWTH: "0.02"
+      S3_DISK_TIME_TO_FULL: "90.0"
+      S3_DISK_BASE_FAIL_P: "0.05"
+      S3_WRONG_RETRY_INTERVAL: "20.0"
+      S3_WRONG_FAIL_WINDOW: "10.0"
+      S3_WRONG_RETRY_SUCCESS_P: "0.2"
 
     steps:
       - uses: actions/checkout@v4
