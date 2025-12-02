@@ -2,7 +2,7 @@ import random
 import time
 from typing import Protocol, Optional
 
-from .metrics import EdgeMetrics
+from metrics import EdgeMetrics
 
 
 class FaultModel(Protocol):
