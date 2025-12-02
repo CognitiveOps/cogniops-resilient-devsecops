@@ -10,8 +10,8 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from .metrics import EdgeMetrics
-from .fault_models import (
+from metrics import EdgeMetrics
+from fault_models import (
     NoFaultModel,
     NetworkLikeFault,
     CpuThrottleFault,
