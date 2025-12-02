@@ -60,5 +60,6 @@ for i in {1..20}; do
   sleep 2
 done
 
-echo "not healthy"
+echo "not healthy; container logs:"
+docker logs edge_cv_app || true
 exit 1
