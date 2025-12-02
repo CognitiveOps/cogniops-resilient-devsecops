@@ -50,17 +50,35 @@ def _select_fault_model(mode: str, scenario: Optional[str]):
 
     scenario = scenario.lower()
     if scenario in {"s3_net", "net_unstable"}:
-        return NetworkLikeFault()
+        return NetworkLikeFault(
+            fail_p=float(os.getenv("S3_NET_FAIL_P", "0.1")),
+            burst_prob=float(os.getenv("S3_NET_BURST_PROB", "0.05")),
+        )
     if scenario in {"s3_cpu", "cpu_starvation"}:
-        return CpuThrottleFault()
+        return CpuThrottleFault(
+            drop_factor=float(os.getenv("S3_CPU_DROP_FACTOR", "0.4")),
+            spike_lambda=float(os.getenv("S3_CPU_SPIKE_LAMBDA", "0.2")),
+        )
     if scenario in {"s3_cam", "dead_camera"}:
-        return BlackFramesFault()
+        return BlackFramesFault(
+            fail_p=float(os.getenv("S3_CAM_FAIL_P", "0.25")),
+        )
     if scenario in {"s3_model", "corrupt_weights"}:
-        return CorruptedModelFault()
+        return CorruptedModelFault(
+            base_fail_p=float(os.getenv("S3_MODEL_BASE_FAIL_P", "0.05")),
+            growth=float(os.getenv("S3_MODEL_GROWTH", "0.02")),
+        )
     if scenario in {"s3_disk", "disk_full"}:
-        return DiskFullFault()
+        return DiskFullFault(
+            time_to_full_sec=float(os.getenv("S3_DISK_TIME_TO_FULL", "90.0")),
+            base_fail_p=float(os.getenv("S3_DISK_BASE_FAIL_P", "0.05")),
+        )
     if scenario in {"s3_wrong_arch", "wrong_arch"}:
-        return WrongArchFault()
+        return WrongArchFault(
+            retry_interval_sec=float(os.getenv("S3_WRONG_RETRY_INTERVAL", "20.0")),
+            fail_window_sec=float(os.getenv("S3_WRONG_FAIL_WINDOW", "10.0")),
+            retry_success_p=float(os.getenv("S3_WRONG_RETRY_SUCCESS_P", "0.2")),
+        )
 
     # wrong_arch / generic_fail are handled at endpoint level
     return NoFaultModel()
