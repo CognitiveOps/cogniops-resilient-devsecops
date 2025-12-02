@@ -62,7 +62,6 @@ jobs:
       FPS_MIN: ${{ matrix.fault.fps_min }}
       DETECTION_RATE_MIN: ${{ matrix.fault.detection_rate_min }}
       MODE: twin
-      REV_SUFFIX: ${{ github.run_number }}-${{ github.run_attempt }}-${{ matrix.fault.name }}
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
 
@@ -117,6 +116,7 @@ jobs:
         id: deploy_healthy
         run: |
           set -euo pipefail
+          REV_SUFFIX="${{ github.run_number }}-${{ github.run_attempt }}-${{ matrix.fault.name }}"
           SERVICE="${CR_SERVICE_NAME}"
           IMG="${{ env.AR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           # Unique revision suffix per run/fault to avoid etag conflicts
@@ -180,6 +180,9 @@ jobs:
           T_INJECT=$(date +%s)
 
           echo "Injecting failure by setting FAIL_MODE=${FAIL_MODE} on edge_cv_app (fault=${FAULT_NAME})..."
+          if [ -z "${REV_SUFFIX_SANITIZED:-}" ]; then
+            REV_SUFFIX_SANITIZED=$(echo "${{ github.run_number }}-${{ github.run_attempt }}-${{ matrix.fault.name }}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | head -c 63 | sed 's/^-*//;s/-*$//')
+          fi
           FAULT_REV="${REV_SUFFIX_SANITIZED}-fault"
           for attempt in 1 2 3 4 5; do
             if gcloud run deploy "${CR_SERVICE_NAME}" \
@@ -269,6 +272,9 @@ jobs:
           echo "Starting rollback from detection time: ${T_DETECT}"
 
           echo "Clearing FAIL_MODE env var on Cloud Run service (set FAIL_MODE=0)..."
+          if [ -z "${REV_SUFFIX_SANITIZED:-}" ]; then
+            REV_SUFFIX_SANITIZED=$(echo "${{ github.run_number }}-${{ github.run_attempt }}-${{ matrix.fault.name }}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | head -c 63 | sed 's/^-*//;s/-*$//')
+          fi
           RECOVER_REV="${REV_SUFFIX_SANITIZED}-recover"
           for attempt in 1 2 3 4 5; do
             if gcloud run deploy "${CR_SERVICE_NAME}" \
