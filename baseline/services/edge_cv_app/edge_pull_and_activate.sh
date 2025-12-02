@@ -29,7 +29,7 @@ if [ -n "$REG_HOST" ]; then
   gcloud auth configure-docker "$REG_HOST" -q || true
 fi
 
-# 4) pull by digest if υπάρχει, αλλιώς μόνο με tag (λιγότερο ασφαλές αλλά αποφεύγει invalid ref)
+# 4) pull by digest if present, else by tag (less safe but avoids invalid ref)
 if [ -n "$DIGEST" ]; then
   echo "Pulling immutable ref: ${IMG}@${DIGEST}"
   docker pull "${IMG}@${DIGEST}"
