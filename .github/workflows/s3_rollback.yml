@@ -326,7 +326,7 @@ jobs:
         id: metrics-id
         run: |
           set -euo pipefail
-          TOKEN=$(gcloud auth print-identity-token --audiences="${METRICS_INGEST_URL}")
+          TOKEN=$(gcloud auth print-identity-token --audiences="${METRICS_INGEST_URL}" --impersonate-service-account="${GCP_SA_APP_EMAIL}")
           echo "id_token=${TOKEN}" >> "$GITHUB_OUTPUT"
 
       # 4) Send S3 metrics to BigQuery ingest (runs table)
