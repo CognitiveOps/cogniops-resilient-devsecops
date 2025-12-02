@@ -592,7 +592,7 @@ Structured view of the fault injections used to exercise resilience logic (A = i
 | 5 | Wrong Arch Rollout | OTA x86 image to ARM | Deterministic fail; renewal attempts | Liveness/readiness fail | MTTD / MTTR | Markov Availability Models |
 | 6 | Corrupted Model Weights | Truncate `.pt` / `.onnx` files | Bernoulli corruption; Markov degradation | Model load exception | MTTD / MTTR | Intermittent Degradation Models; MSS Reliability |
 
-Edge faults έχουν 3 χαρακτηριστικά: intermittent (έρχονται και φεύγουν), bursty (clusters), multi-state (healthy → degraded → failed → recover).
+Edge faults have three characteristics: intermittent (come and go), bursty (occur in clusters), multi-state (healthy → degraded → failed → recover).
 
 Modeling layers used for automation and analysis:
 
@@ -861,7 +861,7 @@ Structured view of the fault injections used to exercise resilience logic (A = i
 | 5 | Wrong Arch Rollout | OTA x86 image to ARM | Deterministic fail; renewal attempts | Liveness/readiness fail | MTTD / MTTR | Markov Availability Models |
 | 6 | Corrupted Model Weights | Truncate `.pt` / `.onnx` files | Bernoulli corruption; Markov degradation | Model load exception | MTTD / MTTR | Intermittent Degradation Models; MSS Reliability |
 
-Edge faults έχουν 3 χαρακτηριστικά: intermittent (έρχονται και φεύγουν), bursty (clusters), multi-state (healthy → degraded → failed → recover).
+Edge faults have three characteristics: intermittent (come and go), bursty (clusters), multi-state (healthy → degraded → failed → recover).
 
 Modeling layers used for automation and analysis:
 
