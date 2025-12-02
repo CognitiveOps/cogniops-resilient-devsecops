@@ -123,7 +123,7 @@ jobs:
           REV_SUFFIX_SANITIZED=$(echo "${REV_SUFFIX}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | head -c 63 | sed 's/^-*//;s/-*$//')
 
           echo "Deploying healthy service $SERVICE with image $IMG"
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if gcloud run deploy "$SERVICE" \
               --image="$IMG" \
               --region="${GCP_REGION}" \
@@ -132,8 +132,8 @@ jobs:
               --revision-suffix="${REV_SUFFIX_SANITIZED}"; then
               break
             fi
-            echo "Deploy conflict, retry ${attempt}/3..."
-            sleep 5
+            echo "Deploy conflict, retry ${attempt}/5..."
+            sleep 8
           done
 
           URL=$(gcloud run services describe "$SERVICE" \
@@ -181,7 +181,7 @@ jobs:
 
           echo "Injecting failure by setting FAIL_MODE=${FAIL_MODE} on edge_cv_app (fault=${FAULT_NAME})..."
           FAULT_REV="${REV_SUFFIX_SANITIZED}-fault"
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if gcloud run deploy "${CR_SERVICE_NAME}" \
               --image="${{ env.AR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
               --region="${GCP_REGION}" \
@@ -190,8 +190,8 @@ jobs:
               --revision-suffix="${FAULT_REV}"; then
               break
             fi
-            echo "Deploy conflict, retry ${attempt}/3..."
-            sleep 5
+            echo "Deploy conflict, retry ${attempt}/5..."
+            sleep 8
           done
 
           echo "Waiting for service to become unhealthy at /status..."
@@ -270,7 +270,7 @@ jobs:
 
           echo "Clearing FAIL_MODE env var on Cloud Run service (set FAIL_MODE=0)..."
           RECOVER_REV="${REV_SUFFIX_SANITIZED}-recover"
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if gcloud run deploy "${CR_SERVICE_NAME}" \
               --image="${{ env.AR_LOCATION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
               --region="${GCP_REGION}" \
@@ -279,8 +279,8 @@ jobs:
               --revision-suffix="${RECOVER_REV}"; then
               break
             fi
-            echo "Deploy conflict, retry ${attempt}/3..."
-            sleep 5
+            echo "Deploy conflict, retry ${attempt}/5..."
+            sleep 8
           done
 
           echo "Waiting for service to become healthy (HTTP 200)..."
