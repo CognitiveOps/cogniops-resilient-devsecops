@@ -170,10 +170,16 @@ jobs:
           T_INJECT=$(date +%s)
 
           echo "Injecting failure by setting FAIL_MODE=${FAIL_MODE} on edge_cv_app (fault=${FAULT_NAME})..."
-          gcloud run services update "${CR_SERVICE_NAME}" \
-            --region="${GCP_REGION}" \
-            --platform=managed \
-            --set-env-vars MODE=twin,FAIL_MODE="${FAIL_MODE}"
+          for attempt in 1 2 3; do
+            if gcloud run services update "${CR_SERVICE_NAME}" \
+              --region="${GCP_REGION}" \
+              --platform=managed \
+              --set-env-vars MODE=twin,FAIL_MODE="${FAIL_MODE}"; then
+              break
+            fi
+            echo "Update conflict, retry ${attempt}/3..."
+            sleep 5
+          done
 
           echo "Waiting for service to become unhealthy at /status..."
 
@@ -250,10 +256,16 @@ jobs:
           echo "Starting rollback from detection time: ${T_DETECT}"
 
           echo "Clearing FAIL_MODE env var on Cloud Run service (set FAIL_MODE=0)..."
-          gcloud run services update "${CR_SERVICE_NAME}" \
-            --region="${GCP_REGION}" \
-            --platform=managed \
-            --update-env-vars MODE=real,FAIL_MODE=0
+          for attempt in 1 2 3; do
+            if gcloud run services update "${CR_SERVICE_NAME}" \
+              --region="${GCP_REGION}" \
+              --platform=managed \
+              --update-env-vars MODE=real,FAIL_MODE=0; then
+              break
+            fi
+            echo "Update conflict, retry ${attempt}/3..."
+            sleep 5
+          done
 
           echo "Waiting for service to become healthy (HTTP 200)..."
 
