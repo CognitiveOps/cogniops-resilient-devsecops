@@ -579,6 +579,33 @@ Use the same edge workload (`edge_cv_app`) to evaluate **resilience**:
 
 This reflects realistic issues **not caught by CI**, that only appear under edge load or for specific inputs.
 
+### 🧨 Edge Fault Injection Scenarios (S3 focus)
+
+Structured view of the fault injections used to exercise resilience logic (A = injection, B = stochastic model, C = detection signal).
+
+| # | Fault Scenario | A – Injection | B – Stochastic Model | C – Detection | Metrics | Literature Support |
+|:-:| -------------- | ------------- | -------------------- | ------------- | ------- | ------------------- |
+| 1 | Network Instability | `tc netem` loss/latency/jitter | Bernoulli `FAIL_P`; Poisson bursts | Slow `/status`, timeouts, retries ↑ | MTTD / MTTR | Intermittent Failure Dynamics; Edge Fault Survey |
+| 2 | Disk Full / Read-Only FS | `/tmp/` fill until <5% space | Exponential time-to-full; Bernoulli write failure | Write error, crashloop | MTTD / MTTR | Multistate Reliability Model; Intermittent Stochastic Model Summary |
+| 3 | CPU Starvation | `stress-ng` (CPU 95%+) | Poisson CPU spikes; Bernoulli per-frame slow | FPS drop, inference latency ↑ | MTTD / MTTR | Non-homogeneous Markov Faults; Edge Fault Survey |
+| 4 | Dead Camera / Black Frames | Inject black or 0-byte frames | Bernoulli missing frames; gap process | `detection_rate = 0`, identical frames | MTTD / MTTR | Markov Sensor Failure (IoT); Random Telegraph Noise |
+| 5 | Wrong Arch Rollout | OTA x86 image to ARM | Deterministic fail; renewal attempts | Liveness/readiness fail | MTTD / MTTR | Markov Availability Models |
+| 6 | Corrupted Model Weights | Truncate `.pt` / `.onnx` files | Bernoulli corruption; Markov degradation | Model load exception | MTTD / MTTR | Intermittent Degradation Models; MSS Reliability |
+
+Edge faults έχουν 3 χαρακτηριστικά: intermittent (έρχονται και φεύγουν), bursty (clusters), multi-state (healthy → degraded → failed → recover).
+
+Modeling layers used for automation and analysis:
+
+- Event-level: Bernoulli `FAIL_P` for binary intermittent events (frame/healthcheck/write).
+- Time-level: Poisson arrivals (Exponential inter-arrival) for random fault timing.
+- State-level: 3-state Markov chain — Healthy → Degraded → Failed → Recovering (multistate reliability).
+
+Implementation (real edge + twin):
+- `baseline/services/edge_cv_app/metrics.py` — unified `EdgeMetrics` contract returned by `/status`.
+- `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
+- `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
+- Detection + ingest lives in GitHub Actions (`s3_rollback.yml`); thresholds are auto-calibrated per run and labels include fault type, thresholds, and optional `/status` snapshots.
+
 ### 🧩 How S3 models stochastic, intermittent, multi-state faults
 
 - **Fault models (A/B):** Bernoulli per-frame events + Poisson bursts/spikes (network, CPU), time-to-full ramp with Bernoulli write errors (disk), Bernoulli missing frames (camera), deterministic + retry cycle (wrong-arch), growing Bernoulli corruption with gradual degradation (weights).  
@@ -589,8 +616,16 @@ Threshold rationale (per matrix in `.github/workflows/s3_rollback.yml`):
 - `latency_budget_sec` — used for network/CPU faults to catch slow `/status` responses from jitter/spikes (e.g., 2s for net, 3s for CPU).  
 - `fps_min` — tighter for CPU (`15`) to flag throttling; relaxed (`10`) elsewhere to avoid false positives.  
 - `detection_rate_min` — near-zero for camera (`0.001`) to detect black frames; default (`0.01`) for others.  
-- **Calibration:** before faults, the workflow polls the healthy service and derives thresholds from observed noise (p95 latency × 3, p5 fps × 0.7, p5 detection_rate × 0.5). These calibrated values override defaults and are stored as labels in BigQuery.  
+- **Calibration:** before faults, the workflow polls the healthy service on the runner and derives thresholds from observed noise (p95 latency × 3, p5 fps × 0.7, p5 detection_rate × 0.5). The calibrated values override the matrix defaults, are exported as env vars for detection, and are included as labels in the BigQuery ingest so you can audit/retune per run.  
 - All other metrics stay identical so baseline vs agent comparisons remain schema-compatible.
+
+Stochastic model parameters (configurable via env in `s3_rollback.yml`, defaults shown):
+- Network: `S3_NET_FAIL_P=0.1`, `S3_NET_BURST_PROB=0.05`
+- CPU: `S3_CPU_DROP_FACTOR=0.4`, `S3_CPU_SPIKE_LAMBDA=0.2`
+- Camera: `S3_CAM_FAIL_P=0.25`
+- Corrupted weights: `S3_MODEL_BASE_FAIL_P=0.05`, `S3_MODEL_GROWTH=0.02`
+- Disk: `S3_DISK_TIME_TO_FULL=90.0`, `S3_DISK_BASE_FAIL_P=0.05`
+- Wrong arch: `S3_WRONG_RETRY_INTERVAL=20.0`, `S3_WRONG_FAIL_WINDOW=10.0`, `S3_WRONG_RETRY_SUCCESS_P=0.2`
 
 ---
 
