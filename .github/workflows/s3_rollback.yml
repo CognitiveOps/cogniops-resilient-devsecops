@@ -28,6 +28,7 @@ jobs:
     name: S3 resilience – ${{ matrix.fault.name }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         fault:
           # net: detect on latency or non-200; keep lax fps/detection thresholds
@@ -291,7 +292,7 @@ jobs:
         id: metrics-id
         run: |
           set -euo pipefail
-          TOKEN=$(gcloud auth print-identity-token)
+          TOKEN=$(gcloud auth print-identity-token --audiences="${METRICS_INGEST_URL}")
           echo "id_token=${TOKEN}" >> "$GITHUB_OUTPUT"
 
       # 4) Send S3 metrics to BigQuery ingest (runs table)
