@@ -14,6 +14,8 @@ on:
 
   # Manual trigger (for testing)
   workflow_dispatch:
+  # Reusable workflow
+  workflow_call:
 
 permissions:
   contents: read

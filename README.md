@@ -605,6 +605,7 @@ Implementation (real edge + twin):
 - `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
 - `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
 - Detection + ingest lives in GitHub Actions (`s3_rollback.yml`); thresholds are auto-calibrated per run and labels include fault type, thresholds, and optional `/status` snapshots.
+  - Scheduled runs: `.github/workflows/s3_schedule.yml` triggers S3 nightly (cron), with a guard that stops when BQ has >=500 S3 rows and a small repeat matrix (capped at 3 per night) to accumulate samples per fault type without unbounded growth.
 - Why these edge faults (and not Kubernetes/control-plane faults): the thesis scope is cloud→pipeline→edge; Kubernetes control-plane failures are cloud-side and well-covered in existing chaos catalogs. Here we target device-level, resource-light injections that (a) reproduce reliably on GitHub runners and Cloud Run, (b) match edge literature (intermittent/bursty/multi-state), and (c) stress the OTA/rollback path where the agent operates. Kubernetes-specific chaos would test the cloud fabric, not the edge OTA/resilience loop we measure in S3.
   - Future work: add a small cloud-side chaos scenario (e.g., K8s node/network fault) to complement edge faults; current scope stays edge-focused to align with cloud→pipeline→edge and OTA/resilience measurement.
 
