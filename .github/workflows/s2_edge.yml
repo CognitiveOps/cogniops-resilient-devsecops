@@ -36,7 +36,7 @@ jobs:
       AR_REPO: apps
       IMAGE_NAME: edge-cv-app
       # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
-      METRICS_INGEST_URL: ${{ vars.SCENARIO_RUNS_INGEST_URL }}
+      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
 
     steps:
       - uses: actions/checkout@v4

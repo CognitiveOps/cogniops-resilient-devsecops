@@ -234,7 +234,6 @@ jobs:
           echo "sa_infra=$(jq -r '.gha_infra_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_run_exec=$(jq -r '.run_exec_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-          echo "metrics_url=$(jq -r '.metrics_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "scenario_runs_url=$(jq -r '.scenario_runs_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
 
       - name: Upsert repository variables
@@ -253,8 +252,7 @@ jobs:
               GCP_SA_INFRA_EMAIL:    '${{ steps.tfout.outputs.sa_infra }}',
               GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',              
               RUN_EXEC_SA_EMAIL:      '${{ steps.tfout.outputs.sa_run_exec }}',
-              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.metrics_url }}',
-              SCENARIO_RUNS_INGEST_URL: '${{ steps.tfout.outputs.scenario_runs_url }}'
+              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.scenario_runs_url }}'
             };
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
@@ -283,6 +281,5 @@ jobs:
             echo "- GCP_WIF_PROVIDER        = ${{ steps.tfout.outputs.wif_provider }}";
             echo "- GCP_SA_INFRA_EMAIL      = ${{ steps.tfout.outputs.sa_infra }}";
             echo "- GCP_SA_APP_EMAIL        = ${{ steps.tfout.outputs.sa_app }}";
-            echo "- METRICS_INGEST_URL      = ${{ steps.tfout.outputs.metrics_url }}";
-            echo "- SCENARIO_RUNS_INGEST_URL = ${{ steps.tfout.outputs.scenario_runs_url }}";
+            echo "- METRICS_INGEST_URL      = ${{ steps.tfout.outputs.scenario_runs_url }}";
           } >> $GITHUB_STEP_SUMMARY

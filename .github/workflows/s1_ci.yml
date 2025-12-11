@@ -28,7 +28,6 @@ env:
 permissions:
   id-token: write
   contents: read
-  actions: read   # needed for downloading artifacts from previous workflow runs
 
 concurrency:
   group: s1-baseline-${{ github.ref }}
@@ -40,6 +39,9 @@ jobs:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      MODE: baseline
 
     defaults:
       run:
@@ -49,17 +51,6 @@ jobs:
       # --- Source checkout ----------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
-
-      # --- Restore previous CSV history (artifact) ----------------------------
-      # This allows CFR/DF to be lifetime-cumulative across runs.
-      - name: Restore previous metrics artifact
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          name: s1_pipeline_runs
-          path: baseline/metrics/_restore
-          if_no_artifact_found: ignore
-          workflow: s1_ci.yml
-          branch: ${{ github.ref_name }}
 
       # --- Compute image ref early (used throughout) --------------------------
       - name: Compute IMAGE var
@@ -105,23 +96,48 @@ jobs:
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
           echo "RUN_ENV=cloud-run" >> $GITHUB_ENV
 
-      - name: Ensure metrics directory
-        run: mkdir -p baseline/metrics
-
-      # --- Metrics: commit (begin row; records commit_ts) ---------------------
-      - name: "S1 metrics: commit"
+      # --- Resolve ingest endpoint + ID token ---------------------------------
+      - name: Resolve ingest endpoint and ID token
+        id: ingest
         run: |
-          python baseline/scripts/s1_write_metrics.py \
-            --outfile baseline/metrics/s1_pipeline_runs.csv \
-            --run_id "${{ github.run_id }}" \
-            --commit_sha "${{ github.sha }}" \
-            --stage commit \
-            --workflow "s1_ci" \
-            --scenario_id "${{ env.SCENARIO_ID }}" \
-            --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --commit_ts "${{ steps.t0.outputs.ts }}"
+          set -euo pipefail
+          INGEST_URL="${METRICS_INGEST_URL:-}"
+          if [ -z "$INGEST_URL" ]; then
+            echo "Ingest URL not configured (METRICS_INGEST_URL)." >&2
+            exit 1
+          fi
+          TOKEN=$(gcloud auth print-identity-token \
+            --audiences="$INGEST_URL" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
+          echo "INGEST_URL=$INGEST_URL" >> "$GITHUB_ENV"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "ingest_url=$INGEST_URL" >> "$GITHUB_OUTPUT"
+
+      # --- Metrics: commit (event) --------------------------------------------
+      - name: "Send metrics: commit"
+        run: |
+          set -euo pipefail
+          T0=${{ steps.t0.outputs.ts }}
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_commit",
+            "mode": "${{ env.MODE }}",
+            "status": "success",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T0},
+            "t_end": ${T0},
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}"
+            }
+          }
+          EOF
 
       # --- Unit tests (non-fatal capture) -------------------------------------
       - name: Unit tests (capture exit code)
@@ -130,31 +146,33 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
         run: |
           set +e
+          T_START=$(date +%s)
           pytest -q baseline/services/app/tests
           CODE=$?
+          T_END=$(date +%s)
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_test",
+            "mode": "${{ env.MODE }}",
+            "status": "${STATUS}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T_START},
+            "t_end": ${T_END},
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}"
+            }
+          }
+          EOF
           exit 0
-
-      - name: "S1 metrics: test status"
-        if: always()
-        run: |
-          if [ "${{ steps.test.outputs.code }}" = "0" ]; then
-            STATUS="success"
-          else
-            STATUS="failure"
-          fi
-
-          python baseline/scripts/s1_write_metrics.py \
-            --outfile baseline/metrics/s1_pipeline_runs.csv \
-            --run_id "${{ github.run_id }}" \
-            --commit_sha "${{ github.sha }}" \
-            --stage test \
-            --status "$STATUS" \
-            --workflow "s1_ci" \
-            --scenario_id "${{ env.SCENARIO_ID }}" \
-            --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}"
 
       # --- Build & Push -------------------------------------------------------
       - name: Build image
@@ -166,33 +184,57 @@ jobs:
       - name: Push image
         id: push
         run: |
-          set -euo pipefail
+          set +e
+          T_START=$(date +%s)
           docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
-          DIGEST=$(gcloud artifacts docker images list \
-            "$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE" \
-            --include-tags --format='get(DIGEST)' --filter="TAGS:${GITHUB_SHA}" | head -n1)
-          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
-
-      - name: "S1 metrics: push"
-        run: |
-          python baseline/scripts/s1_write_metrics.py \
-            --outfile baseline/metrics/s1_pipeline_runs.csv \
-            --run_id "${{ github.run_id }}" \
-            --commit_sha "${{ github.sha }}" \
-            --stage push \
-            --workflow "s1_ci" \
-            --scenario_id "${{ env.SCENARIO_ID }}" \
-            --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --image "${IMAGE}@${DIGEST}"
+          PUSH_STATUS=$?
+          DIGEST=""
+          DIG_STATUS=0
+          if [ "$PUSH_STATUS" = "0" ]; then
+            DIGEST=$(gcloud artifacts docker images list \
+              "$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE" \
+              --include-tags --format='get(DIGEST)' --filter="TAGS:${GITHUB_SHA}" | head -n1)
+            echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+            DIG_STATUS=$?
+          fi
+          CODE=$PUSH_STATUS
+          if [ "$DIG_STATUS" != "0" ]; then CODE=$DIG_STATUS; fi
+          T_END=$(date +%s)
+          STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
+          DIG="${DIGEST:-""}"
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_push",
+            "mode": "${{ env.MODE }}",
+            "status": "${STATUS}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T_START},
+            "t_end": ${T_END},
+            "metrics": {
+              "digest": "${DIG}"
+            },
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}",
+              "image": "${IMAGE}"
+            }
+          }
+          EOF
+          exit $CODE
 
       # --- Deploy to Cloud Run ------------------------------------------------
       - name: Deploy to Cloud Run
         id: deploy
         run: |
-          set -euo pipefail
+          set +e
+          T_START=$(date +%s)
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
@@ -202,37 +244,83 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 2
-          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
-          : "${URL:?failed to resolve Cloud Run URL}"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: "S1 metrics: deploy"
-        run: |
-          python baseline/scripts/s1_write_metrics.py \
-            --outfile baseline/metrics/s1_pipeline_runs.csv \
-            --run_id "${{ github.run_id }}" \
-            --commit_sha "${{ github.sha }}" \
-            --stage deploy \
-            --workflow "s1_ci" \
-            --scenario_id "${{ env.SCENARIO_ID }}" \
-            --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}"
+          DEPLOY_STATUS=$?
+          URL=""
+          if [ "$DEPLOY_STATUS" = "0" ]; then
+            URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
+            : "${URL:?failed to resolve Cloud Run URL}"
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+          fi
+          CODE=$DEPLOY_STATUS
+          T_END=$(date +%s)
+          STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_deploy",
+            "mode": "${{ env.MODE }}",
+            "status": "${STATUS}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T_START},
+            "t_end": ${T_END},
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}"
+            },
+            "metrics": {
+              "service_url": "${URL:-}"
+            }
+          }
+          EOF
+          exit $CODE
 
       # --- Health check (retry/backoff) ---------------------------------------
       - name: Health Check (with retries)
         id: health_check
         run: |
-          set -euo pipefail
+          set +e
+          T_START=$(date +%s)
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
           : "${URL:?Could not resolve Cloud Run URL}"
           OK=0
+          LAST_CODE=000
           for i in {1..6}; do
-            CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
-            if [[ "$CODE" == "200" ]]; then OK=1; break; fi
+            LAST_CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
+            if [[ "$LAST_CODE" == "200" ]]; then OK=1; break; fi
             sleep 10
           done
+          T_END=$(date +%s)
           echo "healthy=$OK" >> "$GITHUB_OUTPUT"
+          STATUS=$([ "$OK" = "1" ] && echo success || echo failure)
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_health",
+            "mode": "${{ env.MODE }}",
+            "status": "${STATUS}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T_START},
+            "t_end": ${T_END},
+            "metrics": {
+              "healthy": ${OK},
+              "last_code": "${LAST_CODE}"
+            },
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}"
+            }
+          }
+          EOF
           if [[ "$OK" != "1" ]]; then exit 1; fi
 
       # --- End timer (TTD end) ------------------------------------------------
@@ -241,101 +329,38 @@ jobs:
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # --- Finalize metrics (final stage – overall pipeline result + ingest) ---
-      - name: "S1 metrics: final (overall)"
+      # --- Final metrics event (overall) --------------------------------------
+      - name: "Send metrics: final (overall)"
         if: always()
-        env:
-          METRICS_INGEST_URL: ${{ env.METRICS_INGEST_URL }}
         run: |
           set -euo pipefail
-
-          TOKEN=""
-          if [ -n "${METRICS_INGEST_URL}" ]; then
-            TOKEN=$(gcloud auth print-identity-token \
-              --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}" \
-              --audiences="${METRICS_INGEST_URL}" \
-              --format='get(token)')
-          fi
-
-          python baseline/scripts/s1_write_metrics.py \
-            --outfile baseline/metrics/s1_pipeline_runs.csv \
-            --run_id "${{ github.run_id }}" \
-            --commit_sha "${{ github.sha }}" \
-            --stage final \
-            --status "${{ job.status }}" \
-            --workflow "s1_ci" \
-            --scenario_id "${{ env.SCENARIO_ID }}" \
-            --branch "${{ env.BRANCH }}" \
-            --env "${{ env.RUN_ENV }}" \
-            --service "${SERVICE}" \
-            --ended_ts "${{ steps.t1.outputs.ts }}" \
-            --post-to "${METRICS_INGEST_URL}" \
-            --auth-token "$TOKEN"
-
-      # --- Install deps for metrics_snapshot (safe even if already installed) --
-      - name: Install Python dependencies for snapshot
-        if: always()
-        run: |
-          pip install requests
-
-      # --- Snapshot (history-based CFR/DF from CSV history) -------------------
-      - name: Build baseline snapshot (history-based)
-        if: always()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python baseline/scripts/metrics_snapshot.py \
-            --in baseline/metrics/s1_pipeline_runs.csv \
-            --merge-from "baseline/metrics/_restore/**/s1_pipeline_runs.csv" \
-            --write-merged-to baseline/metrics/s1_pipeline_runs.csv \
-            --out baseline/metrics/s1_baseline_snapshot.json \
-            --group-by scenario \
-            --scenario-default S1 \
-            --min-days 1.0
-
-      - name: Upload S1 baseline snapshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: s1_baseline_snapshot
-          path: baseline/metrics/s1_baseline_snapshot.json
-          if-no-files-found: error
-
-      # --- Render CFR/DF from the snapshot (no duplicate math) ----------------
-      - name: Render CFR/DF from snapshot
-        if: always()
-        run: |
-          FILE="baseline/metrics/s1_baseline_snapshot.json"
-          if [ ! -f "$FILE" ]; then
-            echo "**Snapshot not found at $FILE**" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          L_CFR=$(jq -r '.lifetime.cfr' "$FILE")
-          L_DF=$(jq -r '.lifetime.df_per_day' "$FILE")
-          L_DAYS=$(jq -r '.lifetime.days' "$FILE")
-
+          T0=${{ steps.t0.outputs.ts }}
+          T1=${{ steps.t1.outputs.ts }}
+          STATUS="${{ job.status }}"
+          DUR=$(( T1 - T0 ))
+          curl -sS -X POST "${INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
           {
-            echo "### CFR/DF — lifetime & per-scenario (from snapshot)"
-            echo "- **Lifetime CFR:** ${L_CFR}%"
-            if [ "$L_DAYS" != "0" ]; then
-              printf -- "- **Lifetime DF:** %.2f successful deployments/day (duration≈%.2f days)\n" "$L_DF" "$L_DAYS"
-            else
-              echo "- **Lifetime DF:** n/a (insufficient timestamps)"
-            fi
-            jq -r '
-              .per_scenario
-              | to_entries
-              | sort_by(.key)
-              | .[]
-              | "- **Scenario \(.key):** CFR \(.value.cfr)% (total=\(.value.total_runs), fail=\(.value.fail), success=\(.value.success))"
-                + (if (.value.days|tonumber) > 0
-                  then ", DF \(.value.df_per_day)/day over ≈\(.value.days) days"
-                  else ", DF n/a (insufficient timestamps)"
-                  end)
-            ' "$FILE"
-          } >> "$GITHUB_STEP_SUMMARY"
+            "run_id": "${{ env.RUN_ID }}",
+            "scenario_id": "s1",
+            "stage": "s1_final",
+            "mode": "${{ env.MODE }}",
+            "status": "${STATUS}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T0},
+            "t_end": ${T1},
+            "metrics": {
+              "ttd_sec": ${DUR}
+            },
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${{ github.ref_name }}"
+            }
+          }
+          EOF
 
       # --- Summary (human-readable headline in the Job UI) --------------------
       - name: Summary
@@ -354,12 +379,3 @@ jobs:
             echo "- Health: ${{ steps.health_check.outputs.healthy || '<n/a>' }}"
             echo "- Scenario: ${{ env.SCENARIO_ID }} | Branch: ${{ env.BRANCH }} | Env: ${{ env.RUN_ENV }}"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # --- Upload metrics artifact (CSV) --------------------------------------
-      - name: Upload metrics artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: s1_pipeline_runs
-          path: baseline/metrics/s1_pipeline_runs.csv
-          if-no-files-found: ignore

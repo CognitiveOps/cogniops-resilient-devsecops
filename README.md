@@ -34,7 +34,7 @@ cogniops-resilient-devsecops/
 │ └── tests/ # unit, integration & resilience tests
 │
 ├── infra/ # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
-├── functions/ingest/ # Cloud Function Gen2 for metrics ingest
+├── functions/ingest_runs/ # Cloud Function Gen2 for scenario metrics ingest
 ├── docs/ # architecture diagrams & thesis documentation
 └── README.md
 
@@ -116,7 +116,7 @@ Establish a fully automated CI/CD baseline with real **deploy** to Cloud Run and
    → Push image to **Artifact Registry**  
    → Deploy to **Cloud Run (Managed)**  
    → Poll `/status` for health OK  
-   → Write metrics to CSV (`baseline/metrics/s1_pipeline_runs.csv`)
+   → Send stage metrics events to `METRICS_INGEST_URL` (scenario-runs-ingest → BigQuery)
 
 ### 🪣 GCP Resources
 | Resource | Purpose |
@@ -175,68 +175,35 @@ Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
 
 ## 🧩 Metrics Collection Pipeline (Per-Scenario)
 
-| Script | Purpose |
-|---------|----------|
-| **`baseline/scripts/s1_write_metrics.py`** | Appends stage metrics (commit, test, push, deploy, health) to CSV. Scenario context (S1) replaces older epoch logic. |
-| **`baseline/scripts/metrics_snapshot.py`** | Merges CSV history and computes lifetime & per-scenario CFR/DF values (no rolling window). |
+Όλα τα scenarios στέλνουν stage events (commit/test/push/deploy/health/κ.λπ.) στο ίδιο HTTP endpoint `METRICS_INGEST_URL` (Cloud Function Gen2 `scenario-runs-ingest`). Δεν κρατάμε πλέον τοπικά CSV για S1.
 
-All metrics are automatically collected from GitHub Actions workflows and stored under  
-`baseline/metrics/` for reproducibility.
+### 📊 Data Store
 
----
+| Layer | Table | Purpose |
+|:------|:------|:--------|
+| **BigQuery** | `agent_metrics.runs` | Κεντρικό κατάστημα για όλα τα stage events όλων των σεναρίων. |
 
-## 🧾 S1 Metrics Schema — CSV and BigQuery Alignment
+### 🧱 Schema (agent_metrics.runs)
 
-This schema and dataflow apply **only to Scenario S1 (Cloud → Pipeline CI/CD Baseline)**.  
-It captures operational metrics — **TTD**, **CFR**, and **DF** — directly from the GitHub Actions pipeline and GCP deployment events.
-
-### 📊 Data Stores
-
-| Layer | File / Table | Purpose |
-|:------|:--------------|:--------|
-| **Local CSV (GitHub Actions)** | `baseline/metrics/s1_pipeline_runs.csv` | Per-run ledger for S1 executions. |
-| **BigQuery Table** | `agent_metrics.s1_pipeline_runs` | Central analytics store for S1 metrics (via Cloud Function Gen2 ingest). |
-
-### 🧱 Schema (CSV + BigQuery)
-
-| Field | Type | Source | Description |
-|:--|:--|:--|:--|
-| **run_id** | STRING | GitHub Actions | Unique workflow run ID. |
-| **workflow** | STRING | Workflow name (`s1_ci`) | Identifies pipeline. |
-| **scenario_id** | STRING | Static | Always `S1`. |
-| **branch** | STRING | Git ref | Branch tested. |
-| **env** | STRING | Variable | Runtime environment (e.g. `cloud-run`). |
-| **service** | STRING | Variable | Cloud Run service (e.g. `baseline-app`). |
-| **status** | STRING | GitHub Job | Final status (success / failure / cancelled). |
-| **failure_stage** | STRING | Derived | First stage that failed (commit/test/push/deploy/health). |
-| **commit_sha** | STRING | Git | Commit hash of deployed revision. |
-| **tests_total** | INTEGER | pytest | Total test sets executed. |
-| **tests_failed** | INTEGER | pytest | Failed test sets. |
-| **commit_ts** | TIMESTAMP | Stage commit | Pipeline start. |
-| **push_ts** | TIMESTAMP | Stage push | Docker image push. |
-| **deploy_ts** | TIMESTAMP | Stage deploy | Cloud Run deployment end. |
-| **ended_ts** | TIMESTAMP | Stage health | Service healthy (HTTP 200). |
-| **ttd_sec** | FLOAT | Derived | Time-to-Deploy = `ended_ts − commit_ts`. |
-| **inserted_at** | TIMESTAMP | BigQuery | Server ingestion timestamp. |
-
-### 🧮 Derived Metrics
-
-| Metric | Formula | Interpretation |
+| Field | Type | Description |
 |:--|:--|:--|
-| **TTD** | `ended_ts − commit_ts` | End-to-end CI/CD agility. |
-| **CFR** | `failed runs / total runs × 100` | Deployment stability. |
-| **DF** | `successful runs / days(active)` | Deployment throughput. |
+| `run_id` | STRING | GitHub Actions run id ή λογικό id. |
+| `scenario_id` | STRING | s1, s2, s3, s4, s5, ss1, ss2, κ.λπ. |
+| `stage` | STRING | Όνομα σταδίου (π.χ. `s1_push`, `s3_recover`). |
+| `mode` | STRING | baseline / shadow / enforce. |
+| `status` | STRING | success / failure / cancelled. |
+| `commit_sha` | STRING | Commit SHA. |
+| `t_start` / `t_end` | TIMESTAMP | Χρονικά σημεία σταδίου. |
+| `duration_sec` | FLOAT | `t_end - t_start` (αν δεν δίνεται, υπολογίζεται στο ingest). |
+| `labels` | JSON | Free-form labels (service, env, branch, fault_type κ.λπ.). |
+| `metrics` | JSON | Στατιστικά/μετρήσεις σταδίου (π.χ. digest, healthy, ttr_sample_sec). |
+| `ingested_at` | TIMESTAMP | Χρόνος εισαγωγής στο BigQuery. |
 
----
+### ⚙️ Flow
 
-### ⚙️ Collection Flow
-
-1. **GitHub Actions Workflow** (`.github/workflows/s1_ci.yml`)  
-   Stages → Build → Test → Push → Deploy → Health → writes CSV via `s1_write_metrics.py`.  
-2. **Snapshot Builder** (`metrics_snapshot.py`)  
-   Merges CSV history → computes lifetime CFR/DF statistics.  
-3. **Cloud Function Ingest** (optional)  
-   Receives row and inserts it into BigQuery.
+1. **GitHub Actions Workflows** (S1–S3…) στέλνουν ένα event ανά στάδιο στο `METRICS_INGEST_URL`.  
+2. **Cloud Function `scenario-runs-ingest`** κάνει normalize και γράφει στο BigQuery.  
+3. **Παράγωγες μετρικές** (TTD/CFR/DF/MTTD/MTTR κ.λπ.) υπολογίζονται downstream με SQL/BI.
 
 ### 📈 Example (S1 Baseline Metrics)
 
@@ -423,7 +390,7 @@ Exports: `t_ota_start`, `t_edge_end`, `ota_latency`
 
 ### Metrics → BigQuery (`scenario-runs-ingest`)
 
-Workflow sends JSON via HTTP POST to `${{ vars.SCENARIO_RUNS_INGEST_URL }}`
+Workflow sends JSON via HTTP POST to `${{ vars.METRICS_INGEST_URL }}`
 
 #### a) `s2_activate` event
 
@@ -520,7 +487,7 @@ GCP_REGION
 GCP_REPO_LOCATION
 GCP_WIF_PROVIDER
 GCP_SA_APP_EMAIL
-SCENARIO_RUNS_INGEST_URL
+METRICS_INGEST_URL
 ```
 
 ---
