@@ -437,7 +437,7 @@ resource "google_cloud_run_v2_service_iam_member" "edge_cv_public_invoker" {
 }
 
 ###############################
-# Cloud Functions Gen2 (S1 ingest)
+# Cloud Functions Gen2 source bucket (used for ingest functions)
 ###############################
 resource "google_storage_bucket" "src" {
   name                        = "${var.project_id}-fn-src"
@@ -474,74 +474,8 @@ resource "google_storage_bucket_iam_member" "src_cf_read" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:service-${data.google_project.current.number}@gcf-admin-robot.iam.gserviceaccount.com"
 }
-
-data "archive_file" "ingest_zip" {
-  type        = "zip"
-  source_dir  = "${path.module}/../functions/ingest"
-  output_path = "${path.module}/.tf-build/ingest.zip"
-}
-
-resource "google_storage_bucket_object" "ingest_object" {
-  name   = "ingest-${data.archive_file.ingest_zip.output_md5}.zip"
-  bucket = google_storage_bucket.src.name
-  source = data.archive_file.ingest_zip.output_path
-
-  depends_on = [
-    google_storage_bucket_iam_member.src_uploader_admin
-  ]
-}
-
-resource "google_cloudfunctions2_function" "ingest" {
-  name     = "s1-metrics-ingest"
-  location = var.region
-
-  build_config {
-    runtime     = "python312"
-    entry_point = "ingest"
-    source {
-      storage_source {
-        bucket = google_storage_bucket.src.name
-        object = google_storage_bucket_object.ingest_object.name
-      }
-    }
-  }
-
-  service_config {
-    service_account_email = google_service_account.cf_ingest.email
-    max_instance_count    = 1
-    available_memory      = "256M"
-    ingress_settings      = "ALLOW_ALL"
-  }
-
-  depends_on = [
-    google_service_account.cf_ingest,
-    google_service_account_iam_member.infra_can_actas_cf_ingest,
-    google_service_account_iam_member.gcf_admin_can_actas_cf_ingest,
-    google_service_account_iam_member.serverless_can_actas_cf_ingest,
-    google_project_iam_member.cf_can_deploy_run,
-    google_bigquery_dataset_iam_member.cf_ingest_bq_writer,
-  ]
-}
-
-resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_app" {
-  count              = var.cf_ingest_public ? 0 : 1
-  project            = var.project_id
-  location           = var.region
-  cloud_function     = google_cloudfunctions2_function.ingest.name
-  role               = "roles/cloudfunctions.invoker"
-  member             = "serviceAccount:${google_service_account.gha_app.email}"
-}
-
-resource "google_cloudfunctions2_function_iam_member" "ingest_invoker_public" {
-  count              = var.cf_ingest_public ? 1 : 0
-  project            = var.project_id
-  location           = var.region
-  cloud_function     = google_cloudfunctions2_function.ingest.name
-  role               = "roles/cloudfunctions.invoker"
-  member             = "allUsers"
-}
 ###############################
-# Cloud Functions Gen2 (generic runs ingest for S2+)
+# Cloud Functions Gen2 (generic runs ingest)
 ###############################
 
 # Package the ingest_runs function code into a zip
@@ -562,7 +496,7 @@ resource "google_storage_bucket_object" "runs_ingest_object" {
   ]
 }
 
-# Deploy the Cloud Function Gen2 for S2+ metrics ingestion
+# Deploy the Cloud Function Gen2 for metrics ingestion (all scenarios)
 resource "google_cloudfunctions2_function" "runs_ingest" {
   name     = "scenario-runs-ingest"
   location = var.region
@@ -610,7 +544,7 @@ resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_app" 
   member             = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
-# Optional public invoker (for S2 baseline – default = true)
+# Optional public invoker (default = true)
 resource "google_cloudfunctions2_function_iam_member" "runs_ingest_invoker_public" {
   count              = var.scenario_runs_public ? 1 : 0
   project            = var.project_id
@@ -643,11 +577,6 @@ output "run_exec_sa_email" {
 output "cloud_run_service_url" {
   value       = "https://${google_cloud_run_v2_service.app.name}-${var.region}.a.run.app"
   description = "Public URL of the Cloud Run service (hostname pattern)."
-}
-
-output "metrics_function_url" {
-  value       = google_cloudfunctions2_function.ingest.service_config[0].uri
-  description = "HTTP trigger URL for the S1 metrics ingest function."
 }
 
 output "scenario_runs_function_url" {

@@ -62,9 +62,3 @@ variable "scenario_runs_public" {
   default     = true
   description = "Whether to make the generic scenario-runs ingest Cloud Function public."
 }
-
-variable "cf_ingest_public" {
-  type        = bool
-  default     = false
-  description = "Whether to make the ingest Cloud Function public (keep false)."
-}
