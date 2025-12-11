@@ -175,35 +175,59 @@ Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
 
 ## 🧩 Metrics Collection Pipeline (Per-Scenario)
 
-Όλα τα scenarios στέλνουν stage events (commit/test/push/deploy/health/κ.λπ.) στο ίδιο HTTP endpoint `METRICS_INGEST_URL` (Cloud Function Gen2 `scenario-runs-ingest`). Δεν κρατάμε πλέον τοπικά CSV για S1.
+All scenarios send stage events (commit/test/push/deploy/health/etc.) to the same HTTP endpoint `METRICS_INGEST_URL` (Cloud Function Gen2 `scenario-runs-ingest`). No local CSVs are kept for S1 anymore.
 
 ### 📊 Data Store
 
 | Layer | Table | Purpose |
 |:------|:------|:--------|
-| **BigQuery** | `agent_metrics.runs` | Κεντρικό κατάστημα για όλα τα stage events όλων των σεναρίων. |
+| **BigQuery** | `agent_metrics.runs` | Central store for all stage events across scenarios. |
 
 ### 🧱 Schema (agent_metrics.runs)
 
 | Field | Type | Description |
 |:--|:--|:--|
-| `run_id` | STRING | GitHub Actions run id ή λογικό id. |
-| `scenario_id` | STRING | s1, s2, s3, s4, s5, ss1, ss2, κ.λπ. |
-| `stage` | STRING | Όνομα σταδίου (π.χ. `s1_push`, `s3_recover`). |
+| `run_id` | STRING | GitHub Actions run id or logical id. |
+| `scenario_id` | STRING | s1, s2, s3, s4, s5, ss1, ss2, etc. |
+| `stage` | STRING | Stage name (e.g., `s1_push`, `s3_recover`). |
 | `mode` | STRING | baseline / shadow / enforce. |
 | `status` | STRING | success / failure / cancelled. |
 | `commit_sha` | STRING | Commit SHA. |
-| `t_start` / `t_end` | TIMESTAMP | Χρονικά σημεία σταδίου. |
-| `duration_sec` | FLOAT | `t_end - t_start` (αν δεν δίνεται, υπολογίζεται στο ingest). |
-| `labels` | JSON | Free-form labels (service, env, branch, fault_type κ.λπ.). |
-| `metrics` | JSON | Στατιστικά/μετρήσεις σταδίου (π.χ. digest, healthy, ttr_sample_sec). |
-| `ingested_at` | TIMESTAMP | Χρόνος εισαγωγής στο BigQuery. |
+| `t_start` / `t_end` | TIMESTAMP | Stage timestamps. |
+| `duration_sec` | FLOAT | `t_end - t_start` (computed if absent). |
+| `labels` | JSON | Free-form labels (service, env, branch, fault_type, etc.). |
+| `metrics` | JSON | Stage metrics (e.g., digest, healthy, ttr_sample_sec). |
+| `ingested_at` | TIMESTAMP | BigQuery ingestion time. |
 
 ### ⚙️ Flow
 
-1. **GitHub Actions Workflows** (S1–S3…) στέλνουν ένα event ανά στάδιο στο `METRICS_INGEST_URL`.  
-2. **Cloud Function `scenario-runs-ingest`** κάνει normalize και γράφει στο BigQuery.  
-3. **Παράγωγες μετρικές** (TTD/CFR/DF/MTTD/MTTR κ.λπ.) υπολογίζονται downstream με SQL/BI.
+1. GitHub Actions workflows (S1–S3…) emit one event per stage to `METRICS_INGEST_URL`.  
+2. Cloud Function `scenario-runs-ingest` normalizes and writes to BigQuery.  
+3. Derived metrics (TTD/CFR/DF/MTTD/MTTR, etc.) are computed downstream via SQL/BI.
+
+### S1 → BigQuery (`scenario-runs-ingest`)
+
+Example payload for the S1 commit stage:
+
+```json
+{
+  "run_id": "123456789-1",
+  "scenario_id": "s1",
+  "stage": "s1_commit",
+  "mode": "baseline",
+  "status": "success",
+  "commit_sha": "<commit_sha>",
+  "t_start": 1733913600,
+  "t_end": 1733913600,
+  "labels": {
+    "service": "baseline-app",
+    "env": "prod",
+    "branch": "<branch>"
+  }
+}
+```
+
+Later stages (`s1_test`, `s1_push`, `s1_deploy`, `s1_health`, `s1_final`) follow the same shape, adding stage-specific metrics (e.g., `digest`, `service_url`, `healthy`, `ttd_sec`).
 
 ### 📈 Example (S1 Baseline Metrics)
 
