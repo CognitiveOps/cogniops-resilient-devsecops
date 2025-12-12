@@ -252,7 +252,11 @@ jobs:
               GCP_SA_INFRA_EMAIL:    '${{ steps.tfout.outputs.sa_infra }}',
               GCP_SA_APP_EMAIL:      '${{ steps.tfout.outputs.sa_app }}',              
               RUN_EXEC_SA_EMAIL:      '${{ steps.tfout.outputs.sa_run_exec }}',
-              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.scenario_runs_url }}'
+              METRICS_INGEST_URL:    '${{ steps.tfout.outputs.scenario_runs_url }}',
+              SS1_ALLOWED_REGIONS:   process.env.REGION,
+              SS1_ALLOWED_SERVICE_ACCOUNTS: '${{ steps.tfout.outputs.sa_app }}',
+              SS1_ALLOW_PUBLIC:      'false',
+              SS1_ALLOWED_INGRESS:   'internal'
             };
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
