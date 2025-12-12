@@ -229,6 +229,34 @@ Example payload for the S1 commit stage:
 
 Later stages (`s1_test`, `s1_push`, `s1_deploy`, `s1_health`, `s1_final`) follow the same shape, adding stage-specific metrics (e.g., `digest`, `service_url`, `healthy`, `ttd_sec`).
 
+### BigQuery: CFR/DF from `agent_metrics.runs`
+
+Example query to compute per-scenario CFR and DF directly from the unified runs table:
+
+```sql
+SELECT
+  COALESCE(scenario_id, 'UNKNOWN') AS scenario_id,
+  COUNT(*) AS total_runs,
+  SUM(CASE WHEN LOWER(status) = 'success' THEN 1 ELSE 0 END) AS success,
+  SUM(CASE WHEN LOWER(status) <> 'success' THEN 1 ELSE 0 END) AS fail,
+  ROUND(
+    SUM(CASE WHEN LOWER(status) <> 'success' THEN 1 ELSE 0 END) * 100.0
+    / COUNT(*),
+    2
+  ) AS cfr_percent,
+  ROUND(
+    SUM(CASE WHEN LOWER(status) = 'success' THEN 1 ELSE 0 END)
+    / GREATEST(
+        DATE_DIFF(MAX(DATE(t_end)), MIN(DATE(t_end)), DAY) + 1,
+        1
+      ),
+    2
+  ) AS df_per_day
+FROM `cogent-wall-445012-h5.agent_metrics.runs`
+GROUP BY scenario_id
+ORDER BY scenario_id;
+```
+
 ### 📈 Example (S1 Baseline Metrics)
 
 | Metric | Value | Meaning |
@@ -236,6 +264,20 @@ Later stages (`s1_test`, `s1_push`, `s1_deploy`, `s1_health`, `s1_final`) follow
 | **TTD = 118 s** | Avg commit → healthy deployment. |
 | **CFR = 10 %** | 1 failed run in 10. |
 | **DF = 3.4 /day** | Successful deployments per day. |
+
+---
+
+## 🛡️ SS1 – Security & Policy Audit (Pipeline-Centric)
+
+SS1 adds a dedicated security/policy audit layer around the S1 CI/CD pipeline without changing its behavior. It continuously verifies security posture, detects policy deviations, and captures audit evidence aligned with NIST SP 800-204C, SSDF (SP 800-218), SLSA, CNCF Cloud Native Security, and GitHub Actions hardening.
+
+- **Scope:** Pipeline only (build → test → push → deploy) for the web service; checks artifact immutability, workflow/security guardrails, and deploy-time runtime config. Out of scope: edge/OTA/resilience faults, PQC validation (handled later).
+- **Principles:** Policy-as-Code (OPA), automated compliance checks, auditability/traceability, supply-chain risk reduction.
+- **Metrics:** FDR (policy violations detected), ACR (audit completeness), and impact on CFR/DF when the security gate fails.
+- **Policies implemented:** `security/policies/ss1.rego` enforces prod-only deploys, secure-* naming, immutable tags (no `latest`), CPU/memory bounds, allowed regions, allowed ingress, public access flag, allowed service accounts, and allowed registry prefix.
+- **Config via repo vars:** `SS1_ALLOW_PUBLIC` (default false), `SS1_ALLOWED_INGRESS` (default internal), `SS1_ALLOWED_REGIONS`, `SS1_ALLOWED_SERVICE_ACCOUNTS`; image registry prefix derived from Artifact Registry settings.
+- **BigQuery ingest:** SS1 stages (`ss1_commit`, `ss1_test`, `ss1_policy`, `ss1_push`, `ss1_deploy`, `ss1_health`, `ss1_final`) are posted to `scenario-runs-ingest` with `scenario_id="ss1"`, carrying stage-specific metrics (policy violations, digest, service URL, health, TTD).
+- **References:** NIST SP 800-204C, NIST SSDF (SP 800-218), SLSA, CNCF Cloud Native Security whitepaper, GitHub Actions security hardening, OPA policy-as-code literature.
 
 ---
 
