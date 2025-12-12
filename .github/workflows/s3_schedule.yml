@@ -5,6 +5,10 @@ on:
     # Daily at 02:00 UTC
     - cron: "0 2 * * *"
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   guard:
     runs-on: ubuntu-latest
