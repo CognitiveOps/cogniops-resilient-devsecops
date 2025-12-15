@@ -4,6 +4,8 @@ on:
   schedule:
     # Daily at 02:00 UTC
     - cron: "0 2 * * *"
+  # Manual trigger for debugging or ad-hoc runs
+  workflow_dispatch:
 
 permissions:
   contents: read
