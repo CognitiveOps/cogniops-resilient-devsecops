@@ -927,8 +927,7 @@ Implementation (real edge + twin):
 
 ## 🧠 Next Steps
 - **S4:** Security & PQC validation tests  
-- **S5:** Explainability / Human-in-the-Loop metrics  
-- **SS1:** Policy audit & compliance trace  
+- **S5:** Explainability / Human-in-the-Loop metrics   
 - **SS2:** Adaptive threat mitigation simulation  
 - **Agent Core:** Autonomous reasoning + XAI integration  
 
