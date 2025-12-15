@@ -19,21 +19,20 @@ env:
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
-  SS1_SUBSCENARIO: "${{ matrix.subscenario || 'P0' }}"  # P0 clean, P1 mutable tag, P2 public ingress, P3 unapproved registry, P4 wrong region
 
 permissions:
   id-token: write
   contents: read
-
-concurrency:
-  group: ss1-${{ github.ref }}-${{ matrix.subscenario || 'P0' }}
-  cancel-in-progress: true
 
 jobs:
   ss1:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
+    concurrency:
+      group: ss1-${{ github.ref }}-${{ matrix.subscenario }}
+      cancel-in-progress: true
 
     strategy:
       fail-fast: false
@@ -43,6 +42,7 @@ jobs:
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       MODE: baseline
+      SS1_SUBSCENARIO: ${{ matrix.subscenario }}
 
     defaults:
       run:
