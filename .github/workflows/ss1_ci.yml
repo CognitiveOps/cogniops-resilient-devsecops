@@ -19,6 +19,7 @@ env:
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
+  SS1_SUBSCENARIO: "P0"  # P0 clean, P1 mutable tag, P2 public ingress, P3 unapproved registry, P4 wrong region
 
 permissions:
   id-token: write
@@ -91,6 +92,34 @@ jobs:
           echo "BRANCH=${{ github.ref_name }}" >> "$GITHUB_ENV"
           echo "RUN_ENV=cloud-run" >> "$GITHUB_ENV"
 
+      - name: Apply SS1 sub-scenario overrides
+        id: ss1sub
+        run: |
+          set -euo pipefail
+          sub="${SS1_SUBSCENARIO:-P0}"
+          POLICY_IMAGE_TAG="${GITHUB_SHA}"
+          POLICY_ALLOW_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
+          POLICY_INGRESS="${SS1_ALLOWED_INGRESS:-internal}"
+          POLICY_REGION="${REGION}"
+          POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}"
+          POLICY_SERVICE_ACCOUNT="${{ vars.GCP_SA_APP_EMAIL }}"
+          POLICY_DESC="clean"
+          case "$sub" in
+            P1) POLICY_IMAGE_TAG="latest"; POLICY_DESC="mutable-tag";;
+            P2) POLICY_ALLOW_PUBLIC="true"; POLICY_DESC="public-ingress";;
+            P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry";;
+            P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region";;
+            *) POLICY_DESC="clean";;
+          esac
+          echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "POLICY_ALLOW_PUBLIC=$POLICY_ALLOW_PUBLIC" >> "$GITHUB_ENV"
+          echo "POLICY_INGRESS=$POLICY_INGRESS" >> "$GITHUB_ENV"
+          echo "POLICY_REGION=$POLICY_REGION" >> "$GITHUB_ENV"
+          echo "POLICY_IMAGE_REPO=$POLICY_IMAGE_REPO" >> "$GITHUB_ENV"
+          echo "POLICY_SERVICE_ACCOUNT=$POLICY_SERVICE_ACCOUNT" >> "$GITHUB_ENV"
+          echo "POLICY_DESC=$POLICY_DESC" >> "$GITHUB_ENV"
+          echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
+
       # -------------------------
       # Resolve ingest endpoint + token
       # -------------------------
@@ -128,7 +157,9 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}"
             }
           }
           EOF
@@ -165,7 +196,9 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}"
             }
           }
           EOF
@@ -187,14 +220,14 @@ jobs:
 
           jq -n \
             --arg service "$SERVICE" \
-            --arg region "$REGION" \
+            --arg region "${POLICY_REGION}" \
             --arg env "$ENV" \
-            --arg image_tag "${GITHUB_SHA}" \
+            --arg image_tag "${POLICY_IMAGE_TAG}" \
             --arg allowed_registry "$SS1_ALLOWED_REGISTRY_PREFIX" \
-            --arg image_repo "${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}" \
-            --arg allow_public "${{ vars.SS1_ALLOW_PUBLIC }}" \
-            --arg ingress "${{ vars.SS1_ALLOWED_INGRESS }}" \
-            --arg service_account "${{ vars.GCP_SA_APP_EMAIL }}" \
+            --arg image_repo "${POLICY_IMAGE_REPO}" \
+            --arg allow_public "${POLICY_ALLOW_PUBLIC}" \
+            --arg ingress "${POLICY_INGRESS}" \
+            --arg service_account "${POLICY_SERVICE_ACCOUNT}" \
             --arg regions "${{ vars.SS1_ALLOWED_REGIONS }}" \
             --arg sa_list "${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS }}" \
             '{
@@ -209,7 +242,7 @@ jobs:
               allowed_ingress: ($ingress | split(",") | map(select(length>0))),
               service_account: $service_account,
               allowed_service_accounts: ([ $service_account ] + ($sa_list | split(",") | map(select(length>0)))) | unique,
-              allowed_regions: ([ $region ] + ($regions | split(",") | map(select(length>0)))) | unique,
+              allowed_regions: ($regions | split(",") | map(select(length>0))),
               allowed_registry_prefix: $allowed_registry,
               image_repo: $image_repo
             }' > input.json
@@ -252,7 +285,9 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}"
             }
           }
           EOF

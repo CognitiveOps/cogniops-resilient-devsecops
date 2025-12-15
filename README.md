@@ -279,6 +279,20 @@ SS1 adds a dedicated security/policy audit layer around the S1 CI/CD pipeline wi
 - **BigQuery ingest:** SS1 stages (`ss1_commit`, `ss1_test`, `ss1_policy`, `ss1_push`, `ss1_deploy`, `ss1_health`, `ss1_final`) are posted to `scenario-runs-ingest` with `scenario_id="ss1"`, carrying stage-specific metrics (policy violations, digest, service URL, health, TTD).
 - **References:** NIST SP 800-204C, NIST SSDF (SP 800-218), SLSA, CNCF Cloud Native Security whitepaper, GitHub Actions security hardening, OPA policy-as-code literature.
 
+### SS1 Sub-Scenarios (policy violations)
+
+Deterministic sub-scenarios for policy evaluation (labelled in `labels.subscenario` and `labels.policy`):
+
+| Sub-Scenario | What it tests             | Inputs tweaked                     |
+| ------------ | ------------------------- | ---------------------------------- |
+| **SS1-P0**   | Clean run (no violation)  | Default settings                   |
+| **SS1-P1**   | Mutable image tag         | `image_tag = latest`               |
+| **SS1-P2**   | Public ingress allowed    | `allow_unauthenticated = true`     |
+| **SS1-P3**   | Unapproved registry       | `image_repo = docker.io/...`       |
+| **SS1-P4**   | Wrong region              | `region = us-central1`             |
+
+All other pipeline stages remain the same; only the policy inputs change, and policy/test/deploy/health metrics are emitted per stage to BigQuery.
+
 ---
 
 ## 🚀 S2 – Pipeline → Edge Deployment (OTA Baseline)
