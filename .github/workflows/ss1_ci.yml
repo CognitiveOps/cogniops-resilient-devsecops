@@ -1,4 +1,4 @@
-# SS1 – Secure CI/CD: adds OPA policy gate, keeps epochs + CFR/DF
+# SS1 – Secure CI/CD: OPA policy gate + audit metrics (pipeline-centric)
 name: SS1 Secure CI/CD
 
 on:
@@ -15,8 +15,10 @@ env:
   SERVICE: "secure-app"
   REPO_LOCATION: "europe"
   AR_REPO: "apps"
-  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   ENV: "prod"
+
+  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+  SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
 
 permissions:
   id-token: write
@@ -31,24 +33,30 @@ jobs:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       MODE: baseline
-    defaults: { run: { shell: bash } }
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Compute IMAGE var
         run: |
-          IMAGE="$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE:${GITHUB_SHA}"
+          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${GITHUB_SHA}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Start timer
         id: t0
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      # -------------------------
       # Auth & tooling
+      # -------------------------
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -62,55 +70,56 @@ jobs:
         run: gcloud auth configure-docker "${REPO_LOCATION}-docker.pkg.dev" --quiet
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps (tests + OPA)
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install pytest httpx
+          pip install pytest httpx jq
           curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
           chmod +x opa
           sudo mv opa /usr/local/bin/opa
 
-      # Epoch context (E2 = SS1)
-      - name: Set run context (epoch/branch/env)
+      # -------------------------
+      # Epoch / context
+      # -------------------------
+      - name: Set run context
         run: |
-          echo "EPOCH_ID=E2" >> $GITHUB_ENV
-          echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
-          echo "RUN_ENV=cloud-run" >> $GITHUB_ENV
+          echo "EPOCH_ID=E2" >> "$GITHUB_ENV"
+          echo "BRANCH=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          echo "RUN_ENV=cloud-run" >> "$GITHUB_ENV"
 
-      # Resolve ingest endpoint + ID token
+      # -------------------------
+      # Resolve ingest endpoint + token
+      # -------------------------
       - name: Resolve ingest endpoint and ID token
-        id: ingest
         run: |
           set -euo pipefail
-          INGEST_URL="${METRICS_INGEST_URL:-}"
-          if [ -z "$INGEST_URL" ]; then
-            echo "Ingest URL not configured (METRICS_INGEST_URL)." >&2
-            exit 1
-          fi
-          TOKEN=$(gcloud auth print-identity-token \
-            --audiences="$INGEST_URL" \
-            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
-          echo "INGEST_URL=$INGEST_URL" >> "$GITHUB_ENV"
-          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          echo "ingest_url=$INGEST_URL" >> "$GITHUB_OUTPUT"
+          : "${METRICS_INGEST_URL:?METRICS_INGEST_URL not set}"
 
-      # Begin run (commit event)
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}")"
+
+          echo "INGEST_URL=${METRICS_INGEST_URL}" >> "$GITHUB_ENV"
+          echo "ID_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
+
+      # -------------------------
+      # Commit event
+      # -------------------------
       - name: "Send metrics: commit"
         run: |
-          set -euo pipefail
           T0=${{ steps.t0.outputs.ts }}
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_commit",
-            "mode": "${{ env.MODE }}",
+            "mode": "${MODE}",
             "status": "success",
             "commit_sha": "${{ github.sha }}",
             "t_start": ${T0},
@@ -118,14 +127,16 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
             }
           }
           EOF
 
+      # -------------------------
       # Tests (non-fatal capture)
-      - name: Unit tests (capture exit code)
+      # -------------------------
+      - name: Unit tests
         id: test
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/baseline
@@ -135,17 +146,17 @@ jobs:
           pytest -q baseline/services/app/tests
           CODE=$?
           T_END=$(date +%s)
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
           STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_test",
-            "mode": "${{ env.MODE }}",
+            "mode": "${MODE}",
             "status": "${STATUS}",
             "commit_sha": "${{ github.sha }}",
             "t_start": ${T_START},
@@ -153,69 +164,63 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
             }
           }
           EOF
           exit 0
 
+      # -------------------------
       # Build
+      # -------------------------
       - name: Build image
-        run: |
-          set -euo pipefail
-          docker build -t app-image:local baseline/services/app
+        run: docker build -t app-image:local baseline/services/app
 
-      # OPA policy gate (example: enforce memory/cpu limits, no :latest, env guardrails, etc.)
-      - name: OPA policy evaluation (Rego)
+      # -------------------------
+      # OPA policy gate
+      # -------------------------
+      - name: OPA policy evaluation
         id: opa
         run: |
           set -euo pipefail
-          ALLOWED_REGIONS="${{ vars.SS1_ALLOWED_REGIONS || '' }}"
-          ALLOWED_SA="${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS || '' }}"
-          ALLOW_PUBLIC="${{ vars.SS1_ALLOW_PUBLIC || 'false' }}"
-          ALLOWED_INGRESS="${{ vars.SS1_ALLOWED_INGRESS || 'internal' }}"
-          ALLOWED_REGISTRY="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}"
-          IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}"
 
           jq -n \
             --arg service "$SERVICE" \
             --arg region "$REGION" \
             --arg env "$ENV" \
             --arg image_tag "${GITHUB_SHA}" \
-            --arg allow_public "$ALLOW_PUBLIC" \
-            --arg ingress_list "$ALLOWED_INGRESS" \
+            --arg allowed_registry "$SS1_ALLOWED_REGISTRY_PREFIX" \
+            --arg image_repo "${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}" \
+            --arg allow_public "${{ vars.SS1_ALLOW_PUBLIC }}" \
+            --arg ingress "${{ vars.SS1_ALLOWED_INGRESS }}" \
             --arg service_account "${{ vars.GCP_SA_APP_EMAIL }}" \
-            --arg regions "$ALLOWED_REGIONS" \
-            --arg sa_list "$ALLOWED_SA" \
-            --arg allowed_registry "$ALLOWED_REGISTRY" \
-            --arg image_repo "$IMAGE_REPO" \
+            --arg regions "${{ vars.SS1_ALLOWED_REGIONS }}" \
+            --arg sa_list "${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS }}" \
             '{
               service: $service,
               region: $region,
               env: $env,
               image_tag: $image_tag,
-              limits: {cpu:1,memory:"512Mi"},
+              limits: {cpu:1, memory:"512Mi"},
               allow_unauthenticated: ($allow_public=="true"),
               allowed_public: ($allow_public=="true"),
-              ingress: $ingress_list,
-              allowed_ingress: ($ingress_list | split(",") | map(select(length>0))),
+              ingress: $ingress,
+              allowed_ingress: ($ingress | split(",") | map(select(length>0))),
               service_account: $service_account,
-              allowed_service_accounts: ([ $service_account ] + ($sa_list | split(",") | map(select(length>0))) ) | unique,
-              allowed_regions: ([$region] + ($regions | split(",") | map(select(length>0)))) | unique,
+              allowed_service_accounts: ([ $service_account ] + ($sa_list | split(",") | map(select(length>0)))) | unique,
+              allowed_regions: ([ $region ] + ($regions | split(",") | map(select(length>0)))) | unique,
               allowed_registry_prefix: $allowed_registry,
               image_repo: $image_repo
             }' > input.json
 
-          vio=$(opa eval -i input.json -d security/policies 'count(data.app.policy.deny)' -f raw || echo 0)
-          if ! opa eval --format pretty -i input.json -d security/policies 'data.app.policy.deny'; then
-            echo "violations=0" >> $GITHUB_OUTPUT
-          else
-            echo "violations=${vio}" >> $GITHUB_OUTPUT
-          fi
+          VIO=$(opa eval -i input.json -d security/policies \
+            'count(data.app.policy.deny)' -f raw)
 
-          if [ "${vio}" != "0" ]; then
-            echo "Policy violations: ${vio}"
+          echo "violations=${VIO}" >> "$GITHUB_OUTPUT"
+
+          if [ "$VIO" != "0" ]; then
+            opa eval -i input.json -d security/policies 'data.app.policy.deny'
             exit 1
           fi
 
@@ -223,22 +228,22 @@ jobs:
         if: always()
         run: |
           GATE=$([ "${{ steps.opa.outcome }}" = "success" ] && echo pass || echo fail)
-          VIO="${{ steps.opa.outputs.violations || '0' }}"
-          T_START=$(date +%s)
-          T_END=$T_START
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+          VIO="${{ steps.opa.outputs.violations }}"
+          TS=$(date +%s)
+
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_policy",
-            "mode": "${{ env.MODE }}",
+            "mode": "${MODE}",
             "status": "${GATE}",
             "commit_sha": "${{ github.sha }}",
-            "t_start": ${T_START},
-            "t_end": ${T_END},
+            "t_start": ${TS},
+            "t_end": ${TS},
             "metrics": {
               "policy_gate": "${GATE}",
               "policy_violations": "${VIO}"
@@ -246,142 +251,110 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
             }
           }
           EOF
 
-      # Push image
+      # -------------------------
+      # Push
+      # -------------------------
       - name: Push image
-        id: push
         run: |
-          set +e
-          T_START=$(date +%s)
+          set -euo pipefail
           docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
-          PUSH_STATUS=$?
-          DIGEST=""
-          DIG_STATUS=0
-          if [ "$PUSH_STATUS" = "0" ]; then
-            DIGEST=$(gcloud artifacts docker images list \
-              "$REPO_LOCATION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$SERVICE" \
-              --include-tags --format='get(DIGEST)' --filter="TAGS:${GITHUB_SHA}" | head -n1)
-            echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
-            DIG_STATUS=$?
-          fi
-          CODE=$PUSH_STATUS
-          if [ "$DIG_STATUS" != "0" ]; then CODE=$DIG_STATUS; fi
-          T_END=$(date +%s)
-          STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
-          DIG="${DIGEST:-""}"
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -d @- <<EOF
-          {
-            "run_id": "${{ env.RUN_ID }}",
-            "scenario_id": "ss1",
-            "stage": "ss1_push",
-            "mode": "${{ env.MODE }}",
-            "status": "${STATUS}",
-            "commit_sha": "${{ github.sha }}",
-            "t_start": ${T_START},
-            "t_end": ${T_END},
-            "metrics": {
-              "digest": "${DIG}"
-            },
-            "labels": {
-              "service": "${SERVICE}",
-              "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
-              "epoch": "E2",
-              "image": "${IMAGE}"
-            }
-          }
-          EOF
-          exit $CODE
 
-      # Deploy (can be private or public; keep same as S1 for now)
+      # -------------------------
+      # Deploy (PRIVATE)
+      # -------------------------
       - name: Deploy to Cloud Run
         id: deploy
         run: |
-          set +e
+          set -euo pipefail
           T_START=$(date +%s)
+
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
-            --allow-unauthenticated \
             --platform managed \
             --memory 512Mi \
             --cpu 1 \
             --min-instances 0 \
             --max-instances 2 \
             --service-account "${{ vars.RUN_EXEC_SA_EMAIL }}"
-          DEPLOY_STATUS=$?
-          URL=""
-          if [ "$DEPLOY_STATUS" = "0" ]; then
-            URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
-            : "${URL:?failed to resolve Cloud Run URL}"
-            echo "url=$URL" >> "$GITHUB_OUTPUT"
-          fi
-          CODE=$DEPLOY_STATUS
+
+          URL="$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --platform managed \
+            --format='value(status.url)')"
+
           T_END=$(date +%s)
-          STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_deploy",
-            "mode": "${{ env.MODE }}",
-            "status": "${STATUS}",
+            "mode": "${MODE}",
+            "status": "success",
             "commit_sha": "${{ github.sha }}",
             "t_start": ${T_START},
             "t_end": ${T_END},
+            "metrics": {
+              "service_url": "${URL}"
+            },
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
-            },
-            "metrics": {
-              "service_url": "${URL:-}"
             }
           }
           EOF
-          exit $CODE
 
-      # Health (same retry/backoff)
-      - name: Health Check (with retries)
+      # -------------------------
+      # Health (OIDC-authenticated)
+      # -------------------------
+      - name: Health Check (OIDC)
         id: health
         run: |
-          set +e
+          set -euo pipefail
           T_START=$(date +%s)
-          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')"
-          : "${URL:?Could not resolve Cloud Run URL}"
+
+          URL="$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --platform managed \
+            --format='value(status.url)')"
+
+          ID_TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
+
           OK=0
           LAST_CODE=000
           for i in {1..6}; do
-            LAST_CODE=$(curl -Ls -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "$URL" || echo 000)
+            LAST_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
+              "$URL/status" || echo 000)
             if [[ "$LAST_CODE" == "200" ]]; then OK=1; break; fi
             sleep 10
           done
+
           T_END=$(date +%s)
-          echo "healthy=$OK" >> "$GITHUB_OUTPUT"
-          STATUS=$([ "$OK" = "1" ] && echo success || echo failure)
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_health",
-            "mode": "${{ env.MODE }}",
-            "status": "${STATUS}",
+            "mode": "${MODE}",
+            "status": "$([ "$OK" = "1" ] && echo success || echo failure)",
             "commit_sha": "${{ github.sha }}",
             "t_start": ${T_START},
             "t_end": ${T_END},
@@ -392,37 +365,39 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
             }
           }
           EOF
-          if [[ "$OK" != "1" ]]; then exit 1; fi
 
+          [ "$OK" = "1" ]
+
+      # -------------------------
+      # Final
+      # -------------------------
       - name: End timer
         id: t1
         if: always()
         run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      # Final metrics event
-      - name: "Send metrics: final (overall)"
+      - name: "Send metrics: final"
         if: always()
         run: |
-          set -euo pipefail
           T0=${{ steps.t0.outputs.ts }}
           T1=${{ steps.t1.outputs.ts }}
-          STATUS="${{ job.status }}"
-          DUR=$(( T1 - T0 ))
-          curl -sS -X POST "${INGEST_URL}" \
-            -H "Content-Type: application/json" \
+          DUR=$((T1 - T0))
+
+          curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
             -d @- <<EOF
           {
-            "run_id": "${{ env.RUN_ID }}",
+            "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
             "stage": "ss1_final",
-            "mode": "${{ env.MODE }}",
-            "status": "${STATUS}",
+            "mode": "${MODE}",
+            "status": "${{ job.status }}",
             "commit_sha": "${{ github.sha }}",
             "t_start": ${T0},
             "t_end": ${T1},
@@ -432,29 +407,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}",
+              "branch": "${BRANCH}",
               "epoch": "E2"
             }
           }
           EOF
-
-      # Summary
-      - name: Summary
-        if: always()
-        run: |
-          set -euo pipefail
-          DUR=$(( ${{ steps.t1.outputs.ts }} - ${{ steps.t0.outputs.ts }} ))
-          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --platform managed --format='value(status.url)')" || URL="<unknown>"
-          VIOL="${{ steps.opa.outputs.violations || '<n/a>' }}"
-          {
-            echo "### SS1 Run"
-            echo "- Status: ${{ job.status }}"
-            echo "- Service URL: ${URL}"
-            echo "- Commit: ${{ github.sha }}"
-            echo "- Full TTD (sec): $DUR"
-            echo "- Image: $IMAGE"
-            echo "- Digest: ${DIGEST}"
-            echo "- Health: ${{ steps.health.outputs.healthy || '<n/a>' }}"
-            echo "- Policy gate: violations=${VIOL}"
-            echo "- Epoch: ${{ env.EPOCH_ID }} | Branch: ${{ env.BRANCH }} | Env: ${{ env.RUN_ENV }}"
-          } >> "$GITHUB_STEP_SUMMARY"

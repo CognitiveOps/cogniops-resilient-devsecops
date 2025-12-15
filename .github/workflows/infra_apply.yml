@@ -256,7 +256,8 @@ jobs:
               SS1_ALLOWED_REGIONS:   process.env.REGION,
               SS1_ALLOWED_SERVICE_ACCOUNTS: '${{ steps.tfout.outputs.sa_app }}',
               SS1_ALLOW_PUBLIC:      'false',
-              SS1_ALLOWED_INGRESS:   'internal'
+              SS1_ALLOWED_INGRESS:   'internal',
+              SS1_ALLOWED_REGISTRY_PREFIX: `${process.env.REPO_LOCATION}-docker.pkg.dev/${process.env.PROJECT_ID}/apps/`
             };
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }
