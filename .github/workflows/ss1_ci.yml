@@ -323,6 +323,11 @@ jobs:
           set -euo pipefail
           T_START=$(date +%s)
 
+          ALLOW_FLAG="--no-allow-unauthenticated"
+          if [ "${POLICY_ALLOW_PUBLIC}" = "true" ]; then
+            ALLOW_FLAG="--allow-unauthenticated"
+          fi
+
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
@@ -331,7 +336,8 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 2 \
-            --service-account "${{ vars.RUN_EXEC_SA_EMAIL }}"
+            --service-account "${{ vars.RUN_EXEC_SA_EMAIL }}" \
+            ${ALLOW_FLAG}
 
           URL="$(gcloud run services describe "$SERVICE" \
             --region "$REGION" \
