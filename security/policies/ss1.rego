@@ -24,7 +24,12 @@ deny contains sprintf("environment %v is not allowed (prod only)", [input.env]) 
 
 deny contains sprintf("region %v not in allowed_regions", [input.region]) if {
   count(input.allowed_regions) > 0
-  not input.region == input.allowed_regions[_]
+  not any_allowed_region
+}
+
+any_allowed_region if {
+  input.allowed_regions
+  input.region == input.allowed_regions[_]
 }
 
 deny contains "image tag is missing" if {
@@ -41,11 +46,11 @@ deny contains "memory limit must be set" if {
 
 deny contains sprintf("memory limit must be an Mi suffix, got %v", [input.limits.memory]) if {
   input.limits.memory
-  not re_match("^[0-9]+Mi$", input.limits.memory)
+  not regex.match("^[0-9]+Mi$", input.limits.memory)
 }
 
 deny contains sprintf("memory limit too low: %v (min 512Mi)", [input.limits.memory]) if {
-  re_match("^[0-9]+Mi$", input.limits.memory)
+  regex.match("^[0-9]+Mi$", input.limits.memory)
   to_number(replace(input.limits.memory, "Mi", "")) < 512
 }
 
@@ -70,12 +75,22 @@ deny contains "allow_unauthenticated does not match allowed_public policy" if {
 
 deny contains sprintf("ingress mode %v not in allowed list", [input.ingress]) if {
   count(input.allowed_ingress) > 0
-  not input.ingress == input.allowed_ingress[_]
+  not any_allowed_ingress
+}
+
+any_allowed_ingress if {
+  input.allowed_ingress
+  input.ingress == input.allowed_ingress[_]
 }
 
 deny contains sprintf("service account %v not in allowed list", [input.service_account]) if {
   count(input.allowed_service_accounts) > 0
-  not input.service_account == input.allowed_service_accounts[_]
+  not any_allowed_sa
+}
+
+any_allowed_sa if {
+  input.allowed_service_accounts
+  input.service_account == input.allowed_service_accounts[_]
 }
 
 deny contains sprintf("image repo %v not allowed (must start with %v)", [input.image_repo, input.allowed_registry_prefix]) if {
