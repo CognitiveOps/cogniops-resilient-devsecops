@@ -225,6 +225,7 @@ jobs:
       # -------------------------
       - name: OPA policy evaluation
         id: opa
+        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -306,6 +307,7 @@ jobs:
       # Push
       # -------------------------
       - name: Push image
+        if: ${{ steps.opa.outcome == 'success' }}
         run: |
           set -euo pipefail
           docker tag app-image:local "$IMAGE"
@@ -316,6 +318,7 @@ jobs:
       # -------------------------
       - name: Deploy to Cloud Run
         id: deploy
+        if: ${{ steps.opa.outcome == 'success' }}
         run: |
           set -euo pipefail
           T_START=$(date +%s)
@@ -367,6 +370,7 @@ jobs:
       # -------------------------
       - name: Health Check
         id: health
+        if: ${{ steps.opa.outcome == 'success' }}
         run: |
           set -euo pipefail
           T_START=$(date +%s)
