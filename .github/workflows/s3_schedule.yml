@@ -6,6 +6,9 @@ on:
     - cron: "0 2 * * *"
   # Manual trigger for debugging or ad-hoc runs
   workflow_dispatch:
+  # External trigger via GitHub API (repository_dispatch)
+  repository_dispatch:
+    types: [s3_schedule]
 
 permissions:
   contents: read
