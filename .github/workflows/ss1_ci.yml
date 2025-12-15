@@ -356,7 +356,7 @@ jobs:
       # -------------------------
       # Health (OIDC-authenticated)
       # -------------------------
-      - name: Health Check (OIDC)
+      - name: Health Check
         id: health
         run: |
           set -euo pipefail
@@ -367,11 +367,17 @@ jobs:
             --platform managed \
             --format='value(status.url)')"
 
+          AUTH=()
+          if [ "${POLICY_ALLOW_PUBLIC}" != "true" ]; then
+            TOK=$(gcloud auth print-identity-token --audiences="$URL" --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
+            AUTH=(-H "Authorization: Bearer ${TOK}")
+          fi
+
           OK=0
           LAST_CODE=000
           for i in {1..6}; do
             LAST_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer ${ID_TOKEN}" \
+              "${AUTH[@]}" \
               "$URL/status" || echo 000)
             if [[ "$LAST_CODE" == "200" ]]; then OK=1; break; fi
             sleep 10
@@ -400,7 +406,9 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}"
             }
           }
           EOF
