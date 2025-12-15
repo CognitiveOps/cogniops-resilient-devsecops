@@ -129,7 +129,8 @@ jobs:
           : "${METRICS_INGEST_URL:?METRICS_INGEST_URL not set}"
 
           TOKEN="$(gcloud auth print-identity-token \
-            --audiences="${METRICS_INGEST_URL}")"
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
 
           echo "INGEST_URL=${METRICS_INGEST_URL}" >> "$GITHUB_ENV"
           echo "ID_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
@@ -365,8 +366,6 @@ jobs:
             --region "$REGION" \
             --platform managed \
             --format='value(status.url)')"
-
-          ID_TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
 
           OK=0
           LAST_CODE=000
