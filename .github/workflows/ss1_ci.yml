@@ -19,14 +19,14 @@ env:
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
-  SS1_SUBSCENARIO: "P0"  # P0 clean, P1 mutable tag, P2 public ingress, P3 unapproved registry, P4 wrong region
+  SS1_SUBSCENARIO: "${{ matrix.subscenario || 'P0' }}"  # P0 clean, P1 mutable tag, P2 public ingress, P3 unapproved registry, P4 wrong region
 
 permissions:
   id-token: write
   contents: read
 
 concurrency:
-  group: ss1-${{ github.ref }}
+  group: ss1-${{ github.ref }}-${{ matrix.subscenario || 'P0' }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +34,11 @@ jobs:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        subscenario: [P0, P1, P2, P3, P4]
 
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -97,11 +102,14 @@ jobs:
         run: |
           set -euo pipefail
           sub="${SS1_SUBSCENARIO:-P0}"
+          BASE_SERVICE="${SERVICE:-secure-app}"
+          sub_lower="$(printf '%s' "$sub" | tr '[:upper:]' '[:lower:]')"
+          SERVICE_NAME="${BASE_SERVICE}-${sub_lower}"
           POLICY_IMAGE_TAG="${GITHUB_SHA}"
           POLICY_ALLOW_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
           POLICY_INGRESS="${SS1_ALLOWED_INGRESS:-internal}"
           POLICY_REGION="${REGION}"
-          POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}"
+          POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${BASE_SERVICE}"
           POLICY_SERVICE_ACCOUNT="${{ vars.GCP_SA_APP_EMAIL }}"
           POLICY_DESC="clean"
           case "$sub" in
@@ -119,6 +127,7 @@ jobs:
           echo "POLICY_SERVICE_ACCOUNT=$POLICY_SERVICE_ACCOUNT" >> "$GITHUB_ENV"
           echo "POLICY_DESC=$POLICY_DESC" >> "$GITHUB_ENV"
           echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
+          echo "SERVICE=$SERVICE_NAME" >> "$GITHUB_ENV"
 
       # -------------------------
       # Resolve ingest endpoint + token
