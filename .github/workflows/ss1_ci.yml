@@ -113,11 +113,12 @@ jobs:
           POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${BASE_SERVICE}"
           POLICY_SERVICE_ACCOUNT="${{ vars.GCP_SA_APP_EMAIL }}"
           POLICY_DESC="clean"
+          VIOLATION_EXPECTED="false"
           case "$sub" in
-            P1) POLICY_IMAGE_TAG="latest"; POLICY_DESC="mutable-tag";;
-            P2) POLICY_ALLOW_PUBLIC="true"; POLICY_DESC="public-ingress";;
-            P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry";;
-            P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region";;
+            P1) POLICY_IMAGE_TAG="latest"; POLICY_DESC="mutable-tag"; VIOLATION_EXPECTED="true";;
+            P2) POLICY_ALLOW_PUBLIC="true"; POLICY_DESC="public-ingress"; VIOLATION_EXPECTED="true";;
+            P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry"; VIOLATION_EXPECTED="true";;
+            P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region"; VIOLATION_EXPECTED="true";;
             *) POLICY_DESC="clean";;
           esac
           echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
@@ -129,6 +130,7 @@ jobs:
           echo "POLICY_SERVICE_ACCOUNT=$POLICY_SERVICE_ACCOUNT" >> "$GITHUB_ENV"
           echo "POLICY_DESC=$POLICY_DESC" >> "$GITHUB_ENV"
           echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
+          echo "VIOLATION_EXPECTED=$VIOLATION_EXPECTED" >> "$GITHUB_ENV"
           echo "SERVICE=$SERVICE_NAME" >> "$GITHUB_ENV"
 
       # -------------------------
@@ -171,7 +173,8 @@ jobs:
               "branch": "${BRANCH}",
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
-              "policy": "${POLICY_DESC}"
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
@@ -210,7 +213,8 @@ jobs:
               "branch": "${BRANCH}",
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
-              "policy": "${POLICY_DESC}"
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
@@ -274,8 +278,12 @@ jobs:
       - name: "Send metrics: policy"
         if: always()
         run: |
-          GATE=$([ "${{ steps.opa.outcome }}" = "success" ] && echo pass || echo fail)
           VIO="${{ steps.opa.outputs.violations }}"
+          VIO_INT=${VIO:-0}
+          GATE="pass"
+          if [ "$VIO_INT" != "0" ]; then
+            GATE="deny"
+          fi
           TS=$(date +%s)
 
           curl -sS -X POST "$INGEST_URL" \
@@ -293,7 +301,7 @@ jobs:
             "t_end": ${TS},
             "metrics": {
               "policy_gate": "${GATE}",
-              "policy_violations": "${VIO}"
+              "policy_violations": ${VIO_INT}
             },
             "labels": {
               "service": "${SERVICE}",
@@ -301,7 +309,8 @@ jobs:
               "branch": "${BRANCH}",
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
-              "policy": "${POLICY_DESC}"
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
@@ -430,7 +439,8 @@ jobs:
               "branch": "${BRANCH}",
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
-              "policy": "${POLICY_DESC}"
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
