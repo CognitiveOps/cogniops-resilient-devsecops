@@ -359,6 +359,36 @@ jobs:
       # -------------------------
       # Deploy (PRIVATE)
       # -------------------------
+      - name: "Send metrics: deploy (skipped due to policy)"
+        if: ${{ steps.opa.outcome != 'success' }}
+        run: |
+          TS=$(date +%s)
+          curl -sS -X POST "$INGEST_URL" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "ss1",
+            "stage": "ss1_deploy",
+            "mode": "${MODE}",
+            "status": "skipped",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${TS},
+            "t_end": ${TS},
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${BRANCH}",
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "reason": "policy_violation"
+            }
+          }
+          EOF
+
       - name: Deploy to Cloud Run
         id: deploy
         if: ${{ steps.opa.outcome == 'success' }}
@@ -420,6 +450,40 @@ jobs:
       # -------------------------
       # Health (OIDC-authenticated)
       # -------------------------
+      - name: "Send metrics: health (skipped due to policy)"
+        if: ${{ steps.opa.outcome != 'success' }}
+        run: |
+          TS=$(date +%s)
+          curl -sS -X POST "$INGEST_URL" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "ss1",
+            "stage": "ss1_health",
+            "mode": "${MODE}",
+            "status": "skipped",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${TS},
+            "t_end": ${TS},
+            "metrics": {
+              "healthy": 0,
+              "last_code": "skipped"
+            },
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${BRANCH}",
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "reason": "policy_violation"
+            }
+          }
+          EOF
+
       - name: Health Check
         id: health
         if: ${{ steps.opa.outcome == 'success' }}
