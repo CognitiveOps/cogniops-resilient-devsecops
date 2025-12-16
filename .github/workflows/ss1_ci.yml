@@ -107,6 +107,7 @@ jobs:
           SERVICE_NAME="${BASE_SERVICE}-${sub_lower}"
           POLICY_IMAGE_TAG="${GITHUB_SHA}"
           POLICY_ALLOW_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
+          POLICY_ALLOWED_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
           POLICY_INGRESS="${SS1_ALLOWED_INGRESS:-internal}"
           POLICY_REGION="${REGION}"
           POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${BASE_SERVICE}"
@@ -120,6 +121,7 @@ jobs:
             *) POLICY_DESC="clean";;
           esac
           echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "POLICY_ALLOWED_PUBLIC=$POLICY_ALLOWED_PUBLIC" >> "$GITHUB_ENV"
           echo "POLICY_ALLOW_PUBLIC=$POLICY_ALLOW_PUBLIC" >> "$GITHUB_ENV"
           echo "POLICY_INGRESS=$POLICY_INGRESS" >> "$GITHUB_ENV"
           echo "POLICY_REGION=$POLICY_REGION" >> "$GITHUB_ENV"
@@ -237,6 +239,7 @@ jobs:
             --arg allowed_registry "$SS1_ALLOWED_REGISTRY_PREFIX" \
             --arg image_repo "${POLICY_IMAGE_REPO}" \
             --arg allow_public "${POLICY_ALLOW_PUBLIC}" \
+            --arg allowed_public "${POLICY_ALLOWED_PUBLIC}" \
             --arg ingress "${POLICY_INGRESS}" \
             --arg service_account "${POLICY_SERVICE_ACCOUNT}" \
             --arg regions "${{ vars.SS1_ALLOWED_REGIONS }}" \
@@ -248,7 +251,7 @@ jobs:
               image_tag: $image_tag,
               limits: {cpu:1, memory:"512Mi"},
               allow_unauthenticated: ($allow_public=="true"),
-              allowed_public: ($allow_public=="true"),
+              allowed_public: ($allowed_public=="true"),
               ingress: $ingress,
               allowed_ingress: ($ingress | split(",") | map(select(length>0))),
               service_account: $service_account,
