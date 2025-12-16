@@ -319,11 +319,42 @@ jobs:
       # Push
       # -------------------------
       - name: Push image
+        id: push
         if: ${{ steps.opa.outcome == 'success' }}
         run: |
           set -euo pipefail
           docker tag app-image:local "$IMAGE"
           docker push "$IMAGE"
+
+      - name: "Send metrics: push"
+        if: always()
+        run: |
+          TS=$(date +%s)
+          STATUS="${{ steps.push.outcome }}"
+          curl -sS -X POST "$INGEST_URL" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "ss1",
+            "stage": "ss1_push",
+            "mode": "${MODE}",
+            "status": "${STATUS:-skipped}",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${TS},
+            "t_end": ${TS},
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${BRANCH}",
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
+            }
+          }
+          EOF
 
       # -------------------------
       # Deploy (PRIVATE)
