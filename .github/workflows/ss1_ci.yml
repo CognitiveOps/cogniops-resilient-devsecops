@@ -378,7 +378,10 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
@@ -482,7 +485,10 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${BRANCH}",
-              "epoch": "E2"
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
           }
           EOF
