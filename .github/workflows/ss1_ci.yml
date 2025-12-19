@@ -16,6 +16,7 @@ env:
   REPO_LOCATION: "europe"
   AR_REPO: "apps"
   ENV: "prod"
+  SS1_ALLOWED_REGIONS: ${{ vars.SS1_ALLOWED_REGIONS || vars.GCP_REGION }}
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
@@ -23,6 +24,10 @@ env:
 permissions:
   id-token: write
   contents: read
+  
+concurrency:
+  group: ss1-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   ss1:
@@ -30,17 +35,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
-    concurrency:
-      group: ss1-${{ github.ref }}-${{ matrix.subscenario }}
-      cancel-in-progress: true
-
     strategy:
       fail-fast: false
       matrix:
         subscenario: [P0, P1, P2, P3, P4]
 
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
 
@@ -50,11 +51,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compute IMAGE var
-        run: |
-          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${GITHUB_SHA}"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Start timer
         id: t0
@@ -82,8 +78,10 @@ jobs:
       - name: Install deps (tests + OPA)
         run: |
           set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
           python -m pip install --upgrade pip
-          pip install pytest httpx jq
+          pip install pytest httpx
           curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
           chmod +x opa
           sudo mv opa /usr/local/bin/opa
@@ -106,25 +104,27 @@ jobs:
           sub_lower="$(printf '%s' "$sub" | tr '[:upper:]' '[:lower:]')"
           SERVICE_NAME="${BASE_SERVICE}-${sub_lower}"
           POLICY_IMAGE_TAG="${GITHUB_SHA}"
-          POLICY_ALLOW_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
-          POLICY_ALLOWED_PUBLIC="${SS1_ALLOW_PUBLIC:-false}"
-          POLICY_INGRESS="${SS1_ALLOWED_INGRESS:-internal}"
+          POLICY_ALLOW_PUBLIC_ACTUAL="false"
+          POLICY_ALLOW_PUBLIC_ALLOWED="${SS1_ALLOW_PUBLIC:-false}"
+          POLICY_INGRESS_ACTUAL="${SS1_ALLOWED_INGRESS:-internal}"
+          POLICY_INGRESS_ALLOWED="${SS1_ALLOWED_INGRESS:-internal}"
           POLICY_REGION="${REGION}"
-          POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${BASE_SERVICE}"
-          POLICY_SERVICE_ACCOUNT="${{ vars.GCP_SA_APP_EMAIL }}"
+          POLICY_IMAGE_REPO="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}"
+          POLICY_SERVICE_ACCOUNT="${{ vars.RUN_EXEC_SA_EMAIL }}"
           POLICY_DESC="clean"
           VIOLATION_EXPECTED="false"
           case "$sub" in
             P1) POLICY_IMAGE_TAG="latest"; POLICY_DESC="mutable-tag"; VIOLATION_EXPECTED="true";;
-            P2) POLICY_ALLOW_PUBLIC="true"; POLICY_DESC="public-ingress"; VIOLATION_EXPECTED="true";;
+            P2) POLICY_ALLOW_PUBLIC_ACTUAL="true"; POLICY_DESC="public-access"; VIOLATION_EXPECTED="true";;
             P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry"; VIOLATION_EXPECTED="true";;
             P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region"; VIOLATION_EXPECTED="true";;
             *) POLICY_DESC="clean";;
           esac
           echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
-          echo "POLICY_ALLOWED_PUBLIC=$POLICY_ALLOWED_PUBLIC" >> "$GITHUB_ENV"
-          echo "POLICY_ALLOW_PUBLIC=$POLICY_ALLOW_PUBLIC" >> "$GITHUB_ENV"
-          echo "POLICY_INGRESS=$POLICY_INGRESS" >> "$GITHUB_ENV"
+          echo "POLICY_ALLOW_PUBLIC_ACTUAL=$POLICY_ALLOW_PUBLIC_ACTUAL" >> "$GITHUB_ENV"
+          echo "POLICY_ALLOW_PUBLIC_ALLOWED=$POLICY_ALLOW_PUBLIC_ALLOWED" >> "$GITHUB_ENV"
+          echo "POLICY_INGRESS_ACTUAL=$POLICY_INGRESS_ACTUAL" >> "$GITHUB_ENV"
+          echo "POLICY_INGRESS_ALLOWED=$POLICY_INGRESS_ALLOWED" >> "$GITHUB_ENV"
           echo "POLICY_REGION=$POLICY_REGION" >> "$GITHUB_ENV"
           echo "POLICY_IMAGE_REPO=$POLICY_IMAGE_REPO" >> "$GITHUB_ENV"
           echo "POLICY_SERVICE_ACCOUNT=$POLICY_SERVICE_ACCOUNT" >> "$GITHUB_ENV"
@@ -132,6 +132,9 @@ jobs:
           echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
           echo "VIOLATION_EXPECTED=$VIOLATION_EXPECTED" >> "$GITHUB_ENV"
           echo "SERVICE=$SERVICE_NAME" >> "$GITHUB_ENV"
+
+          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}:${GITHUB_SHA}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       # -------------------------
       # Resolve ingest endpoint + token
@@ -192,6 +195,7 @@ jobs:
           pytest -q baseline/services/app/tests
           CODE=$?
           T_END=$(date +%s)
+          HEALTH_DUR=$((T_END - T_START))
           STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
 
           curl -sS -X POST "$INGEST_URL" \
@@ -242,11 +246,12 @@ jobs:
             --arg image_tag "${POLICY_IMAGE_TAG}" \
             --arg allowed_registry "$SS1_ALLOWED_REGISTRY_PREFIX" \
             --arg image_repo "${POLICY_IMAGE_REPO}" \
-            --arg allow_public "${POLICY_ALLOW_PUBLIC}" \
-            --arg allowed_public "${POLICY_ALLOWED_PUBLIC}" \
-            --arg ingress "${POLICY_INGRESS}" \
+            --arg allow_public_actual "${POLICY_ALLOW_PUBLIC_ACTUAL}" \
+            --arg allow_public_allowed "${POLICY_ALLOW_PUBLIC_ALLOWED}" \
+            --arg ingress_actual "${POLICY_INGRESS_ACTUAL}" \
+            --arg ingress_allowed "${POLICY_INGRESS_ALLOWED}" \
             --arg service_account "${POLICY_SERVICE_ACCOUNT}" \
-            --arg regions "${{ vars.SS1_ALLOWED_REGIONS }}" \
+            --arg regions "${SS1_ALLOWED_REGIONS}" \
             --arg sa_list "${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS }}" \
             '{
               service: $service,
@@ -254,12 +259,12 @@ jobs:
               env: $env,
               image_tag: $image_tag,
               limits: {cpu:1, memory:"512Mi"},
-              allow_unauthenticated: ($allow_public=="true"),
-              allowed_public: ($allowed_public=="true"),
-              ingress: $ingress,
-              allowed_ingress: ($ingress | split(",") | map(select(length>0))),
+              allow_unauthenticated: ($allow_public_actual=="true"),
+              allowed_public: ($allow_public_allowed=="true"),
+              ingress: $ingress_actual,
+              allowed_ingress: ($ingress_allowed | split(",") | map(select(length>0))),
               service_account: $service_account,
-              allowed_service_accounts: ([ $service_account ] + ($sa_list | split(",") | map(select(length>0)))) | unique,
+              allowed_service_accounts: ($sa_list | split(",") | map(select(length>0))) | unique,
               allowed_regions: ($regions | split(",") | map(select(length>0))),
               allowed_registry_prefix: $allowed_registry,
               image_repo: $image_repo
@@ -278,12 +283,26 @@ jobs:
       - name: "Send metrics: policy"
         if: always()
         run: |
-          VIO="${{ steps.opa.outputs.violations }}"
-          VIO_INT=${VIO:-0}
+          VIO_RAW="${{ steps.opa.outputs.violations }}"
+          VIO_INT=0
           GATE="pass"
-          if [ "$VIO_INT" != "0" ]; then
-            GATE="deny"
+          REASON="none"
+
+          if [[ "$VIO_RAW" =~ ^-?[0-9]+$ ]]; then
+            VIO_INT="$VIO_RAW"
+            if [ "$VIO_INT" -gt 0 ]; then
+              GATE="deny"
+              REASON="policy_violation"
+            elif [ "${{ steps.opa.outcome }}" != "success" ]; then
+              GATE="error"
+              REASON="opa_error"
+            fi
+          else
+            VIO_INT=-1
+            GATE="error"
+            REASON="opa_error"
           fi
+
           TS=$(date +%s)
 
           curl -sS -X POST "$INGEST_URL" \
@@ -301,7 +320,8 @@ jobs:
             "t_end": ${TS},
             "metrics": {
               "policy_gate": "${GATE}",
-              "policy_violations": ${VIO_INT}
+              "policy_violations": ${VIO_INT},
+              "policy_reason": "${REASON}"
             },
             "labels": {
               "service": "${SERVICE}",
@@ -363,6 +383,11 @@ jobs:
         if: ${{ steps.opa.outcome != 'success' }}
         run: |
           TS=$(date +%s)
+          VIO="${{ steps.opa.outputs.violations }}"
+          REASON="opa_error"
+          if [ -n "$VIO" ] && [ "$VIO" != "0" ]; then
+            REASON="policy_violation"
+          fi
           curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -384,7 +409,7 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "policy_violation"
+              "reason": "${REASON}"
             }
           }
           EOF
@@ -397,7 +422,7 @@ jobs:
           T_START=$(date +%s)
 
           ALLOW_FLAG="--no-allow-unauthenticated"
-          if [ "${POLICY_ALLOW_PUBLIC}" = "true" ]; then
+          if [ "${POLICY_ALLOW_PUBLIC_ACTUAL}" = "true" ]; then
             ALLOW_FLAG="--allow-unauthenticated"
           fi
 
@@ -454,6 +479,11 @@ jobs:
         if: ${{ steps.opa.outcome != 'success' }}
         run: |
           TS=$(date +%s)
+          VIO="${{ steps.opa.outputs.violations }}"
+          REASON="opa_error"
+          if [ -n "$VIO" ] && [ "$VIO" != "0" ]; then
+            REASON="policy_violation"
+          fi
           curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -479,7 +509,7 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "policy_violation"
+              "reason": "${REASON}"
             }
           }
           EOF
@@ -497,7 +527,7 @@ jobs:
             --format='value(status.url)')"
 
           AUTH=()
-          if [ "${POLICY_ALLOW_PUBLIC}" != "true" ]; then
+          if [ "${POLICY_ALLOW_PUBLIC_ACTUAL}" != "true" ]; then
             TOK=$(gcloud auth print-identity-token --audiences="$URL" --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
             AUTH=(-H "Authorization: Bearer ${TOK}")
           fi
@@ -529,7 +559,8 @@ jobs:
             "t_end": ${T_END},
             "metrics": {
               "healthy": ${OK},
-              "last_code": "${LAST_CODE}"
+              "last_code": "${LAST_CODE}",
+              "time_to_health_sec": ${HEALTH_DUR}
             },
             "labels": {
               "service": "${SERVICE}",
@@ -574,7 +605,7 @@ jobs:
             "t_start": ${T0},
             "t_end": ${T1},
             "metrics": {
-              "ttd_sec": ${DUR}
+              "pipeline_duration_sec": ${DUR}
             },
             "labels": {
               "service": "${SERVICE}",
