@@ -18,6 +18,7 @@ env:
   ENV: "prod"
   SS1_ALLOWED_REGIONS: ${{ vars.SS1_ALLOWED_REGIONS || vars.GCP_REGION }}
   SS1_ALLOWED_INGRESS: ${{ vars.SS1_ALLOWED_INGRESS || 'all' }}
+  SS1_ALLOWED_SERVICE_ACCOUNTS: ${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS || vars.RUN_EXEC_SA_EMAIL }}
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   SS1_ALLOWED_REGISTRY_PREFIX: ${{ vars.SS1_ALLOWED_REGISTRY_PREFIX }}
@@ -252,7 +253,7 @@ jobs:
             --arg ingress_allowed "${POLICY_INGRESS_ALLOWED}" \
             --arg service_account "${POLICY_SERVICE_ACCOUNT}" \
             --arg regions "${SS1_ALLOWED_REGIONS}" \
-            --arg sa_list "${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS }}" \
+            --arg sa_list "${SS1_ALLOWED_SERVICE_ACCOUNTS}" \
             '{
               service: $service,
               region: $region,
@@ -299,6 +300,10 @@ jobs:
           VIO_INT="${{ steps.opa.outputs.violations }}"
           GATE="${{ steps.opa.outputs.gate }}"
           REASON="${{ steps.opa.outputs.policy_reason }}"
+
+          echo "opa_outcome=${{ steps.opa.outcome }}"
+          echo "gate=${GATE}"
+          echo "violations=${VIO_INT}"
 
           TS=$(date +%s)
 

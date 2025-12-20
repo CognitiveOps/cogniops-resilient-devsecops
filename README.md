@@ -275,7 +275,7 @@ SS1 wraps the S1 CI/CD pipeline with an independent OPA policy gate and full aud
 - **Principles:** Policy-as-Code (OPA), automated checks, auditability/traceability, supply-chain risk reduction.
 - **Metrics:** FDR (policy violations detected), ACR (audit completeness), CFR/DF impact when the gate denies or errors.
 - **Policies (`security/policies/ss1.rego`):** prod-only deploys, secure-* naming, immutable tags (no `latest`), CPU/memory bounds, allowed regions, allowed ingress (default `all` for pipeline reachability), public access flag, allowed runtime service accounts, allowed registry prefix. Null-safe guards prevent OPA errors on empty allowlists.
-- **Config via repo vars:** `SS1_ALLOW_PUBLIC` (default false), `SS1_ALLOWED_INGRESS` (default `all`), `SS1_ALLOWED_REGIONS`, `SS1_ALLOWED_SERVICE_ACCOUNTS`, `SS1_ALLOWED_REGISTRY_PREFIX`. Runtime SA checked: `RUN_EXEC_SA_EMAIL`.
+- **Config via repo vars:** `SS1_ALLOW_PUBLIC` (default false), `SS1_ALLOWED_INGRESS` (default `all`), `SS1_ALLOWED_REGIONS`, `SS1_ALLOWED_SERVICE_ACCOUNTS` (default `RUN_EXEC_SA_EMAIL`), `SS1_ALLOWED_REGISTRY_PREFIX`. Runtime SA checked: `RUN_EXEC_SA_EMAIL`.
 - **Gate semantics:** OPA emits `gate = pass | deny | error` and `policy_violations` (int). Deploy/health run only on `pass`; otherwise `ss1_deploy`/`ss1_health` emit `status=skipped` with `reason` (`policy_violation` or `opa_error`) to keep ACR intact.
 - **BigQuery ingest:** Stages (`ss1_commit`, `ss1_test`, `ss1_policy`, `ss1_push`, `ss1_deploy`, `ss1_health`, `ss1_final`) go to `agent_metrics.runs` with labels (`service`, `env`, `branch`, `epoch`, `subscenario`, `policy`, `violation_expected`, `reason` when blocked).
 
