@@ -31,18 +31,21 @@ deny contains sprintf("environment %v is not allowed (prod only)", [input.env]) 
 # ---------- Allow-lists ----------
 deny contains sprintf("region %v not in allowed_regions", [input.region]) if {
   input.region
+  input.allowed_regions != null
   count(input.allowed_regions) > 0
   not input.region == input.allowed_regions[_]
 }
 
 deny contains sprintf("service account %v not in allowed list", [input.service_account]) if {
   input.service_account
+  input.allowed_service_accounts != null
   count(input.allowed_service_accounts) > 0
   not input.service_account == input.allowed_service_accounts[_]
 }
 
 deny contains sprintf("ingress mode %v not in allowed list", [input.ingress]) if {
   input.ingress
+  input.allowed_ingress != null
   count(input.allowed_ingress) > 0
   not input.ingress == input.allowed_ingress[_]
 }
