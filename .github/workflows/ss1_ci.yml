@@ -265,7 +265,10 @@ jobs:
               ingress: $ingress_actual,
               allowed_ingress: ($ingress_allowed | split(",") | map(select(length>0))),
               service_account: $service_account,
-              allowed_service_accounts: ($sa_list | split(",") | map(select(length>0))) | unique,
+              allowed_service_accounts: (
+                ([ $service_account ] + ($sa_list | split(",") | map(select(length>0))))
+                | unique
+              ),
               allowed_regions: ($regions | split(",") | map(select(length>0))),
               allowed_registry_prefix: $allowed_registry,
               image_repo: $image_repo
