@@ -49,7 +49,7 @@ cogniops-resilient-devsecops/
 | **S3**  | **Rollback & Hotfix Resilience**                         | Inject controlled faults and validate manual/hybrid recovery. Measure MTTD & MTTR.                                                                                          |
 | **S4**  | **Security & PQC Validation**                            | Validate update authenticity and PQC signature verification using NIST FIPS 203–205 algorithms.                                                                             |
 | **S5**  | **Explainability & Human-in-the-Loop**                   | Measure human approval latency (AL) and audit completeness rate (ACR).                                                                                                      |
-| **SS1** | **End-to-End Security Policy Audit**                     | Execute full-pipeline OPA/Kyverno policy enforcement and ISO/NIST audit traceability.                                                                                       |
+| **SS1** | **End-to-End Security Policy Audit**                     | Execute full-pipeline OPA policy enforcement and ISO/NIST audit traceability.                                                                                       |
 | **SS2** | **Adaptive Threat Mitigation**                           | Simulate anomaly injection; the agent performs autonomous mitigation with PQC trust chain validation.                                                                       |
 
 ---
@@ -269,29 +269,27 @@ ORDER BY scenario_id;
 
 ## 🛡️ SS1 – Security & Policy Audit (Pipeline-Centric)
 
-SS1 adds a dedicated security/policy audit layer around the S1 CI/CD pipeline without changing its behavior. It continuously verifies security posture, detects policy deviations, and captures audit evidence aligned with NIST SP 800-204C, SSDF (SP 800-218), SLSA, CNCF Cloud Native Security, and GitHub Actions hardening.
+SS1 wraps the S1 CI/CD pipeline with an independent OPA policy gate and full audit trail. It validates the deploy intent (service, region, tag, registry, public flag, ingress, runtime SA, resources) against declared policies and records every stage — even when blocked — for ACR accuracy. Aligned with NIST SP 800-204C, SSDF (SP 800-218), SLSA, CNCF Cloud Native Security, and GitHub Actions hardening.
 
-- **Scope:** Pipeline only (build → test → push → deploy) for the web service; checks artifact immutability, workflow/security guardrails, and deploy-time runtime config. Out of scope: edge/OTA/resilience faults, PQC validation (handled later).
-- **Principles:** Policy-as-Code (OPA), automated compliance checks, auditability/traceability, supply-chain risk reduction.
-- **Metrics:** FDR (policy violations detected), ACR (audit completeness), and impact on CFR/DF when the security gate fails.
-- **Policies implemented:** `security/policies/ss1.rego` enforces prod-only deploys, secure-* naming, immutable tags (no `latest`), CPU/memory bounds, allowed regions, allowed ingress, public access flag, allowed service accounts, and allowed registry prefix.
-- **Config via repo vars:** `SS1_ALLOW_PUBLIC` (default false), `SS1_ALLOWED_INGRESS` (default internal), `SS1_ALLOWED_REGIONS`, `SS1_ALLOWED_SERVICE_ACCOUNTS`; image registry prefix derived from Artifact Registry settings.
-- **BigQuery ingest:** SS1 stages (`ss1_commit`, `ss1_test`, `ss1_policy`, `ss1_push`, `ss1_deploy`, `ss1_health`, `ss1_final`) are posted to `scenario-runs-ingest` with `scenario_id="ss1"`, carrying stage-specific metrics (policy violations, digest, service URL, health, TTD).
-- **References:** NIST SP 800-204C, NIST SSDF (SP 800-218), SLSA, CNCF Cloud Native Security whitepaper, GitHub Actions security hardening, OPA policy-as-code literature.
+- **Scope:** Pipeline only (build → test → push → deploy). Out of scope: edge/OTA, resilience faults, PQC (handled later).
+- **Principles:** Policy-as-Code (OPA), automated checks, auditability/traceability, supply-chain risk reduction.
+- **Metrics:** FDR (policy violations detected), ACR (audit completeness), CFR/DF impact when the gate denies or errors.
+- **Policies (`security/policies/ss1.rego`):** prod-only deploys, secure-* naming, immutable tags (no `latest`), CPU/memory bounds, allowed regions, allowed ingress (default `all` for pipeline reachability), public access flag, allowed runtime service accounts, allowed registry prefix. Null-safe guards prevent OPA errors on empty allowlists.
+- **Config via repo vars:** `SS1_ALLOW_PUBLIC` (default false), `SS1_ALLOWED_INGRESS` (default `all`), `SS1_ALLOWED_REGIONS`, `SS1_ALLOWED_SERVICE_ACCOUNTS`, `SS1_ALLOWED_REGISTRY_PREFIX`. Runtime SA checked: `RUN_EXEC_SA_EMAIL`.
+- **Gate semantics:** OPA emits `gate = pass | deny | error` and `policy_violations` (int). Deploy/health run only on `pass`; otherwise `ss1_deploy`/`ss1_health` emit `status=skipped` with `reason` (`policy_violation` or `opa_error`) to keep ACR intact.
+- **BigQuery ingest:** Stages (`ss1_commit`, `ss1_test`, `ss1_policy`, `ss1_push`, `ss1_deploy`, `ss1_health`, `ss1_final`) go to `agent_metrics.runs` with labels (`service`, `env`, `branch`, `epoch`, `subscenario`, `policy`, `violation_expected`, `reason` when blocked).
 
-### SS1 Sub-Scenarios (policy violations)
-
-Deterministic sub-scenarios for policy evaluation (labelled in `labels.subscenario` and `labels.policy`):
+### SS1 Sub-Scenarios (deterministic policy cases)
 
 | Sub-Scenario | What it tests             | Inputs tweaked                     |
 | ------------ | ------------------------- | ---------------------------------- |
 | **SS1-P0**   | Clean run (no violation)  | Default settings                   |
 | **SS1-P1**   | Mutable image tag         | `image_tag = latest`               |
-| **SS1-P2**   | Public ingress allowed    | `allow_unauthenticated = true`     |
+| **SS1-P2**   | Public access allowed     | `allow_unauthenticated = true` (policy says no) |
 | **SS1-P3**   | Unapproved registry       | `image_repo = docker.io/...`       |
 | **SS1-P4**   | Wrong region              | `region = us-central1`             |
 
-All other pipeline stages remain the same; only the policy inputs change, and policy/test/deploy/health metrics are emitted per stage to BigQuery.
+All other pipeline stages remain unchanged; only the policy inputs change. Every stage still emits metrics (success, failure, or skipped) to preserve audit completeness.
 
 ---
 
