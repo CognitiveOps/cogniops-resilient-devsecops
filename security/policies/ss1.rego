@@ -37,9 +37,7 @@ deny contains sprintf("region %v not in allowed_regions", [input.region]) if {
 }
 
 region_allowed if {
-  some r
-  r := input.allowed_regions[_]
-  input.region == r
+  input.allowed_regions[_] == input.region
 }
 
 deny contains sprintf("service account %v not in allowed list", [input.service_account]) if {
@@ -50,9 +48,7 @@ deny contains sprintf("service account %v not in allowed list", [input.service_a
 }
 
 sa_allowed if {
-  some sa
-  sa := input.allowed_service_accounts[_]
-  input.service_account == sa
+  input.allowed_service_accounts[_] == input.service_account
 }
 
 deny contains sprintf("ingress mode %v not in allowed list", [input.ingress]) if {
@@ -63,9 +59,7 @@ deny contains sprintf("ingress mode %v not in allowed list", [input.ingress]) if
 }
 
 ingress_allowed if {
-  some ing
-  ing := input.allowed_ingress[_]
-  input.ingress == ing
+  input.allowed_ingress[_] == input.ingress
 }
 
 # ---------- Artifact immutability / provenance ----------
