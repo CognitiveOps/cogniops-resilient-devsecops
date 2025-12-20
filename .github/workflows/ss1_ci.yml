@@ -236,7 +236,6 @@ jobs:
       # -------------------------
       - name: OPA policy evaluation
         id: opa
-        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -271,38 +270,35 @@ jobs:
               image_repo: $image_repo
             }' > input.json
 
-          VIO=$(opa eval -i input.json -d security/policies \
-            'count(data.app.policy.deny)' -f raw)
+          VIO_RAW="$(opa eval -i input.json -d security/policies \
+            'count(data.app.policy.deny)' -f raw || echo "__OPA_ERROR__")"
 
-          echo "violations=${VIO}" >> "$GITHUB_OUTPUT"
-
-          if [ "$VIO" != "0" ]; then
-            opa eval -i input.json -d security/policies 'data.app.policy.deny'
-            exit 1
-          fi
-
-      - name: "Send metrics: policy"
-        if: always()
-        run: |
-          VIO_RAW="${{ steps.opa.outputs.violations }}"
-          VIO_INT=0
           GATE="pass"
           REASON="none"
+          VIO_INT=0
 
           if [[ "$VIO_RAW" =~ ^-?[0-9]+$ ]]; then
             VIO_INT="$VIO_RAW"
             if [ "$VIO_INT" -gt 0 ]; then
               GATE="deny"
               REASON="policy_violation"
-            elif [ "${{ steps.opa.outcome }}" != "success" ]; then
-              GATE="error"
-              REASON="opa_error"
             fi
           else
-            VIO_INT=-1
             GATE="error"
             REASON="opa_error"
+            VIO_INT=-1
           fi
+
+          echo "violations=${VIO_INT}" >> "$GITHUB_OUTPUT"
+          echo "gate=${GATE}" >> "$GITHUB_OUTPUT"
+          echo "policy_reason=${REASON}" >> "$GITHUB_OUTPUT"
+
+      - name: "Send metrics: policy"
+        if: always()
+        run: |
+          VIO_INT="${{ steps.opa.outputs.violations }}"
+          GATE="${{ steps.opa.outputs.gate }}"
+          REASON="${{ steps.opa.outputs.policy_reason }}"
 
           TS=$(date +%s)
 
@@ -341,7 +337,7 @@ jobs:
       # -------------------------
       - name: Push image
         id: push
-        if: ${{ steps.opa.outcome == 'success' }}
+        if: ${{ steps.opa.outputs.gate == 'pass' }}
         run: |
           set -euo pipefail
           docker tag app-image:local "$IMAGE"
@@ -381,14 +377,11 @@ jobs:
       # Deploy (PRIVATE)
       # -------------------------
       - name: "Send metrics: deploy (skipped due to policy)"
-        if: ${{ steps.opa.outcome != 'success' }}
+        if: ${{ steps.opa.outputs.gate != 'pass' }}
         run: |
           TS=$(date +%s)
           VIO="${{ steps.opa.outputs.violations }}"
-          REASON="opa_error"
-          if [ -n "$VIO" ] && [ "$VIO" != "0" ]; then
-            REASON="policy_violation"
-          fi
+          REASON="${{ steps.opa.outputs.policy_reason || 'policy_violation' }}"
           curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -417,7 +410,7 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
-        if: ${{ steps.opa.outcome == 'success' }}
+        if: ${{ steps.opa.outputs.gate == 'pass' }}
         run: |
           set -euo pipefail
           T_START=$(date +%s)
@@ -477,14 +470,10 @@ jobs:
       # Health (OIDC-authenticated)
       # -------------------------
       - name: "Send metrics: health (skipped due to policy)"
-        if: ${{ steps.opa.outcome != 'success' }}
+        if: ${{ steps.opa.outputs.gate != 'pass' }}
         run: |
           TS=$(date +%s)
-          VIO="${{ steps.opa.outputs.violations }}"
-          REASON="opa_error"
-          if [ -n "$VIO" ] && [ "$VIO" != "0" ]; then
-            REASON="policy_violation"
-          fi
+          REASON="${{ steps.opa.outputs.policy_reason || 'policy_violation' }}"
           curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -517,7 +506,7 @@ jobs:
 
       - name: Health Check
         id: health
-        if: ${{ steps.opa.outcome == 'success' }}
+        if: ${{ steps.opa.outputs.gate == 'pass' }}
         run: |
           set -euo pipefail
           T_START=$(date +%s)
