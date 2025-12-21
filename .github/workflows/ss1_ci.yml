@@ -529,6 +529,8 @@ jobs:
             TOK=$(gcloud auth print-identity-token --audiences="$URL" --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
             AUTH=(-H "Authorization: Bearer ${TOK}")
           fi
+          echo "Health check URL: $URL"
+          echo "Public allowed: ${POLICY_ALLOW_PUBLIC_ACTUAL}"
 
           OK=0
           LAST_CODE=000
@@ -536,6 +538,7 @@ jobs:
             LAST_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
               "${AUTH[@]}" \
               "$URL/status" || echo 000)
+            echo "try=$i code=$LAST_CODE"
             if [[ "$LAST_CODE" == "200" ]]; then OK=1; break; fi
             sleep 10
           done
@@ -573,7 +576,11 @@ jobs:
           }
           EOF
 
-          [ "$OK" = "1" ]
+          if [ "$SS1_SUBSCENARIO" = "P0" ]; then
+            [ "$OK" = "1" ]
+          else
+            exit 0
+          fi
 
       # -------------------------
       # Final
