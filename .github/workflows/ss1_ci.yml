@@ -523,14 +523,14 @@ jobs:
 
           URL="${{ steps.deploy.outputs.url }}"
           : "${URL:?deploy url missing}"
-          HEALTH_URL="${URL%/}/status"
+          HEALTH_URL="${URL%/}/"
 
           AUTH=()
           if [ "${POLICY_ALLOW_PUBLIC_ACTUAL}" != "true" ]; then
             TOK=$(gcloud auth print-identity-token --audiences="$URL" --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
             AUTH=(-H "Authorization: Bearer ${TOK}")
           fi
-          echo "Health check URL: $HEALTH_URL"
+          echo "Health check URL (root): $HEALTH_URL"
           echo "Public allowed: ${POLICY_ALLOW_PUBLIC_ACTUAL}"
 
           OK=0
