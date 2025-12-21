@@ -541,6 +541,7 @@ jobs:
           done
 
           T_END=$(date +%s)
+          HEALTH_DUR=$((T_END - T_START))
 
           curl -sS -X POST "$INGEST_URL" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
