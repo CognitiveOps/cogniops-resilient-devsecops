@@ -431,6 +431,7 @@ jobs:
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE" \
             --region "$REGION" \
+            --ingress "${POLICY_INGRESS_ACTUAL}" \
             --platform managed \
             --memory 512Mi \
             --cpu 1 \
@@ -443,6 +444,7 @@ jobs:
             --region "$REGION" \
             --platform managed \
             --format='value(status.url)')"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
           T_END=$(date +%s)
 
@@ -519,10 +521,8 @@ jobs:
           set -euo pipefail
           T_START=$(date +%s)
 
-          URL="$(gcloud run services describe "$SERVICE" \
-            --region "$REGION" \
-            --platform managed \
-            --format='value(status.url)')"
+          URL="${{ steps.deploy.outputs.url }}"
+          : "${URL:?deploy url missing}"
 
           AUTH=()
           if [ "${POLICY_ALLOW_PUBLIC_ACTUAL}" != "true" ]; then
