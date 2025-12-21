@@ -518,10 +518,16 @@ jobs:
         id: health
         if: ${{ steps.opa.outputs.gate == 'pass' }}
         run: |
-          set -euo pipefail
+          set +e
           T_START=$(date +%s)
 
           URL="${{ steps.deploy.outputs.url }}"
+          if [ -z "$URL" ]; then
+            URL="$(gcloud run services describe "$SERVICE" \
+              --region "$REGION" \
+              --platform managed \
+              --format='value(status.url)')"
+          fi
           : "${URL:?deploy url missing}"
           HEALTH_URL="${URL%/}/"
 
