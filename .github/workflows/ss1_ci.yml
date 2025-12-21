@@ -477,18 +477,6 @@ jobs:
           EOF
 
       # -------------------------
-      # Ensure invoker binding for health checks
-      # -------------------------
-      - name: Grant invoker to app SA for health checks
-        if: ${{ steps.opa.outputs.gate == 'pass' }}
-        run: |
-          gcloud run services add-iam-policy-binding "$SERVICE" \
-            --region "$REGION" \
-            --platform managed \
-            --member="serviceAccount:${{ vars.GCP_SA_APP_EMAIL }}" \
-            --role="roles/run.invoker"
-
-      # -------------------------
       # Health (OIDC-authenticated)
       # -------------------------
       - name: "Send metrics: health (skipped due to policy)"
