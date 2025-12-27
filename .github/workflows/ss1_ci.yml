@@ -46,7 +46,6 @@ jobs:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
-      AUDIT_OMIT: "false"
 
     defaults:
       run:
@@ -121,7 +120,7 @@ jobs:
             P2) POLICY_ALLOW_PUBLIC_ACTUAL="true"; POLICY_DESC="public-access"; VIOLATION_EXPECTED="true";;
             P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry"; VIOLATION_EXPECTED="true";;
             P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region"; VIOLATION_EXPECTED="true";;
-            P5) POLICY_DESC="audit-omit"; AUDIT_OMIT="true"; VIOLATION_EXPECTED="false";;
+            P5) POLICY_DESC="audit-omit"; VIOLATION_EXPECTED="false";;
             *) POLICY_DESC="clean";;
           esac
           echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
@@ -136,7 +135,6 @@ jobs:
           echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
           echo "VIOLATION_EXPECTED=$VIOLATION_EXPECTED" >> "$GITHUB_ENV"
           echo "SERVICE=$SERVICE_NAME" >> "$GITHUB_ENV"
-          echo "AUDIT_OMIT=$AUDIT_OMIT" >> "$GITHUB_ENV"
 
           IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}:${GITHUB_SHA}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
@@ -556,7 +554,7 @@ jobs:
           T_END=$(date +%s)
           HEALTH_DUR=$((T_END - T_START))
 
-          if [ "${AUDIT_OMIT}" != "true" ]; then
+          if [ "${SS1_SUBSCENARIO}" != "P5" ]; then
             curl -sS -X POST "$INGEST_URL" \
               -H "Authorization: Bearer ${ID_TOKEN}" \
               -H "Content-Type: application/json" \
@@ -587,7 +585,7 @@ jobs:
             }
             EOF
           else
-            echo "AUDIT_OMIT=true: skipping health metrics emission for ACR degradation scenario"
+            echo "SS1_SUBSCENARIO=P5: skipping health metrics emission for ACR degradation scenario"
           fi
 
           if [ "$SS1_SUBSCENARIO" = "P0" ]; then
