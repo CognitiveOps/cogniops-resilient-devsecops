@@ -40,12 +40,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        subscenario: [P0, P1, P2, P3, P4]
+        subscenario: [P0, P1, P2, P3, P4, P5]
 
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
+      AUDIT_OMIT: "false"
 
     defaults:
       run:
@@ -120,6 +121,7 @@ jobs:
             P2) POLICY_ALLOW_PUBLIC_ACTUAL="true"; POLICY_DESC="public-access"; VIOLATION_EXPECTED="true";;
             P3) POLICY_IMAGE_REPO="docker.io/library/nginx"; POLICY_DESC="unapproved-registry"; VIOLATION_EXPECTED="true";;
             P4) POLICY_REGION="us-central1"; POLICY_DESC="wrong-region"; VIOLATION_EXPECTED="true";;
+            P5) POLICY_DESC="audit-omit"; AUDIT_OMIT="true"; VIOLATION_EXPECTED="false";;
             *) POLICY_DESC="clean";;
           esac
           echo "POLICY_IMAGE_TAG=$POLICY_IMAGE_TAG" >> "$GITHUB_ENV"
@@ -134,6 +136,7 @@ jobs:
           echo "SUB_LABEL=SS1-$sub" >> "$GITHUB_ENV"
           echo "VIOLATION_EXPECTED=$VIOLATION_EXPECTED" >> "$GITHUB_ENV"
           echo "SERVICE=$SERVICE_NAME" >> "$GITHUB_ENV"
+          echo "AUDIT_OMIT=$AUDIT_OMIT" >> "$GITHUB_ENV"
 
           IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}:${GITHUB_SHA}"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
@@ -553,35 +556,39 @@ jobs:
           T_END=$(date +%s)
           HEALTH_DUR=$((T_END - T_START))
 
-          curl -sS -X POST "$INGEST_URL" \
-            -H "Authorization: Bearer ${ID_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d @- <<EOF
-          {
-            "run_id": "${RUN_ID}",
-            "scenario_id": "ss1",
-            "stage": "ss1_health",
-            "mode": "${MODE}",
-            "status": "$([ "$OK" = "1" ] && echo success || echo failure)",
-            "commit_sha": "${{ github.sha }}",
-            "t_start": ${T_START},
-            "t_end": ${T_END},
-            "metrics": {
-              "healthy": ${OK},
-              "last_code": "${LAST_CODE}",
-              "time_to_health_sec": ${HEALTH_DUR}
-            },
-            "labels": {
-              "service": "${SERVICE}",
-              "env": "${ENV}",
-              "branch": "${BRANCH}",
-              "epoch": "E2",
-              "subscenario": "${SUB_LABEL}",
-              "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+          if [ "${AUDIT_OMIT}" != "true" ]; then
+            curl -sS -X POST "$INGEST_URL" \
+              -H "Authorization: Bearer ${ID_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d @- <<EOF
+            {
+              "run_id": "${RUN_ID}",
+              "scenario_id": "ss1",
+              "stage": "ss1_health",
+              "mode": "${MODE}",
+              "status": "$([ "$OK" = "1" ] && echo success || echo failure)",
+              "commit_sha": "${{ github.sha }}",
+              "t_start": ${T_START},
+              "t_end": ${T_END},
+              "metrics": {
+                "healthy": ${OK},
+                "last_code": "${LAST_CODE}",
+                "time_to_health_sec": ${HEALTH_DUR}
+              },
+              "labels": {
+                "service": "${SERVICE}",
+                "env": "${ENV}",
+                "branch": "${BRANCH}",
+                "epoch": "E2",
+                "subscenario": "${SUB_LABEL}",
+                "policy": "${POLICY_DESC}",
+                "violation_expected": "${VIOLATION_EXPECTED}"
+              }
             }
-          }
-          EOF
+            EOF
+          else
+            echo "AUDIT_OMIT=true: skipping health metrics emission for ACR degradation scenario"
+          fi
 
           if [ "$SS1_SUBSCENARIO" = "P0" ]; then
             [ "$OK" = "1" ]
@@ -618,7 +625,7 @@ jobs:
             "t_start": ${T0},
             "t_end": ${T1},
             "metrics": {
-              "pipeline_duration_sec": ${DUR}
+              "ttd_sec": ${DUR}
             },
             "labels": {
               "service": "${SERVICE}",
