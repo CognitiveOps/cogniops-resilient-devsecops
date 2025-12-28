@@ -558,32 +558,32 @@ jobs:
             curl -sS -X POST "$INGEST_URL" \
               -H "Authorization: Bearer ${ID_TOKEN}" \
               -H "Content-Type: application/json" \
-              -d @- <<EOF
-            {
-              "run_id": "${RUN_ID}",
-              "scenario_id": "ss1",
-              "stage": "ss1_health",
-              "mode": "${MODE}",
-              "status": "$([ "$OK" = "1" ] && echo success || echo failure)",
-              "commit_sha": "${{ github.sha }}",
-              "t_start": ${T_START},
-              "t_end": ${T_END},
-              "metrics": {
-                "healthy": ${OK},
-                "last_code": "${LAST_CODE}",
-                "time_to_health_sec": ${HEALTH_DUR}
-              },
-              "labels": {
-                "service": "${SERVICE}",
-                "env": "${ENV}",
-                "branch": "${BRANCH}",
-                "epoch": "E2",
-                "subscenario": "${SUB_LABEL}",
-                "policy": "${POLICY_DESC}",
-                "violation_expected": "${VIOLATION_EXPECTED}"
-              }
+              -d @- <<'EOF'
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "ss1",
+            "stage": "ss1_health",
+            "mode": "${MODE}",
+            "status": "$([ "$OK" = "1" ] && echo success || echo failure)",
+            "commit_sha": "${{ github.sha }}",
+            "t_start": ${T_START},
+            "t_end": ${T_END},
+            "metrics": {
+              "healthy": ${OK},
+              "last_code": "${LAST_CODE}",
+              "time_to_health_sec": ${HEALTH_DUR}
+            },
+            "labels": {
+              "service": "${SERVICE}",
+              "env": "${ENV}",
+              "branch": "${BRANCH}",
+              "epoch": "E2",
+              "subscenario": "${SUB_LABEL}",
+              "policy": "${POLICY_DESC}",
+              "violation_expected": "${VIOLATION_EXPECTED}"
             }
-            EOF
+          }
+          EOF
           else
             echo "SS1_SUBSCENARIO=P5: skipping health metrics emission for ACR degradation scenario"
           fi
