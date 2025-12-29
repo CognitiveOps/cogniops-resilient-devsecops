@@ -104,6 +104,7 @@ cogniops-resilient-devsecops/
 
 ---
 
+<a id="s1-hybrid-baseline"></a>
 ## 🚀 S1 – Hybrid Baseline (GitHub Actions + GCP)
 
 ### 🎯 Objective
@@ -267,6 +268,7 @@ ORDER BY scenario_id;
 
 ---
 
+<a id="ss1-end-to-end-security-policy-audit"></a>
 ## 🛡️ SS1 – Security & Policy Audit (Pipeline-Centric)
 
 SS1 wraps the S1 CI/CD pipeline with an independent OPA policy gate and full audit trail. It validates the deploy intent (service, region, tag, registry, public flag, ingress, runtime SA, resources) against declared policies and records every stage — even when blocked — for ACR accuracy. Aligned with NIST SP 800-204C, SSDF (SP 800-218), SLSA, CNCF Cloud Native Security, and GitHub Actions hardening.
@@ -293,6 +295,7 @@ All other pipeline stages remain unchanged; only the policy inputs change. Every
 
 ---
 
+<a id="s2-ota-baseline"></a>
 ## 🚀 S2 – Pipeline → Edge Deployment (OTA Baseline)
 
 ## 🎯 Objective
@@ -609,6 +612,7 @@ Filter: `scenario_id = 's2'`
 
 ---
 
+<a id="s3-rollback-hotfix-resilience"></a>
 ## 🚧 S3 – Rollback & Hotfix Resilience (`edge_cv_app`)
 
 ### 🎯 Objective
@@ -922,6 +926,27 @@ Implementation (real edge + twin):
 - `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
 - `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
 - `baseline/s3/run_s3_single_scenario.py` + `baseline/s3/detector.py` — polls `/status`, computes MTTD/MTTR, and posts to BigQuery ingest.
+
+---
+
+<a id="s4-security-pqc-validation"></a>
+## 🔒 S4 – Security & PQC Validation
+
+Security/PQC validation baseline placeholder. This scenario will cover PQC signature verification across pipeline and OTA, measuring TTV, VSR, and FDR with hardened crypto chains.
+
+---
+
+<a id="s5-explainability"></a>
+## 🧭 S5 – Explainability & Human-in-the-Loop
+
+Explainability baseline placeholder. This scenario will track approval latency and audit completeness with structured logs and human-in-the-loop gating.
+
+---
+
+<a id="ss2-adaptive-threat-mitigation"></a>
+## 🛡️ SS2 – Adaptive Threat Mitigation
+
+Adaptive mitigation baseline placeholder. This scenario will simulate anomalies and evaluate autonomous mitigations with PQC trust-chain validation.
 
 ---
 
