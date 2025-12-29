@@ -17,6 +17,7 @@ The goal is to demonstrate how an autonomous cognitive agent can manage **secure
 
 ## 📂 Repository Structure
 
+```
 cogniops-resilient-devsecops/
 ├── baseline/
 │ ├── services/ # demo microservices (FastAPI, test workloads)
@@ -38,21 +39,20 @@ cogniops-resilient-devsecops/
 ├── docs/ # architecture diagrams & thesis documentation
 └── README.md
 
+```
 ---
 
 ## 🔹 Evaluation Scenarios (S1–S5 + SS1–SS2)
 
-| ID      | Scenario                                                 | Purpose                                                                                                                                                                     |
-| ------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **S1**  | **Cloud → Pipeline CI/CD Baseline**                      | Measure build–test–push–deploy agility and reliability using GitHub Actions + GCP (metrics: TTD, CFR, DF).                                                                  |
-| **S2**  | **Pipeline → Edge Deployment (Functional OTA Baseline)** | Perform OTA deployment to simulated edge devices measuring OTA latency (TDL), end-to-end deploy time (TTD_edge), and deployment success rate (DSR). No security or PQC yet. |
-| **S3**  | **Rollback & Hotfix Resilience**                         | Inject controlled faults and validate manual/hybrid recovery. Measure MTTD & MTTR.                                                                                          |
-| **S4**  | **Security & PQC Validation**                            | Validate update authenticity and PQC signature verification using NIST FIPS 203–205 algorithms.                                                                             |
-| **S5**  | **Explainability & Human-in-the-Loop**                   | Measure human approval latency (AL) and audit completeness rate (ACR).                                                                                                      |
-| **SS1** | **End-to-End Security Policy Audit**                     | Execute full-pipeline OPA policy enforcement and ISO/NIST audit traceability.                                                                                       |
-| **SS2** | **Adaptive Threat Mitigation**                           | Simulate anomaly injection; the agent performs autonomous mitigation with PQC trust chain validation.                                                                       |
-
----
+| ID      | Scenario                                                                 | Purpose                                                                                                                                                                     |
+| ------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S1**  | [Cloud → Pipeline CI/CD Baseline](#s1-hybrid-baseline)                    | Measure build–test–push–deploy agility and reliability using GitHub Actions + GCP (metrics: TTD, CFR, DF).                                                                  |
+| **S2**  | [Pipeline → Edge Deployment (Functional OTA Baseline)](#s2-ota-baseline) | Perform OTA deployment to simulated edge devices measuring OTA latency (TDL), end-to-end deploy time (TTD_edge), and deployment success rate (DSR). No security or PQC yet. |
+| **S3**  | [Rollback & Hotfix Resilience](#s3-rollback-hotfix-resilience)            | Inject controlled faults and validate manual/hybrid recovery. Measure MTTD & MTTR.                                                                                          |
+| **S4**  | [Security & PQC Validation](#s4-security-pqc-validation)                  | Validate update authenticity and PQC signature verification using NIST FIPS 203–205 algorithms.                                                                             |
+| **S5**  | [Explainability & Human-in-the-Loop](#s5-explainability)                 | Measure human approval latency (AL) and audit completeness rate (ACR).                                                                                                      |
+| **SS1** | [End-to-End Security Policy Audit](#ss1-end-to-end-security-policy-audit) | Execute full-pipeline OPA policy enforcement and ISO/NIST audit traceability.                                                                                               |
+| **SS2** | [Adaptive Threat Mitigation](#ss2-adaptive-threat-mitigation)            | Simulate anomaly injection; the agent performs autonomous mitigation with PQC trust chain validation.                                                                       |
 
 ## 🧮 Scenario–Metric Matrix
 
