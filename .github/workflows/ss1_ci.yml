@@ -198,7 +198,6 @@ jobs:
           pytest -q baseline/services/app/tests
           CODE=$?
           T_END=$(date +%s)
-          HEALTH_DUR=$((T_END - T_START))
           STATUS=$([ "$CODE" = "0" ] && echo success || echo failure)
 
           curl -sS -X POST "$INGEST_URL" \
@@ -558,7 +557,7 @@ jobs:
             curl -sS -X POST "$INGEST_URL" \
               -H "Authorization: Bearer ${ID_TOKEN}" \
               -H "Content-Type: application/json" \
-              -d @- <<'EOF'
+              -d @- <<EOF
           {
             "run_id": "${RUN_ID}",
             "scenario_id": "ss1",
