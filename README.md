@@ -932,7 +932,28 @@ Implementation (real edge + twin):
 <a id="s4-security-pqc-validation"></a>
 ## 🔒 S4 – Security & PQC Validation
 
-Security/PQC validation baseline placeholder. This scenario will cover PQC signature verification across pipeline and OTA, measuring TTV, VSR, and FDR with hardened crypto chains.
+Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signature verification of the OTA manifest already used in S2/S3. It focuses exclusively on authenticity and integrity (FIPS 203–205 style digital signatures) without changing the deployment logic or introducing resilience/rollback behavior.
+
+**What runs:** a dedicated GitHub Actions workflow (`.github/workflows/s4_pqc.yml`) creates an OTA manifest fixture, generates a PQC keypair, signs the manifest, and executes four sub-scenarios:
+
+- **S4-P0:** valid manifest + correct signature (expected PASS)
+- **S4-P1:** tampered manifest (expected FAIL)
+- **S4-P2:** incorrect public key (expected FAIL)
+- **S4-P3:** replayed/old manifest (expected FAIL via replay window; modeled as a logical freshness violation of signed metadata rather than a transport-level replay)
+
+**Metrics emitted:** per-stage Time-to-Verify (**TTV**) plus a summary of Verification Success Rate (**VSR**) and Failure Detection Rate (**FDR**). All results are optionally posted to the shared BigQuery ingest endpoint and stored as artifacts under `baseline/metrics/s4/`.
+
+**Verifier CLI:** `baseline/security/pqc/verify.py` verifies a canonical manifest against a signature and public key, with optional replay-window enforcement. This is reused in SS2 to validate real OTA artifacts.
+
+**Artifact-level signatures:** S4 emits `ota.json.pqcsig` and `pub.key` alongside the manifest to model OCI/registry metadata bundles used in production.
+
+**Crypto backend (industry-ready):** the verifier is pluggable. It supports a real PQC backend via Open Quantum Safe (`liboqs` / python-oqs) with **ML-DSA (Dilithium)** as the default demo algorithm for fast verification and OTA-friendly signature sizes. The workflow defaults to `auto` (uses OQS if installed, else a lightweight interface), and can be forced via `S4_PQC_BACKEND=oqs`.
+
+**Recommended demo config:** set `S4_PQC_BACKEND=oqs` and `S4_PQC_ALG=Dilithium2` in repo variables to run the real PQC path.
+
+**Compliance posture:** the implementation is **FIPS-aligned / NIST-selected** and architecture-ready for certified modules (KMS/HSM), without making certification claims.
+
+**Why isolated:** S4 establishes reproducible cryptographic baselines that SS2 will reuse for trust decisions without re-benchmarking crypto performance, keeping experimental boundaries clean.
 
 ---
 

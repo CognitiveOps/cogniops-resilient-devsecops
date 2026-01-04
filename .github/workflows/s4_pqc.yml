@@ -1,0 +1,110 @@
+name: S4 Security PQC Validation
+
+on:
+  push:
+    paths:
+      - ".github/workflows/s4_pqc.yml"
+      - "baseline/scripts/s4_pqc_runner.py"
+      - "baseline/scripts/s2_make_ota_manifest.py"
+      - "baseline/security/pqc/**"
+      - "baseline/metrics/s4/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: s4-pqc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+  S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'auto' }}
+  S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+
+jobs:
+  s4-pqc:
+    runs-on: ubuntu-latest
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      MODE: baseline
+      SCENARIO_ID: s4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PQC backend (optional)
+        if: ${{ env.S4_PQC_BACKEND == 'oqs' }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install oqs || python -m pip install python-oqs
+
+      - name: Auth to GCP (for ingest token)
+        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Create OTA manifest fixture
+        id: manifest
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s4/artifacts
+          DIGEST="sha256:${GITHUB_SHA}"
+          python baseline/scripts/s2_make_ota_manifest.py \
+            --image "example.com/edge_cv_app:${GITHUB_SHA}" \
+            --digest "$DIGEST" \
+            --outdir baseline/metrics/s4/artifacts \
+            --version "${GITHUB_SHA}"
+          MANIFEST_PATH="$(ls baseline/metrics/s4/artifacts/ota_*.json | tail -n1)"
+          echo "manifest=$MANIFEST_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Run PQC validation scenarios (P0–P3)
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s4_pqc_runner.py \
+            --manifest "${{ steps.manifest.outputs.manifest }}" \
+            --out baseline/metrics/s4/results.json \
+            --emit-artifacts-dir baseline/metrics/s4/artifacts \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --backend "${S4_PQC_BACKEND}" \
+            --algorithm "${S4_PQC_ALG}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}" \
+            --replay-cutoff-sec 900
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s4_${{ env.RUN_ID }}
+          path: |
+            baseline/metrics/s4/results.json
+            baseline/metrics/s4/artifacts/ota_*.json
+            baseline/metrics/s4/artifacts/ota_*.json.sha256
+            baseline/metrics/s4/artifacts/ota_*.json.pqcsig
+            baseline/metrics/s4/artifacts/pub.key
