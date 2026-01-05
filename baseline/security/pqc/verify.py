@@ -2,8 +2,8 @@
 """
 Verify a PQC signature over a canonical OTA manifest.
 
-This CLI is intended for pipeline/edge reuse (S4, SS2) and supports a pluggable
-backend (toy or liboqs).
+This CLI is intended for pipeline/edge reuse (S4, SS2) and requires a real
+PQC backend via liboqs (python-oqs).
 """
 
 import argparse
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--manifest", required=True, help="Path to OTA manifest JSON.")
     ap.add_argument("--sig", required=True, help="Path to PQC signature file.")
     ap.add_argument("--pub", required=True, help="Path to public key file.")
-    ap.add_argument("--backend", default="auto", help="Backend: auto | oqs | toy.")
+    ap.add_argument("--backend", default="oqs", help="Backend: oqs.")
     ap.add_argument("--algorithm", default="Dilithium2", help="PQC algorithm (oqs only).")
     ap.add_argument(
         "--replay-cutoff-sec",

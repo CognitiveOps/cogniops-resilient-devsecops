@@ -10,9 +10,9 @@ on:
         required: false
         default: "false"
       s4_pqc_backend:
-        description: "S4 PQC backend (auto | oqs | toy)"
+        description: "S4 PQC backend (oqs only)"
         required: false
-        default: "auto"
+        default: "oqs"
       s4_pqc_alg:
         description: "S4 PQC algorithm (e.g. Dilithium2)"
         required: false
@@ -43,7 +43,7 @@ env:
   TF_STATE_BUCKET:   ${{ vars.TF_STATE_BUCKET }}
   TF_STATE_PREFIX:   "terraform/state"
   BOOTSTRAP_SA_EMAIL: ${{ vars.GCP_SA_BOOTSTRAP_EMAIL || '' }}
-  S4_PQC_BACKEND:    ${{ github.event.inputs.s4_pqc_backend || vars.S4_PQC_BACKEND || 'auto' }}
+  S4_PQC_BACKEND:    ${{ github.event.inputs.s4_pqc_backend || vars.S4_PQC_BACKEND || 'oqs' }}
   S4_PQC_ALG:        ${{ github.event.inputs.s4_pqc_alg || vars.S4_PQC_ALG || 'Dilithium2' }}
 
 jobs:

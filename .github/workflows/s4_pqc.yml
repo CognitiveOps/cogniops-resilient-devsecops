@@ -20,7 +20,7 @@ concurrency:
 
 env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
-  S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'auto' }}
+  S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
   S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
 
 jobs:
@@ -39,8 +39,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install PQC backend (optional)
-        if: ${{ env.S4_PQC_BACKEND == 'oqs' }}
+      - name: Enforce OQS backend
+        run: |
+          set -euo pipefail
+          if [ "${S4_PQC_BACKEND}" != "oqs" ]; then
+            echo "S4_PQC_BACKEND must be 'oqs' (got '${S4_PQC_BACKEND}')." >&2
+            exit 1
+          fi
+
+      - name: Install PQC backend (OQS)
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip

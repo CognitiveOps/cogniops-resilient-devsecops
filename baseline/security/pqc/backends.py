@@ -1,15 +1,11 @@
 """
 Pluggable PQC signature backends.
 
-Default backend is a lightweight PQC-style interface (toy) intended for
-benchmarking and integration validation. A real PQC backend can be enabled
-via liboqs (python-oqs) when available.
+This project requires a real PQC backend via liboqs (python-oqs).
 """
 
 from __future__ import annotations
 
-import hashlib
-import os
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -31,21 +27,6 @@ class PQCBackend:
 
     def verify(self, payload: bytes, public_key: bytes, signature: bytes) -> bool:
         raise NotImplementedError
-
-
-class ToyBackend(PQCBackend):
-    def generate_keypair(self) -> Tuple[bytes, bytes]:
-        priv = os.urandom(48)
-        pub = hashlib.shake_256(priv + b"pub").digest(48)
-        return priv, pub
-
-    def sign(self, payload: bytes, private_key: bytes) -> bytes:
-        pub = hashlib.shake_256(private_key + b"pub").digest(48)
-        return hashlib.shake_256(pub + payload).digest(64)
-
-    def verify(self, payload: bytes, public_key: bytes, signature: bytes) -> bool:
-        expected = hashlib.shake_256(public_key + payload).digest(64)
-        return expected == signature
 
 
 class OQSBackend(PQCBackend):
@@ -83,18 +64,10 @@ class OQSBackend(PQCBackend):
 
 
 def get_backend(name: str, algorithm: str) -> PQCBackend:
-    normalized = (name or "auto").strip().lower()
+    normalized = (name or "oqs").strip().lower()
     algorithm = algorithm or "Dilithium2"
 
-    if normalized in ("auto", "oqs"):
-        try:
-            return OQSBackend(algorithm)
-        except PQCBackendError:
-            if normalized == "oqs":
-                raise
-            return ToyBackend(name="toy", algorithm="toy-shake256")
-
-    if normalized == "toy":
-        return ToyBackend(name="toy", algorithm="toy-shake256")
+    if normalized == "oqs":
+        return OQSBackend(algorithm)
 
     raise PQCBackendError(f"Unknown PQC backend: {name}")
