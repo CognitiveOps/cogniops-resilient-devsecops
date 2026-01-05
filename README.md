@@ -949,7 +949,7 @@ Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signa
 
 **Crypto backend (industry-ready):** the verifier is pluggable but requires a real PQC backend via Open Quantum Safe (`liboqs` / python-oqs), with **ML-DSA (Dilithium)** as the default demo algorithm for fast verification and OTA-friendly signature sizes.
 
-**Required demo config:** set `S4_PQC_BACKEND=oqs` and `S4_PQC_ALG=Dilithium2` in repo variables. The workflow fails if OQS is unavailable, avoiding toy/auto fallbacks.
+**Required demo config:** set `S4_PQC_BACKEND=oqs` and `S4_PQC_ALG=Dilithium2` in repo variables. The workflow installs `liboqs-python` from source and fails if OQS is unavailable, avoiding toy/auto fallbacks.
 
 **Compliance posture:** the implementation is **FIPS-aligned / NIST-selected** and architecture-ready for certified modules (KMS/HSM), without making certification claims.
 
