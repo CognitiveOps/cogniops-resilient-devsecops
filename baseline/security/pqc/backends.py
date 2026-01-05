@@ -57,8 +57,7 @@ class OQSBackend(PQCBackend):
     def sign(self, payload: bytes, private_key: bytes) -> bytes:
         import oqs
 
-        with oqs.Signature(self.algorithm) as signer:
-            signer.import_secret_key(private_key)
+        with oqs.Signature(self.algorithm, secret_key=private_key) as signer:
             signature = signer.sign(payload)
         return signature
 
