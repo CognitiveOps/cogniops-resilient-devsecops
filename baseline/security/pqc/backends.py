@@ -39,6 +39,11 @@ class OQSBackend(PQCBackend):
             raise PQCBackendError(
                 "python-oqs is not available; install it to use the oqs backend."
             ) from exc
+        if not hasattr(oqs, "Signature"):
+            raise PQCBackendError(
+                "python-oqs is required (package name: python-oqs); "
+                "the installed 'oqs' module lacks Signature."
+            )
 
     def generate_keypair(self) -> Tuple[bytes, bytes]:
         import oqs

@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install oqs || python -m pip install python-oqs
+          python -m pip install python-oqs
 
       - name: Auth to GCP (for ingest token)
         if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
