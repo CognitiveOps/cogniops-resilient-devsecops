@@ -172,16 +172,22 @@ def compute_summary(scenarios: List[Dict[str, Any]]) -> Dict[str, Any]:
         else 0.0
     )
 
-    ttv_avg_ms = (
+    ttv_all_ms = (
         sum(s["metrics"]["ttv_ms"] for s in scenarios) / len(scenarios)
         if scenarios
+        else 0.0
+    )
+    ttv_valid_ms = (
+        sum(s["metrics"]["ttv_ms"] for s in valid_cases) / len(valid_cases)
+        if valid_cases
         else 0.0
     )
 
     return {
         "vsr": round(vsr, 4),
         "fdr": round(fdr, 4),
-        "ttv_avg_ms": round(ttv_avg_ms, 3),
+        "ttv_all_ms": round(ttv_all_ms, 3),
+        "ttv_valid_ms": round(ttv_valid_ms, 3),
         "cases": len(scenarios),
         "status": "success" if all(s["status"] == "success" for s in scenarios) else "failure",
     }
@@ -350,32 +356,7 @@ def main() -> int:
         }
         send_ingest(args.ingest_url, args.auth_token, payload)
 
-    summary_payload = {
-        "run_id": args.run_id,
-        "scenario_id": args.scenario_id,
-        "stage": "s4_summary",
-        "mode": args.mode,
-        "status": summary["status"],
-        "commit_sha": args.commit_sha,
-        "t_start": time.time(),
-        "t_end": time.time(),
-        "metrics": {
-            "vsr": summary["vsr"],
-            "fdr": summary["fdr"],
-            "ttv_avg_ms": summary["ttv_avg_ms"],
-            "cases": summary["cases"],
-            "pqc_backend": backend.name,
-            "pqc_algorithm": backend.algorithm,
-            "test_case": "SUMMARY",
-        },
-        "labels": {
-            "replay_cutoff_ts": replay_cutoff_ts,
-            "backend": backend.name,
-            "algorithm": backend.algorithm,
-            "test_case": "SUMMARY",
-        },
-    }
-    send_ingest(args.ingest_url, args.auth_token, summary_payload)
+    # Summary is kept in results.json; aggregate metrics are derived in BigQuery.
 
     return 0 if summary["status"] == "success" else 1
 
