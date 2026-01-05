@@ -50,8 +50,10 @@ jobs:
       - name: Install PQC backend (OQS)
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install python-oqs
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
 
       - name: Auth to GCP (for ingest token)
         if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
