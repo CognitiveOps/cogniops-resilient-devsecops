@@ -947,9 +947,9 @@ Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signa
 
 **Artifact-level signatures:** S4 emits `ota.json.pqcsig` and `pub.key` alongside the manifest to model OCI/registry metadata bundles used in production.
 
-**Crypto backend (industry-ready):** the verifier is pluggable. It supports a real PQC backend via Open Quantum Safe (`liboqs` / python-oqs) with **ML-DSA (Dilithium)** as the default demo algorithm for fast verification and OTA-friendly signature sizes. The workflow defaults to `auto` (uses OQS if installed, else a lightweight interface), and can be forced via `S4_PQC_BACKEND=oqs`.
+**Crypto backend (industry-ready):** the verifier is pluggable but requires a real PQC backend via Open Quantum Safe (`liboqs` / python-oqs), with **ML-DSA (Dilithium)** as the default demo algorithm for fast verification and OTA-friendly signature sizes.
 
-**Recommended demo config:** set `S4_PQC_BACKEND=oqs` and `S4_PQC_ALG=Dilithium2` in repo variables to run the real PQC path.
+**Required demo config:** set `S4_PQC_BACKEND=oqs` and `S4_PQC_ALG=Dilithium2` in repo variables. The workflow fails if OQS is unavailable, avoiding toy/auto fallbacks.
 
 **Compliance posture:** the implementation is **FIPS-aligned / NIST-selected** and architecture-ready for certified modules (KMS/HSM), without making certification claims.
 

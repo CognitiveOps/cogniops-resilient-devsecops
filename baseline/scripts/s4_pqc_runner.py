@@ -12,8 +12,8 @@ Outputs per-scenario metrics (TTV, verification outcome) and aggregates VSR/FDR.
 Optionally posts each stage to the scenario-runs-ingest endpoint used across
 the project (BigQuery sink).
 
-Cryptographic backend: pluggable interface supporting real PQC via liboqs
-(python-oqs, e.g., Dilithium) or a lightweight fallback for CI.
+Cryptographic backend: pluggable interface using liboqs (python-oqs), with
+Dilithium as the default demo algorithm.
 """
 
 import argparse
@@ -201,7 +201,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--commit-sha", required=True, help="Commit SHA for provenance.")
     ap.add_argument("--scenario-id", default="s4", help="Scenario identifier (default: s4).")
     ap.add_argument("--mode", default="baseline", help="Mode label (baseline/shadow/enforce).")
-    ap.add_argument("--backend", default="auto", help="Backend: auto | oqs | toy.")
+    ap.add_argument("--backend", default="oqs", help="Backend: oqs.")
     ap.add_argument(
         "--algorithm",
         default="Dilithium2",
