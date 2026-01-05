@@ -144,13 +144,13 @@ def run_subscenario(
 
     return {
         "id": scenario_id,
-        "test_case": scenario_id.split("_")[1].upper() if "_" in scenario_id else scenario_id,
         "expected": expected_verified,
         "verified": verified,
         "reason": reason or "ok",
         "status": status,
         "metrics": {
             "ttv_ms": round(ttv_ms, 3),
+            "ttv_sec": round(ttv_ms / 1000.0, 6),
         },
         "t_start": start_epoch,
         "t_end": end_epoch,
@@ -341,17 +341,17 @@ def main() -> int:
             "t_end": s["t_end"],
             "metrics": {
                 "ttv_ms": s["metrics"]["ttv_ms"],
+                "ttv_sec": s["metrics"]["ttv_sec"],
                 "verified": s["verified"],
                 "expected": s["expected"],
                 "pqc_backend": backend.name,
                 "pqc_algorithm": backend.algorithm,
-                "test_case": s["test_case"],
             },
             "labels": {
                 "reason": s["reason"],
                 "backend": backend.name,
                 "algorithm": backend.algorithm,
-                "test_case": s["test_case"],
+                "alg": backend.algorithm,
             },
         }
         send_ingest(args.ingest_url, args.auth_token, payload)
