@@ -943,9 +943,9 @@ Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signa
 
 **Metrics emitted:** per-stage Time-to-Verify (**TTV**) for P0–P3 events. Aggregate metrics (**VSR**, **FDR**, `ttv_valid_ms`, `ttv_all_ms`) are derived in BigQuery from the raw per-case events; a local `results.json` summary is kept under `baseline/metrics/s4/`.
 
-**BigQuery query (S4):** example query to compute TTV p50/p95, VSR, and FDR from `agent_metrics.runs`.
+**BigQuery query (S4):** example query to compute per-record fields and TTV p50/p95, VSR, and FDR from `agent_metrics.runs` (test case derived from `stage`).
 ```sql
--- S4 summary (TTV p50/p95 + VSR + FDR) from runs table
+-- S4 per-record view + summary rollups from runs table
 WITH s4_cases AS (
   SELECT
     run_id,
@@ -963,16 +963,13 @@ WITH s4_cases AS (
     COALESCE(
       JSON_VALUE(metrics, '$.pqc_algorithm'),
       JSON_VALUE(labels, '$.algorithm'),
-      JSON_VALUE(labels, '$.pqc_alg')
+      JSON_VALUE(labels, '$.alg')
     ) AS alg,
-    COALESCE(
-      JSON_VALUE(metrics, '$.test_case'),
-      JSON_VALUE(labels, '$.test_case')
-    ) AS test_case,
+    UPPER(REGEXP_EXTRACT(stage, r's4_(p[0-9]+)_')) AS test_case,
     COALESCE(
       SAFE_CAST(JSON_VALUE(metrics, '$.expected') AS BOOL),
       SAFE_CAST(JSON_VALUE(labels, '$.expected') AS BOOL),
-      UPPER(COALESCE(JSON_VALUE(metrics, '$.test_case'), JSON_VALUE(labels, '$.test_case'), '')) = 'P0'
+      UPPER(REGEXP_EXTRACT(stage, r's4_(p[0-9]+)_')) = 'P0'
     ) AS expected_bool,
     COALESCE(
       SAFE_CAST(JSON_VALUE(metrics, '$.verified') AS BOOL),
