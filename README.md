@@ -941,7 +941,66 @@ Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signa
 - **S4-P2:** incorrect public key (expected FAIL)
 - **S4-P3:** replayed/old manifest (expected FAIL via replay window; modeled as a logical freshness violation of signed metadata rather than a transport-level replay)
 
-**Metrics emitted:** per-stage Time-to-Verify (**TTV**) plus a summary of Verification Success Rate (**VSR**) and Failure Detection Rate (**FDR**). All results are optionally posted to the shared BigQuery ingest endpoint and stored as artifacts under `baseline/metrics/s4/`.
+**Metrics emitted:** per-stage Time-to-Verify (**TTV**) for P0–P3 events. Aggregate metrics (**VSR**, **FDR**, `ttv_valid_ms`, `ttv_all_ms`) are derived in BigQuery from the raw per-case events; a local `results.json` summary is kept under `baseline/metrics/s4/`.
+
+**BigQuery query (S4):** example query to compute TTV p50/p95, VSR, and FDR from `agent_metrics.runs`.
+```sql
+-- S4 summary (TTV p50/p95 + VSR + FDR) from runs table
+WITH s4_cases AS (
+  SELECT
+    run_id,
+    stage,
+    status,
+    COALESCE(
+      SAFE_CAST(JSON_VALUE(metrics, '$.ttv_ms') AS FLOAT64) / 1000.0,
+      duration_sec
+    ) AS ttv_sec,
+    COALESCE(
+      JSON_VALUE(metrics, '$.pqc_backend'),
+      JSON_VALUE(labels, '$.backend'),
+      JSON_VALUE(labels, '$.pqc_backend')
+    ) AS backend,
+    COALESCE(
+      JSON_VALUE(metrics, '$.pqc_algorithm'),
+      JSON_VALUE(labels, '$.algorithm'),
+      JSON_VALUE(labels, '$.pqc_alg')
+    ) AS alg,
+    COALESCE(
+      JSON_VALUE(metrics, '$.test_case'),
+      JSON_VALUE(labels, '$.test_case')
+    ) AS test_case,
+    COALESCE(
+      SAFE_CAST(JSON_VALUE(metrics, '$.expected') AS BOOL),
+      SAFE_CAST(JSON_VALUE(labels, '$.expected') AS BOOL),
+      UPPER(COALESCE(JSON_VALUE(metrics, '$.test_case'), JSON_VALUE(labels, '$.test_case'), '')) = 'P0'
+    ) AS expected_bool,
+    COALESCE(
+      SAFE_CAST(JSON_VALUE(metrics, '$.verified') AS BOOL),
+      SAFE_CAST(JSON_VALUE(labels, '$.verified') AS BOOL)
+    ) AS verified_bool
+  FROM `cogent-wall-445012-h5.agent_metrics.runs`
+  WHERE scenario_id = 's4'
+    AND STARTS_WITH(stage, 's4_p')
+)
+SELECT
+  COALESCE(backend, 'unknown') AS backend,
+  COALESCE(alg, 'unknown')     AS alg,
+  COUNT(*) AS case_rows,
+  AVG(ttv_sec) AS ttv_avg_sec,
+  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(50)] AS ttv_p50_sec,
+  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(95)] AS ttv_p95_sec,
+  SAFE_DIVIDE(
+    COUNTIF(expected_bool = TRUE AND verified_bool = TRUE),
+    NULLIF(COUNTIF(expected_bool = TRUE), 0)
+  ) AS vsr,
+  SAFE_DIVIDE(
+    COUNTIF(expected_bool = FALSE AND verified_bool = FALSE),
+    NULLIF(COUNTIF(expected_bool = FALSE), 0)
+  ) AS fdr
+FROM s4_cases
+GROUP BY backend, alg
+ORDER BY backend, alg;
+```
 
 **Verifier CLI:** `baseline/security/pqc/verify.py` verifies a canonical manifest against a signature and public key, with optional replay-window enforcement. This is reused in SS2 to validate real OTA artifacts.
 
