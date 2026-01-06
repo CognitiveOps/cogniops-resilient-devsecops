@@ -943,15 +943,16 @@ Scenario S4 is an isolated, deterministic benchmark for post-quantum (PQC) signa
 
 **Metrics emitted:** per-stage Time-to-Verify (**TTV**) for P0–P3 events. Aggregate metrics (**VSR**, **FDR**, `ttv_valid_ms`, `ttv_all_ms`) are derived in BigQuery from the raw per-case events; a local `results.json` summary is kept under `baseline/metrics/s4/`.
 
-**BigQuery query (S4):** example query to compute per-record fields and TTV p50/p95, VSR, and FDR from `agent_metrics.runs` (test case derived from `stage`).
+**BigQuery query (S4):** summary query with **valid-path TTV** (P0 only) plus **all-attempt TTV**, VSR, and FDR (test case derived from `stage`).
 ```sql
--- S4 per-record view + summary rollups from runs table
+-- S4 summary (valid-path + all-attempt TTV, VSR, FDR)
 WITH s4_cases AS (
   SELECT
     run_id,
     stage,
     status,
     COALESCE(
+      SAFE_CAST(JSON_VALUE(metrics, '$.ttv_sec') AS FLOAT64),
       SAFE_CAST(JSON_VALUE(metrics, '$.ttv_ms') AS FLOAT64) / 1000.0,
       duration_sec
     ) AS ttv_sec,
@@ -983,9 +984,15 @@ SELECT
   COALESCE(backend, 'unknown') AS backend,
   COALESCE(alg, 'unknown')     AS alg,
   COUNT(*) AS case_rows,
-  AVG(ttv_sec) AS ttv_avg_sec,
-  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(50)] AS ttv_p50_sec,
-  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(95)] AS ttv_p95_sec,
+
+  -- Primary (thesis): valid-path TTV (P0 only)
+  APPROX_QUANTILES(IF(test_case = 'P0', ttv_sec, NULL), 101)[OFFSET(50)] AS ttv_p50_valid_sec,
+  APPROX_QUANTILES(IF(test_case = 'P0', ttv_sec, NULL), 101)[OFFSET(95)] AS ttv_p95_valid_sec,
+
+  -- Secondary (industry): all attempts
+  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(50)] AS ttv_p50_all_sec,
+  APPROX_QUANTILES(ttv_sec, 101)[OFFSET(95)] AS ttv_p95_all_sec,
+  AVG(ttv_sec) AS ttv_avg_all_sec,
   SAFE_DIVIDE(
     COUNTIF(expected_bool = TRUE AND verified_bool = TRUE),
     NULLIF(COUNTIF(expected_bool = TRUE), 0)
