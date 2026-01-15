@@ -1023,7 +1023,150 @@ ORDER BY backend, alg;
 <a id="s5-explainability"></a>
 ## 🧭 S5 – Explainability & Human-in-the-Loop
 
-Explainability baseline placeholder. This scenario will track approval latency and audit completeness with structured logs and human-in-the-loop gating.
+**S5** evaluates the **Explainability and Human-in-the-Loop (HITL)** layer as an **independent, standalone scenario**, producing quantitative explainability metrics:
+
+- **AL (Approval Latency)**
+- **ACR (Audit Completeness Rate)**
+
+In addition, S5 provides a **reusable Explainability & Approval Kit** that is later **invoked by SS2 (Adaptive Threat Mitigation)** to avoid duplicated implementations.
+
+This creates a clean experimental separation:
+
+- **S5** → component-level evaluation (explainability & HITL)
+- **SS2** → system-level evaluation (adaptive mitigation using the same components)
+
+---
+
+## Design Principles
+
+- **Explainability-by-design:** every automated recommendation produces a structured explanation.
+- **Human-in-the-loop gating:** high-risk actions require explicit human approval.
+- **Auditability & traceability:** all actions are logged with sufficient metadata for post-hoc analysis.
+- **Reusability:** the same explainability primitives are reused by SS2.
+
+---
+
+## Approval Mechanism (HITL)
+
+### Selected mechanism: simulated gate (S5) + real gate (SS2)
+
+This project separates **measurement** (S5) from **real usage** (SS2):
+
+- **S5 (standalone benchmark):** human participation is **intentionally simulated** to preserve determinism and reproducibility. AL is measured using **scripted approval delays / deterministic approval policies**, not real human behavior.
+- **SS2 (system evaluation):** real human approval can be enforced via GitHub Actions **Environments** with **Required reviewers** (approver: only the thesis author), which pauses execution until approval is granted.
+
+> The environment approval semantics (“pause-until-approved”) allow measurement of **Approval Latency (AL)** in SS2 without building custom UI.
+
+---
+
+## Repository Layout (S5 as Scenario + Kit)
+
+Reusable kit (invoked by S5 and SS2):
+
+```
+baseline/explainability/
+  ├── schema.py        # ActionTrace schema + required fields (ACR contract)
+  ├── cloudevents.py   # CloudEvents v1.0 wrapper utilities
+  ├── emit.py          # Emits stage events to METRICS_INGEST_URL
+  ├── report.py        # Markdown / JSON explanation generator
+  └── approval.py      # Approval timestamp helpers (AL)
+```
+
+---
+
+## Standalone S5 Workflow
+
+Workflow:
+
+```
+.github/workflows/s5_explainability.yml
+```
+
+### Workflow behavior
+
+S5 executes **controlled synthetic cases**, independent of S1–S4 or SS2, such as:
+
+- policy violation detected
+- tampered artifact detected
+- rollback recommendation generated
+
+### Stages
+
+1. **`s5_explain`**
+   - generates ActionTraces + explanation reports
+   - records `t_recommend`
+2. **`s5_approve`**
+   - simulates approval with a deterministic delay
+   - records `t_approved`
+3. **`s5_final`**
+   - computes **AL** and **ACR**
+   - sends final metrics to `agent_metrics.runs` via `METRICS_INGEST_URL` (required by default)
+
+---
+
+## Metrics
+
+### Approval Latency (AL)
+
+```
+AL = t_approved − t_recommend
+```
+
+Where:
+
+- `t_recommend` is recorded when the recommendation is emitted (before the gate)
+- `t_approved` is recorded when the environment-approved job resumes
+
+---
+
+### Audit Completeness Rate (ACR)
+
+In S5, “sufficient explainability” is not judged subjectively (by a human or by AI). Instead, it is defined structurally via an audit schema. Each action trace must contain a minimum required set of fields (defined in `baseline/explainability/schema.py`). An action is “complete” if all required fields are present.
+
+```
+ACR = (# complete audit records) / (total actions)
+```
+
+---
+
+## Reuse in SS2 (Adaptive Threat Mitigation)
+
+S5 is **not re-implemented** in SS2. SS2 invokes the same kit via the reusable workflow:
+
+```
+.github/workflows/_hitl_explain_and_approve.yml
+```
+
+This ensures identical explainability semantics, consistent AL/ACR measurement, and no duplication of logic.
+
+---
+
+## CloudEvents → GCP Ingest (optional)
+
+The same `METRICS_INGEST_URL` endpoint can ingest both:
+
+- **stage metrics events** (run/stage timing + aggregated metrics), and
+- **CloudEvents v1.0 ActionTraces** emitted by S5/SS2 (stored as `stage = action_trace` in `agent_metrics.runs`).
+
+This enables computing metrics (especially **ACR**) directly from BigQuery without relying on workflow artifacts.
+
+---
+
+## Standards & Related Work
+
+- **NIST SP 800-53 (AU family)** — audit/event logging completeness and accountability controls.
+- **CloudEvents v1.0 (CNCF)** — standard event envelope for portable, structured event data.
+- **OpenTelemetry Semantic Conventions** — standardized attributes for `service.name` and `deployment.environment.name`.
+- **OPA decision logs** — common industry pattern for explainable policy decisions (inputs/outputs/metadata).
+- **GitHub Actions Environments & Required Reviewers** — CI/CD manual approval gate used for production deployments.
+
+References:
+
+- GitHub Environments: https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment
+- CloudEvents spec: https://github.com/cloudevents/spec
+- OpenTelemetry semantic conventions: https://opentelemetry.io/docs/what-is-opentelemetry/
+- NIST SP 800-53 Rev. 5: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+- OPA decision logs: https://www.openpolicyagent.org/docs/management-decision-logs
 
 ---
 
