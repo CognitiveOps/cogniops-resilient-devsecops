@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from google.cloud import bigquery
 from flask import Request, make_response
@@ -50,6 +50,99 @@ def _epoch_to_datetime(value: Any) -> datetime:
     raise ValueError(f"Unsupported t_start/t_end type: {type(value)}")
 
 
+def _as_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    return None
+
+
+def _is_cloudevent(payload: Dict[str, Any]) -> bool:
+    return (
+        isinstance(payload, dict)
+        and payload.get("specversion") == "1.0"
+        and isinstance(payload.get("data"), dict)
+        and isinstance(payload.get("type"), str)
+        and isinstance(payload.get("source"), str)
+    )
+
+
+def _normalize_stage_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize legacy stage-event payloads (GitHub Actions -> METRICS_INGEST_URL).
+    """
+    return payload
+
+
+def _normalize_cloudevent_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert a CloudEvents v1.0 ActionTrace envelope into a BigQuery 'runs' row payload.
+
+    We store CloudEvents inside the existing agent_metrics.runs table by:
+    - stage: 'action_trace'
+    - labels: important index fields (case_id, action, trace_stage, ce_type, ce_source)
+    - metrics: embeds the full cloudevent envelope for downstream analysis (ACR, traceability)
+    """
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    timestamps = data.get("timestamps") if isinstance(data.get("timestamps"), dict) else {}
+    provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
+
+    # Prefer explicit recommend epoch (S5/SS2 contract), else CloudEvent time.
+    t_recommend_epoch = _as_float(timestamps.get("t_recommend_epoch"))
+    if t_recommend_epoch is None:
+        # Fall back to 'time' (ISO8601) as both start/end.
+        t_time = payload.get("time") or datetime.now(tz=timezone.utc).isoformat()
+        return {
+            "run_id": data.get("run_id", ""),
+            "scenario_id": data.get("scenario_id", ""),
+            "stage": "action_trace",
+            "mode": data.get("mode", ""),
+            "status": "success",
+            "commit_sha": provenance.get("commit_sha", ""),
+            "t_start": t_time,
+            "t_end": t_time,
+            "labels": {
+                "event_kind": "cloudevent",
+                "ce_type": payload.get("type", ""),
+                "ce_source": payload.get("source", ""),
+                "ce_subject": payload.get("subject", ""),
+                "trace_stage": data.get("stage", ""),
+                "case_id": data.get("case_id", ""),
+                "action": data.get("action", ""),
+            },
+            "metrics": {"cloudevent": payload},
+        }
+
+    t_iso = datetime.fromtimestamp(t_recommend_epoch, tz=timezone.utc).isoformat()
+    return {
+        "run_id": data.get("run_id", ""),
+        "scenario_id": data.get("scenario_id", ""),
+        "stage": "action_trace",
+        "mode": data.get("mode", ""),
+        "status": "success",
+        "commit_sha": provenance.get("commit_sha", ""),
+        "t_start": t_iso,
+        "t_end": t_iso,
+        "duration_sec": 0.0,
+        "labels": {
+            "event_kind": "cloudevent",
+            "ce_type": payload.get("type", ""),
+            "ce_source": payload.get("source", ""),
+            "ce_subject": payload.get("subject", ""),
+            "trace_stage": data.get("stage", ""),
+            "case_id": data.get("case_id", ""),
+            "action": data.get("action", ""),
+        },
+        "metrics": {"cloudevent": payload},
+    }
+
+
 def ingest_runs(request: Request):
     """
     HTTP Cloud Function (Gen2) for generic scenario metric ingestion.
@@ -83,6 +176,12 @@ def ingest_runs(request: Request):
 
     if not isinstance(payload, dict):
         return make_response(("Expected JSON object", 400))
+
+    # Accept either a stage metrics event or a CloudEvents ActionTrace envelope.
+    if _is_cloudevent(payload):
+        payload = _normalize_cloudevent_payload(payload)
+    else:
+        payload = _normalize_stage_payload(payload)
 
     # Required fields based on the BigQuery schema
     required_fields = [
@@ -126,9 +225,9 @@ def ingest_runs(request: Request):
     if not isinstance(metrics, dict):
         return make_response(("metrics must be a JSON object", 400))
 
-    # BigQuery JSON type expects JSON-encoded string values.
-    labels_json = json.dumps(labels) if labels else None
-    metrics_json = json.dumps(metrics) if metrics else None
+    # BigQuery JSON type accepts JSON text; keep payload portable.
+    labels_json = json.dumps(labels, ensure_ascii=False) if labels else None
+    metrics_json = json.dumps(metrics, ensure_ascii=False) if metrics else None
 
     # Construct BigQuery row
     row: Dict[str, Any] = {
