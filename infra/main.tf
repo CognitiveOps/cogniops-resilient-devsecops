@@ -211,6 +211,15 @@ resource "google_service_account" "cf_ingest" {
   display_name = "Cloud Functions (Gen2) - Metrics Ingest"
 }
 
+# Cloud Functions Gen2 deployments can default to the project Compute Engine default
+# service account during build/update operations. Ensure the infra SA can "actAs"
+# that service account to avoid 403 errors during `google_cloudfunctions2_function` updates.
+resource "google_service_account_iam_member" "infra_can_actas_default_compute" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
 resource "google_project_iam_member" "run_exec_writers" {
   for_each = toset(["roles/logging.logWriter", "roles/monitoring.metricWriter"])
   project  = var.project_id
