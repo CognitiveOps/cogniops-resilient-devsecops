@@ -1189,9 +1189,7 @@ Adaptive mitigation baseline placeholder. This scenario will simulate anomalies 
 
 ---
 
-## 🧠 Next Steps
-- **S4:** Security & PQC validation tests  
-- **S5:** Explainability / Human-in-the-Loop metrics   
+## 🧠 Next Steps 
 - **SS2:** Adaptive threat mitigation simulation  
 - **Agent Core:** Autonomous reasoning + XAI integration  
 
