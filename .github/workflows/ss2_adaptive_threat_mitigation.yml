@@ -7,18 +7,9 @@ on:
       - "baseline/scripts/ss2_detect.py"
       - "baseline/services/edge_cv_app/**"
       - "baseline/explainability/**"
-      - ".github/workflows/_hitl_explain_and_approve.yml"
+      - ".github/workflows/_hitl_explain_and_approve_soft.yml"
   workflow_dispatch:
     inputs:
-      approval_environment:
-        description: "GitHub Environment used as HITL approval gate"
-        required: true
-        default: staging
-        type: choice
-        options:
-          - prod
-          - staging
-          - edge
       incident_type:
         description: "Which incident to simulate"
         required: true
@@ -59,7 +50,6 @@ jobs:
       commit_sha: ${{ steps.meta.outputs.commit_sha }}
       incident_type: ${{ steps.meta.outputs.incident_type }}
       fail_mode: ${{ steps.meta.outputs.fail_mode }}
-      approval_environment: ${{ steps.meta.outputs.approval_environment }}
       gcs_prefix: ${{ steps.gcs.outputs.gcs_prefix }}
       case_id: ${{ steps.hitl.outputs.case_id }}
       action: ${{ steps.hitl.outputs.action }}
@@ -89,7 +79,6 @@ jobs:
 
       INCIDENT_TYPE: ${{ github.event.inputs.incident_type || 'runtime_fault' }}
       FAIL_MODE: ${{ github.event.inputs.fault_mode || 'corrupt_weights' }}
-      APPROVAL_ENVIRONMENT: ${{ github.event.inputs.approval_environment || vars.SS2_APPROVAL_ENV || 'staging' }}
 
       # Detection budgets (can be overridden via repo variables)
       LATENCY_BUDGET_SEC: ${{ vars.SS2_LATENCY_BUDGET_SEC || '2' }}
@@ -139,7 +128,6 @@ jobs:
           echo "commit_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "incident_type=${INCIDENT_TYPE}" >> "$GITHUB_OUTPUT"
           echo "fail_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
-          echo "approval_environment=${APPROVAL_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
           echo "artifacts_name=ss2_${RUN_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Require METRICS_INGEST_URL
@@ -432,32 +420,8 @@ jobs:
           gcloud storage cp -r baseline/metrics/ss2 "${GCS_PREFIX}/"
           echo "gcs_prefix=${GCS_PREFIX}" >> "$GITHUB_OUTPUT"
 
-  hitl_env:
+  hitl:
     needs: [prepare]
-    if: ${{ (vars.SS2_HITL_GATE_MODE || 'soft') != 'soft' }}
-    uses: ./.github/workflows/_hitl_explain_and_approve.yml
-    with:
-      environment: ${{ needs.prepare.outputs.approval_environment }}
-      scenario_id: ${{ needs.prepare.outputs.scenario_id }}
-      mode: ${{ needs.prepare.outputs.mode }}
-      run_id: ${{ needs.prepare.outputs.run_id }}
-      commit_sha: ${{ needs.prepare.outputs.commit_sha }}
-      case_id: ${{ needs.prepare.outputs.case_id }}
-      action: ${{ needs.prepare.outputs.action }}
-      recommendation: ${{ needs.prepare.outputs.recommendation }}
-      decision: ${{ needs.prepare.outputs.decision }}
-      risk_score: ${{ fromJson(needs.prepare.outputs.risk_score) }}
-      risk_level: ${{ needs.prepare.outputs.risk_level }}
-      rationale: ${{ needs.prepare.outputs.rationale }}
-      inputs_json: ${{ needs.prepare.outputs.inputs_json }}
-      outputs_json: ${{ needs.prepare.outputs.outputs_json }}
-      evidence_json: ${{ needs.prepare.outputs.evidence_json }}
-      policy_refs_json: ${{ needs.prepare.outputs.policy_refs_json }}
-      metrics_ingest_url: ${{ vars.METRICS_INGEST_URL }}
-
-  hitl_soft:
-    needs: [prepare]
-    if: ${{ (vars.SS2_HITL_GATE_MODE || 'soft') == 'soft' }}
     uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
     with:
       scenario_id: ${{ needs.prepare.outputs.scenario_id }}
@@ -481,8 +445,8 @@ jobs:
       approval_poll_sec: ${{ fromJson(vars.SS2_APPROVAL_POLL_SEC || '20') }}
 
   recover:
-    needs: [prepare, hitl_env, hitl_soft]
-    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && (needs.hitl_env.result == 'success' || needs.hitl_soft.result == 'success') }}
+    needs: [prepare, hitl]
+    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && needs.hitl.result == 'success' }}
     uses: ./.github/workflows/_s3_edge_rollback_action.yml
     with:
       gcs_prefix: ${{ needs.prepare.outputs.gcs_prefix }}

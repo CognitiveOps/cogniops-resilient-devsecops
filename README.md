@@ -1068,18 +1068,17 @@ This creates a clean experimental separation:
 
 ## Approval Mechanism (HITL)
 
-### Selected mechanism: simulated gate (S5) + real gate (SS2)
+### Selected mechanism: simulated gate (S5) + soft gate (SS2)
 
 This project separates **measurement** (S5) from **real usage** (SS2):
 
 - **S5 (standalone benchmark):** human participation is **intentionally simulated** to preserve determinism and reproducibility. AL is measured using **scripted approval delays / deterministic approval policies**, not real human behavior.
-- **SS2 (system evaluation):** a human approval step is executed *in the pipeline* before recovery actions. When GitHub Actions **Environment protection rules** are available, SS2 can use an environment-based pause-until-approved gate. On **GitHub Free + private repos** (where “Required reviewers” is unavailable), SS2 falls back to an **issue/comment-based soft gate**: the workflow creates a HITL issue and waits for an `approve` / `reject` comment from an allowed approver list.
+- **SS2 (system evaluation):** a human approval step is executed *in the pipeline* before recovery actions. On **GitHub Free + private repos** (where “Required reviewers” is unavailable), SS2 uses an **issue/comment-based soft gate**: the workflow creates a HITL issue and waits for an `approve` / `reject` comment from an allowed approver list.
 
-> Both modes are auditable: the decision is recorded as S5/SS2 ActionTrace events in BigQuery, and the soft gate additionally leaves a human comment trail in GitHub Issues.
+> This is auditable: the decision is recorded as S5/SS2 ActionTrace events in BigQuery, and the soft gate additionally leaves a human comment trail in GitHub Issues.
 
 Soft-gate configuration (repo variables):
 
-- `SS2_HITL_GATE_MODE=soft` (default) or `SS2_HITL_GATE_MODE=env`
 - `SS2_APPROVERS="yourUser,otherUser"` (CSV; default: the workflow actor)
 - `SS2_APPROVAL_TIMEOUT_MIN=60`, `SS2_APPROVAL_POLL_SEC=20`
 
@@ -1160,7 +1159,7 @@ ACR = (# complete audit records) / (total actions)
 S5 is **not re-implemented** in SS2. SS2 invokes the same kit via the reusable workflow:
 
 ```
-.github/workflows/_hitl_explain_and_approve.yml
+.github/workflows/_hitl_explain_and_approve_soft.yml
 ```
 
 This ensures identical explainability semantics, consistent AL/ACR measurement, and no duplication of logic.
@@ -1392,16 +1391,17 @@ Detection metric (SS2-only):
 
 HITL metrics (reused from S5, recorded under `scenario_id=ss2`):
 
-- `stage = s5_final` → `al_sec`, `acr` (via `.github/workflows/_hitl_explain_and_approve.yml`)
+- `stage = s5_final` → `al_sec`, `acr` (via `.github/workflows/_hitl_explain_and_approve_soft.yml`)
 
 Supported incident modes (workflow_dispatch):
 
 - `runtime_fault`: post-activation runtime fault injection (e.g., `corrupt_weights`) followed by quarantine + rollback to LKG
 - `integrity_failure`: manifest integrity failure (checksum mismatch) leading to block/quarantine before activation
 
-Approval gate environment:
+Approval gate (SS2):
 
-- Uses the GitHub Environment selected by workflow input `approval_environment` (or repository variable `SS2_APPROVAL_ENV`), enabling a real required-reviewers gate.
+- Uses an **issue/comment soft gate**: the workflow creates a HITL issue and waits for `approve` / `reject`.
+- Allowed approvers can be constrained via repository variable `SS2_APPROVERS` (CSV); default is the workflow actor.
 
 Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
 

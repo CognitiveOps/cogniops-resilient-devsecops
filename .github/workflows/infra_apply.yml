@@ -272,11 +272,7 @@ jobs:
               SS1_ALLOWED_INGRESS:   'internal',
               SS1_ALLOWED_REGISTRY_PREFIX: `${process.env.REPO_LOCATION}-docker.pkg.dev/${process.env.PROJECT_ID}/apps/`,
               // SS2 defaults (can be overridden per repo)
-              SS2_APPROVAL_ENV: 'staging',
-              // SS2 HITL gate mode:
-              // - soft: issue/comment-based approval (works on private repos + GitHub Free)
-              // - env:  GitHub Environments approval gate (requires Required reviewers, not available on Free+private)
-              SS2_HITL_GATE_MODE: 'soft',
+              // SS2 HITL (soft gate) configuration
               SS2_APPROVERS: '',
               SS2_APPROVAL_TIMEOUT_MIN: '60',
               SS2_APPROVAL_POLL_SEC: '20',
