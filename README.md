@@ -662,7 +662,7 @@ Implementation (real edge + twin):
 - `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
 - `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
 - S3 is benchmarked in two execution substrates (kept separate on purpose):
-  - **Edge OTA (canonical for thesis scope and SS2/S2 alignment):** `.github/workflows/s3_edge_rollback.yml` with rollback executed via `.github/workflows/_s3_edge_rollback_action.yml` (same OTA activation semantics as S2).
+  - **Edge OTA (canonical for thesis scope and SS2/S2 alignment):** `.github/workflows/s3_edge_rollback.yml` where rollback is executed by re-running `baseline/services/edge_cv_app/edge_pull_and_activate.sh` against the LKG manifest (same OTA activation semantics as S2; SS2 invokes the same rollback mechanism via `.github/workflows/_s3_edge_rollback_action.yml`).
   - **Cloud Run (supplemental benchmark):** `.github/workflows/s3_rollback.yml` with Cloud Run redeploy-based recovery (useful for cloud workloads, not the OTA/edge loop).
   In both cases, metrics are ingested into `agent_metrics.runs`, but results are interpreted per-substrate (no mixing).
 
