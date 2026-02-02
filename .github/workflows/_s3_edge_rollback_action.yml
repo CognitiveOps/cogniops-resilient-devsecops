@@ -85,15 +85,29 @@ jobs:
         name: Rollback to LKG (edge activation)
         run: |
           set -euo pipefail
+          shopt -s nullglob globstar
 
-          LKG="$(ls ${{ inputs.lkg_manifest_glob }} | tail -n1)"
-          if [ -z "${LKG:-}" ]; then
-            echo "No LKG manifest found (glob: ${{ inputs.lkg_manifest_glob }})" >&2
+          # Try the provided glob first (caller-specific), then fall back to a repo-wide search.
+          CANDIDATES=( ${{ inputs.lkg_manifest_glob }} )
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            CANDIDATES=( **/ota_lkg_*.json )
+          fi
+
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            echo "No LKG manifest found (glob: ${{ inputs.lkg_manifest_glob }})." >&2
+            echo "Hint: ensure artifacts were restored from GCS and include an ota_lkg_*.json file." >&2
             exit 1
           fi
 
+          # Pick the last one in lexicographic order (stable across runs); filenames include version/sha.
+          IFS=$'\n' SORTED=( $(printf '%s\n' "${CANDIDATES[@]}" | sort) )
+          unset IFS
+          LKG="${SORTED[$((${#SORTED[@]}-1))]}"
+
           cp "$LKG" baseline/services/edge_cv_app/
-          cp "$LKG.sha256" baseline/services/edge_cv_app/
+          if [ -f "${LKG}.sha256" ]; then
+            cp "${LKG}.sha256" baseline/services/edge_cv_app/
+          fi
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
 
           cd baseline/services/edge_cv_app
