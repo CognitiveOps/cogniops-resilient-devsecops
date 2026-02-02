@@ -245,6 +245,7 @@ jobs:
           echo "sa_app=$(jq -r '.gha_app_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "sa_run_exec=$(jq -r '.run_exec_sa_email.value' tf_outputs.json)" >> $GITHUB_OUTPUT
           echo "scenario_runs_url=$(jq -r '.scenario_runs_function_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          echo "agent_artifacts_bucket=$(jq -r '.agent_artifacts_bucket_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
 
       - name: Upsert repository variables
         uses: actions/github-script@v7
@@ -269,7 +270,21 @@ jobs:
               SS1_ALLOWED_SERVICE_ACCOUNTS: '${{ steps.tfout.outputs.sa_app }}',
               SS1_ALLOW_PUBLIC:      'false',
               SS1_ALLOWED_INGRESS:   'internal',
-              SS1_ALLOWED_REGISTRY_PREFIX: `${process.env.REPO_LOCATION}-docker.pkg.dev/${process.env.PROJECT_ID}/apps/`
+              SS1_ALLOWED_REGISTRY_PREFIX: `${process.env.REPO_LOCATION}-docker.pkg.dev/${process.env.PROJECT_ID}/apps/`,
+              // SS2 defaults (can be overridden per repo)
+              SS2_APPROVAL_ENV: 'staging',
+              // SS2 HITL gate mode:
+              // - soft: issue/comment-based approval (works on private repos + GitHub Free)
+              // - env:  GitHub Environments approval gate (requires Required reviewers, not available on Free+private)
+              SS2_HITL_GATE_MODE: 'soft',
+              SS2_APPROVERS: '',
+              SS2_APPROVAL_TIMEOUT_MIN: '60',
+              SS2_APPROVAL_POLL_SEC: '20',
+              SS2_LATENCY_BUDGET_SEC: '2',
+              SS2_FPS_MIN: '10',
+              SS2_DETECTION_RATE_MIN: '0.01',
+              SS2_ENABLE_PQC: 'true',
+              AGENT_ARTIFACTS_BUCKET: '${{ steps.tfout.outputs.agent_artifacts_bucket }}'
             };
             for (const [name, value] of Object.entries(varsToSet)) {
               if (!value || value === 'null') { core.info(`Skip empty ${name}`); continue; }

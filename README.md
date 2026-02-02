@@ -64,7 +64,7 @@ cogniops-resilient-devsecops/
 | **S4**   | –                              | –                  | **TTV**, **VSR**, **FDR** | –               |
 | **S5**   | –                              | –                  | –                         | **AL**, **ACR** |
 | **SS1**  | **CFR**, **DF**                | –                  | **FDR**, **ACR**          | **ACR**         |
-| **SS2**  | –                              | **MTTD**, **MTTR** | **TTV**, **VSR**, **FDR** | **AL**          |
+| **SS2**  | –                              | **MTTD**           | –                         | **AL**, **ACR** |
 
 ---
 
@@ -314,6 +314,10 @@ The edge application is a **FastAPI web server** that:
 This is a **non-secure baseline**: no PQC or cryptographic validation yet.  
 Security and PQC metrics are introduced later in **S4 / SS2**.
 
+**Execution substrate**
+
+S2 is evaluated on the **edge OTA substrate**: an edge-like host that **pulls & runs containers from an OTA manifest** (simulated on the GitHub runner, or a real device). This is the canonical deployment mechanism reused by SS2 (“SS2 extends S2” without changing delivery semantics).
+
 ---
 
 ## 🧱 Architecture Overview
@@ -366,6 +370,10 @@ Dockerized computer vision service with `/status` endpoint.
 * Downloads/pulls the image from Artifact Registry
 * Starts the container
 * Polls `/status` until healthy or timeout
+
+**Why a shell script is thesis-acceptable (realism vs reproducibility)**
+
+Using a small activation script is a deliberate baseline choice: it reproduces the core behavior of a device-side OTA updater for container workloads (manifest-driven activation, pull-by-digest immutability, stop/start of the workload, and a health gate via `/status`) while remaining deterministic and portable in CI. In a production edge stack, the same logic typically runs as a long-lived agent/service (e.g., systemd-managed “edge updater”) with persistent state, richer policies, and hardened key storage.
 
 #### Metrics Ingest (S2+)
 
@@ -653,7 +661,14 @@ Implementation (real edge + twin):
 - `baseline/services/edge_cv_app/metrics.py` — unified `EdgeMetrics` contract returned by `/status`.
 - `baseline/services/edge_cv_app/fault_models.py` — behavioral fault injectors (network, CPU, camera, model).
 - `baseline/services/edge_cv_app/main.py` — single container that runs in `MODE=real` (S2) or `MODE=twin` (S3) with `SCENARIO`/`FAIL_MODE` driving faults.
-- Detection + ingest lives in GitHub Actions (`s3_rollback.yml`); thresholds are auto-calibrated per run and labels include fault type, thresholds, and optional `/status` snapshots.
+- S3 is benchmarked in two execution substrates (kept separate on purpose):
+  - **Edge OTA (canonical for thesis scope and SS2/S2 alignment):** `.github/workflows/s3_edge_rollback.yml` with rollback executed via `.github/workflows/_s3_edge_rollback_action.yml` (same OTA activation semantics as S2).
+  - **Cloud Run (supplemental benchmark):** `.github/workflows/s3_rollback.yml` with Cloud Run redeploy-based recovery (useful for cloud workloads, not the OTA/edge loop).
+  In both cases, metrics are ingested into `agent_metrics.runs`, but results are interpreted per-substrate (no mixing).
+
+Limitations & future work (edge OTA realism):
+- Replace the script-based activation with a persistent **edge-updater agent** (container/service) that exposes an `apply(manifest)` API and maintains state across reboots.
+- Model OS-level OTA and key storage (A/B partitions, TPM/HSM), and extend to fleet rollouts (multi-device staged deployment).
   - Scheduled runs: `.github/workflows/s3_schedule.yml` triggers S3 nightly (cron), with a guard that stops when BQ has >=500 S3 rows and a small repeat matrix (capped at 3 per night) to accumulate samples per fault type without unbounded growth.
 - Why these edge faults (and not Kubernetes/control-plane faults): the thesis scope is cloud→pipeline→edge; Kubernetes control-plane failures are cloud-side and well-covered in existing chaos catalogs. Here we target device-level, resource-light injections that (a) reproduce reliably on GitHub runners and Cloud Run, (b) match edge literature (intermittent/bursty/multi-state), and (c) stress the OTA/rollback path where the agent operates. Kubernetes-specific chaos would test the cloud fabric, not the edge OTA/resilience loop we measure in S3.
   - Future work: add a small cloud-side chaos scenario (e.g., K8s node/network fault) to complement edge faults; current scope stays edge-focused to align with cloud→pipeline→edge and OTA/resilience measurement.
@@ -825,78 +840,83 @@ S3 uses the same generic table **`agent_metrics.runs`** with **two main stages p
 
 ### 🧮 BigQuery – MTTD / MTTR Query (S3)
 
-Example query to extract **per-run** and **summary** resilience metrics:
+Example query to extract **MTTD/MTTR summary per fault type**, **separated by substrate** (so you can keep Cloud Run vs edge‑OTA results distinct without mixing):
 
 ```sql
--- S3 – MTTD / MTTR metrics for edge_cv_app (scenario_id = 's3')
--- Source of truth: agent_metrics.runs
+-- S3 (both substrates) – MTTD/MTTR by fault type.
+--
+-- edge‑OTA (runner-simulated edge):
+--   stage s3_detect_edge  → metrics.mttd_sample_sec
+--   stage s3_recover_edge → metrics.ttr_sample_sec
+--
+-- Cloud Run:
+--   stage s3_detect        → metrics.ttd_sample_sec
+--   stage s3_recover       → metrics.ttr_sample_sec
+--
+-- Optional sanity check (uncomment):
+-- SELECT stage, JSON_VALUE(labels,'$.env') AS env, COUNT(*) AS rows
+-- FROM `PROJECT_ID.agent_metrics.runs`
+-- WHERE scenario_id='s3'
+-- GROUP BY stage, env
+-- ORDER BY stage, env;
 
-WITH s3_runs AS (
+WITH s3 AS (
   SELECT
     run_id,
-
-    -- Prefer duration_sec of the stage rows; if missing, fall back to metrics JSON (per-run samples)
-    COALESCE(
-      MAX(IF(stage = 's3_detect'  AND status = 'success', duration_sec, NULL)),
-      MAX(CAST(JSON_VALUE(metrics, '$.ttd_sample_sec') AS FLOAT64))
-    ) AS ttd_sample_sec,
-
-    COALESCE(
-      MAX(IF(stage = 's3_recover' AND status = 'success', duration_sec, NULL)),
-      MAX(CAST(JSON_VALUE(metrics, '$.ttr_sample_sec') AS FLOAT64))
-    ) AS ttr_sample_sec
-
-  FROM `cogent-wall-445012-h5.agent_metrics.runs`
+    COALESCE(JSON_VALUE(labels, '$.fault_type'), JSON_VALUE(labels, '$.fault_mode'), 'unknown') AS fault_type,
+    CASE
+      WHEN JSON_VALUE(labels, '$.env') = 'gh-runner' THEN 'edge-ota'
+      WHEN JSON_VALUE(labels, '$.env') = 'cloud-run' THEN 'cloud-run'
+      -- Back-compat: older rows may not have labels.env, so infer substrate from stage.
+      WHEN stage IN ('s3_detect_edge', 's3_recover_edge') THEN 'edge-ota'
+      WHEN stage IN ('s3_detect', 's3_recover') THEN 'cloud-run'
+      ELSE COALESCE(JSON_VALUE(labels, '$.env'), 'unknown')
+    END AS substrate,
+    stage,
+    SAFE_CAST(
+      COALESCE(
+        JSON_VALUE(metrics, '$.mttd_sample_sec'),
+        JSON_VALUE(metrics, '$.ttd_sample_sec')
+      ) AS FLOAT64
+    ) AS mttd_sample_sec,
+    SAFE_CAST(JSON_VALUE(metrics, '$.ttr_sample_sec') AS FLOAT64) AS mttr_sample_sec
+  FROM `PROJECT_ID.agent_metrics.runs`
   WHERE scenario_id = 's3'
-  GROUP BY run_id
+    AND stage IN ('s3_detect_edge', 's3_recover_edge', 's3_detect', 's3_recover')
+    AND status = 'success'
 ),
-
-summary AS (
+paired AS (
   SELECT
-    COUNTIF(ttd_sample_sec IS NOT NULL OR ttr_sample_sec IS NOT NULL)     AS successful_runs,
-    AVG(ttd_sample_sec)                                                   AS mttd_avg_sec,
-    APPROX_QUANTILES(ttd_sample_sec, 101)[OFFSET(50)]                     AS mttd_p50_sec,
-    APPROX_QUANTILES(ttd_sample_sec, 101)[OFFSET(95)]                     AS mttd_p95_sec,
-    AVG(ttr_sample_sec)                                                   AS mttr_avg_sec,
-    APPROX_QUANTILES(ttr_sample_sec, 101)[OFFSET(50)]                     AS mttr_p50_sec,
-    APPROX_QUANTILES(ttr_sample_sec, 101)[OFFSET(95)]                     AS mttr_p95_sec
-  FROM s3_runs
+    run_id,
+    substrate,
+    fault_type,
+    MAX(IF(stage IN ('s3_detect_edge', 's3_detect'), mttd_sample_sec, NULL)) AS mttd_sample_sec, -- detect
+    MAX(IF(stage IN ('s3_recover_edge', 's3_recover'), mttr_sample_sec, NULL)) AS mttr_sample_sec  -- recover
+  FROM s3
+  GROUP BY run_id, substrate, fault_type
+),
+filtered AS (
+  SELECT *
+  FROM paired
+  WHERE mttd_sample_sec IS NOT NULL
+    AND mttr_sample_sec IS NOT NULL
 )
-
--- Final output: per-run rows + one summary row
 SELECT
-  'per_run' AS row_type,
-  r.run_id,
-  r.ttd_sample_sec,
-  r.ttr_sample_sec,
-  NULL AS successful_runs,
-  NULL AS mttd_avg_sec,
-  NULL AS mttd_p50_sec,
-  NULL AS mttd_p95_sec,
-  NULL AS mttr_avg_sec,
-  NULL AS mttr_p50_sec,
-  NULL AS mttr_p95_sec
-FROM s3_runs r
-
-UNION ALL
-
-SELECT
-  'summary' AS row_type,
-  NULL AS run_id,
-  NULL AS mttd_sec,
-  NULL AS mttr_sec,
-  s.successful_runs,
-  s.mttd_avg_sec,
-  s.mttd_p50_sec,
-  s.mttd_p95_sec,
-  s.mttr_avg_sec,
-  s.mttr_p50_sec,
-  s.mttr_p95_sec
-FROM summary s;
+  substrate,
+  fault_type,
+  COUNT(*) AS runs,
+  AVG(mttd_sample_sec) AS mttd_avg_sec,
+  APPROX_QUANTILES(mttd_sample_sec, 101)[OFFSET(50)] AS mttd_p50_sec,
+  APPROX_QUANTILES(mttd_sample_sec, 101)[OFFSET(95)] AS mttd_p95_sec,
+  AVG(mttr_sample_sec) AS mttr_avg_sec,
+  APPROX_QUANTILES(mttr_sample_sec, 101)[OFFSET(50)] AS mttr_p50_sec,
+  APPROX_QUANTILES(mttr_sample_sec, 101)[OFFSET(95)] AS mttr_p95_sec
+FROM filtered
+GROUP BY substrate, fault_type
+ORDER BY substrate, fault_type;
 ```
 
 > Replace `PROJECT_ID` with your actual GCP project ID.
-> This yields one row **per S3 run** plus one **summary row** with aggregate MTTD/MTTR.
 
 ---
 
@@ -1053,9 +1073,15 @@ This creates a clean experimental separation:
 This project separates **measurement** (S5) from **real usage** (SS2):
 
 - **S5 (standalone benchmark):** human participation is **intentionally simulated** to preserve determinism and reproducibility. AL is measured using **scripted approval delays / deterministic approval policies**, not real human behavior.
-- **SS2 (system evaluation):** real human approval can be enforced via GitHub Actions **Environments** with **Required reviewers** (approver: only the thesis author), which pauses execution until approval is granted.
+- **SS2 (system evaluation):** a human approval step is executed *in the pipeline* before recovery actions. When GitHub Actions **Environment protection rules** are available, SS2 can use an environment-based pause-until-approved gate. On **GitHub Free + private repos** (where “Required reviewers” is unavailable), SS2 falls back to an **issue/comment-based soft gate**: the workflow creates a HITL issue and waits for an `approve` / `reject` comment from an allowed approver list.
 
-> The environment approval semantics (“pause-until-approved”) allow measurement of **Approval Latency (AL)** in SS2 without building custom UI.
+> Both modes are auditable: the decision is recorded as S5/SS2 ActionTrace events in BigQuery, and the soft gate additionally leaves a human comment trail in GitHub Issues.
+
+Soft-gate configuration (repo variables):
+
+- `SS2_HITL_GATE_MODE=soft` (default) or `SS2_HITL_GATE_MODE=env`
+- `SS2_APPROVERS="yourUser,otherUser"` (CSV; default: the workflow actor)
+- `SS2_APPROVAL_TIMEOUT_MIN=60`, `SS2_APPROVAL_POLL_SEC=20`
 
 ---
 
@@ -1173,7 +1199,243 @@ References:
 <a id="ss2-adaptive-threat-mitigation"></a>
 ## 🛡️ SS2 – Adaptive Threat Mitigation
 
-Adaptive mitigation baseline placeholder. This scenario will simulate anomalies and evaluate autonomous mitigations with PQC trust-chain validation.
+(Extension of the S2 OTA Delivery Pipeline)
+
+---
+
+### 1. Architectural Objective
+
+The **SS2 (Adaptive Threat Mitigation)** scenario evaluates the capability of a DevSecOps system to **detect, contain, and mitigate security or integrity incidents** occurring across a **cloud-to-edge delivery pipeline**, while preserving **auditability, explainability, and trust guarantees**.
+
+Crucially, **SS2 is designed as a direct extension of the S2 OTA delivery scenario**. Rather than introducing a new deployment mechanism, SS2 **reuses the S2 OTA pipeline unchanged** and augments it with additional **control, verification, mitigation, and explainability layers**.
+
+Unlike earlier scenarios that benchmark isolated capabilities—such as CI/CD performance (**S1**), OTA delivery (**S2**), resilience and recovery mechanisms (**S3**), cryptographic verification (**S4**), or explainability (**S5**)—SS2 is a system-level orchestration scenario. Its objective is to validate how previously evaluated components (**S3 – Resilience & Recovery**, **S4 – Security / PQC**, and **S5 – Explainability & Human-in-the-Loop**) are composed on top of the S2 delivery mechanism to form an operational mitigation loop under realistic incident conditions.
+
+S2 provides the delivery substrate; S3 provides validated recovery actions; SS2 provides the adaptive control and mitigation logic.
+
+---
+
+### 2. Design Principles
+
+The SS2 architecture is grounded in three well-established paradigms drawn from security operations, software supply-chain security, and experimental methodology.
+
+---
+
+#### 2.1 Incident Response Lifecycle (Structural Backbone)
+
+SS2 follows the standard incident response lifecycle:
+
+Detect → Contain → Recover → Verify → Resume
+
+This lifecycle is formally defined in incident-handling guidance by NIST and is widely adopted in Security Operations Centers (SOCs).
+
+**Justification**
+
+Using an incident-response model ensures that mitigation actions are:
+
+- Explainable, as each step has a clear operational rationale,
+- Repeatable, through deterministic control flow,
+- Measurable, enabling quantitative evaluation via MTTD,
+- Comparable, aligning results with real-world security operations.
+
+While recovery correctness and timing are benchmarked in S3, SS2 focuses on orchestrating when and why recovery actions are invoked within the incident-response lifecycle.
+
+**Primary references**
+
+- NIST SP 800-61 Rev.2 – Computer Security Incident Handling Guide: https://csrc.nist.gov/publications/detail/sp/800-61/rev-2/final
+- NIST SP 800-92 – Guide to Computer Security Log Management: https://csrc.nist.gov/publications/detail/sp/800-92/final
+
+---
+
+#### 2.2 SOAR-Style Orchestration (Execution Model)
+
+SS2 is implemented as a SOAR-like orchestration layer that wraps the S2 OTA workflow, consisting of:
+
+- Triggers: anomaly or integrity-failure signals originating from S2 execution (activation failures, degraded health, integrity mismatches),
+- Playbooks: predefined mitigation workflows applied to S2 deployments,
+- Actions: block, quarantine, invoke validated recovery actions, verify, and escalate.
+
+This mirrors modern Security Orchestration, Automation, and Response (SOAR) platforms used in enterprise environments.
+
+**Justification**
+
+A SOAR-style orchestration model:
+
+- Enables automation without altering the underlying delivery pipeline,
+- Avoids embedding opaque intelligence directly into S2 execution steps,
+- Cleanly separates delivery logic (S2) from control and mitigation logic (SS2).
+
+Recovery actions coordinated by SS2 are implemented and benchmarked in S3 and are not re-evaluated in SS2.
+
+**Primary references**
+
+- Gartner – Security Orchestration, Automation and Response (SOAR): https://www.gartner.com/en/information-technology/glossary/security-orchestration-automation-response-soar
+- IBM – What is SOAR?: https://www.ibm.com/think/topics/security-orchestration-automation-response
+
+---
+
+#### 2.3 Separation of Measurement vs Usage (Experimental Validity)
+
+SS2 does not benchmark recovery efficiency, cryptographic performance, or explainability quality directly.
+
+Instead:
+
+- S3 independently benchmarks resilience and recovery mechanisms (e.g., rollback correctness, MTTR),
+- S4 independently benchmarks security verification metrics (TTV, VSR, FDR),
+- S5 independently benchmarks explainability and human-in-the-loop metrics (AL, ACR).
+
+SS2 reuses these components during S2 execution, following the evaluation hierarchy:
+
+Component-level evaluation (S3, S4, S5) → System-level orchestration (SS2 over S2)
+
+This separation prevents metric contamination and ensures methodological rigor.
+
+---
+
+### 3. High-Level SS2 Architecture (Layered over S2)
+
+SS2 is architected as a control and mitigation layer operating on top of the S2 OTA delivery pipeline.
+
+At runtime:
+
+- OTA activation remains unchanged and is executed using the mechanisms defined in S2,
+- Recovery actions (e.g., rollback) are invoked using mechanisms implemented and benchmarked in S3,
+- SS2 observes, controls, and intervenes in the S2 flow only when an incident is detected.
+
+This design ensures that delivery semantics remain identical, while SS2 evaluates the effectiveness of adaptive mitigation.
+
+---
+
+### 4. Core Architectural Components (Extensions of S2)
+
+#### 4.1 Detection Layer
+
+**Role** Monitors S2 execution outcomes to identify abnormal or malicious conditions, including:
+
+- OTA integrity failures during S2 activation,
+- Edge health degradation reported by the S2 `/status` endpoint,
+- Repeated S2 deployment or activation failures,
+- Artifact or provenance mismatches discovered pre- or post-activation.
+
+**Characteristics**
+
+- Deterministic, rule-based logic in the SS2 baseline,
+- Timestamped detection events enabling measurement of MTTD.
+
+#### 4.2 Mitigation Orchestrator (SS2 Core)
+
+**Role** Coordinates mitigation actions within the S2 pipeline by invoking predefined playbooks mapped to detected threat categories.
+
+**Example playbooks**
+
+- Block S2 activation before container start,
+- Invoke rollback or recovery actions implemented and benchmarked in S3,
+- Quarantine the affected edge workload,
+- Rotate or invalidate trust metadata.
+
+SS2 does not reimplement or remeasure recovery logic, but orchestrates the invocation of validated recovery actions.
+
+#### 4.3 Trust Verification (Delegated to S4)
+
+**Role in SS2** Before S2 activation or recovery, SS2 invokes the S4 trust verifier to validate artifact authenticity, signature correctness, and resistance to replay or tampering.
+
+SS2 records only a boolean outcome (`trust_verified = true | false`) and does not measure cryptographic performance.
+
+**Primary references**
+
+- The Update Framework (TUF): https://theupdateframework.io/
+- Uptane: https://uptane.github.io/
+
+#### 4.4 Explainability & Human-in-the-Loop (Delegated to S5)
+
+**Role in SS2** SS2 invokes S5 modules around S2 execution to generate structured explanations, emit audit logs, and optionally pause execution for human approval.
+
+Explainability metrics (AL, ACR) are measured in S5 and reused in SS2.
+
+**Primary references**
+
+- NIST AI Risk Management Framework (AI RMF 1.0): https://www.nist.gov/itl/ai-risk-management-framework
+- EU High-Level Expert Group on Trustworthy AI: https://digital-strategy.ec.europa.eu/en/policies/expert-group-ai
+
+---
+
+### 5. Baseline vs Agent-Enhanced SS2 (Over the Same S2 Pipeline)
+
+| Aspect | Baseline SS2 (over S2) | Agent-Enhanced SS2 (over S2) |
+| --- | --- | --- |
+| Detection | Fixed rules | Learned / adaptive |
+| Decisions | Deterministic mapping | Reasoned / probabilistic |
+| Actions | Predefined playbooks | Dynamic playbooks |
+| Recovery mechanism | Invoked from S3 | Invoked from S3 |
+| Delivery mechanism | S2 OTA pipeline | S2 OTA pipeline |
+| Verification | S4 verifier | S4 verifier |
+| Explainability | S5 modules | S5 modules |
+| Metrics | MTTD, AL, ACR | Same + reasoning metrics |
+
+This design enables direct quantitative comparison, as both baseline and agent-enhanced SS2 operate on the exact same S2 delivery substrate and reuse the same validated recovery mechanisms from S3.
+
+---
+
+### 6. Baseline Implementation (Repository)
+
+SS2 is implemented as a GitHub Actions scenario that wraps the S2 OTA activation unchanged, injects controlled incidents, measures MTTD, and then routes mitigation decisions through the S5 HITL + explainability kit.
+
+Workflow: `.github/workflows/ss2_adaptive_threat_mitigation.yml`
+
+Why this substrate:
+
+- SS2 runs on the **same edge OTA substrate as S2** (manifest-driven pull/run + `/status`), so “SS2 extends S2” holds without changing the deployment mechanism. Cloud Run resilience is kept as a separate (supplemental) S3 benchmark.
+
+Detection metric (SS2-only):
+
+- `stage = ss2_detect` → `mttd_sample_sec` (via `baseline/scripts/ss2_detect.py`)
+
+HITL metrics (reused from S5, recorded under `scenario_id=ss2`):
+
+- `stage = s5_final` → `al_sec`, `acr` (via `.github/workflows/_hitl_explain_and_approve.yml`)
+
+Supported incident modes (workflow_dispatch):
+
+- `runtime_fault`: post-activation runtime fault injection (e.g., `corrupt_weights`) followed by quarantine + rollback to LKG
+- `integrity_failure`: manifest integrity failure (checksum mismatch) leading to block/quarantine before activation
+
+Approval gate environment:
+
+- Uses the GitHub Environment selected by workflow input `approval_environment` (or repository variable `SS2_APPROVAL_ENV`), enabling a real required-reviewers gate.
+
+Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
+
+- SS2 invokes the reusable S3 rollback action `.github/workflows/_s3_edge_rollback_action.yml` (recovery itself is benchmarked in `.github/workflows/s3_edge_rollback.yml` as part of S3).
+
+Optional PQC trust check (SS2 invokes S4 verifier without measuring S4 metrics):
+
+PQC trust is mandatory in SS2 (thesis mode):
+
+- SS2 requires repository variable `SS2_ENABLE_PQC=true` and signs + verifies the candidate manifest using `baseline/security/pqc/sign.py` and `baseline/security/pqc/verify.py`.
+
+Artifact storage (canonical):
+
+- SS2 stores artifacts in GCS under `gs://${AGENT_ARTIFACTS_BUCKET}/runs/ss2/${RUN_ID}/` (bucket is provisioned by Terraform and upserted as repo variable `AGENT_ARTIFACTS_BUCKET` via `infra_apply.yml`).
+
+---
+
+#### 🔑 Final takeaway (advisor & industry safe)
+
+SS2 extends the S2 OTA delivery scenario by layering adaptive detection, orchestration, trust verification, and explainability mechanisms on top of an unchanged deployment pipeline, while invoking recovery actions validated in S3 to enable system-level adaptive threat mitigation aligned with established incident-response and SOAR practices.
+
+---
+
+#### Optional thesis add-ons
+
+##### What is implemented vs measured (S2 / S3 / SS2)
+
+| Scenario | Primary role | Implemented (capabilities) | Measured (metrics) | Explicitly not measured here |
+| --- | --- | --- | --- | --- |
+| S2 | OTA delivery substrate | Cloud-to-edge OTA packaging, distribution, activation, and health polling | TDL, DSR, TTD_edge | Recovery performance (MTTD/MTTR), cryptographic verification (TTV/VSR/FDR), explainability (AL/ACR) |
+| S3 | Resilience & recovery benchmark | Fault injection plus validated recovery actions (e.g., rollback/hotfix) and recovery correctness checks | MTTD, MTTR | Delivery performance (TDL/DSR/TTD_edge), cryptographic verification (TTV/VSR/FDR), explainability (AL/ACR) |
+| SS2 | Adaptive mitigation orchestration over S2 | Detection + playbook orchestration over the unchanged S2 pipeline; invokes S3 recovery actions; invokes S4 trust verification; invokes S5 explainability/HITL | MTTD (orchestration loop), AL, ACR (reused from S5) | Recovery efficiency (MTTR) and rollback performance (benchmarked in S3); cryptographic performance (TTV/VSR/FDR, benchmarked in S4) |
+
+Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation chapter)
 
 ---
 

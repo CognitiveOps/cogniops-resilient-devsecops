@@ -1,0 +1,492 @@
+name: SS2 Adaptive Threat Mitigation (over S2)
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
+      - "baseline/scripts/ss2_detect.py"
+      - "baseline/services/edge_cv_app/**"
+      - "baseline/explainability/**"
+      - ".github/workflows/_hitl_explain_and_approve.yml"
+  workflow_dispatch:
+    inputs:
+      approval_environment:
+        description: "GitHub Environment used as HITL approval gate"
+        required: true
+        default: staging
+        type: choice
+        options:
+          - prod
+          - staging
+          - edge
+      incident_type:
+        description: "Which incident to simulate"
+        required: true
+        default: runtime_fault
+        type: choice
+        options:
+          - runtime_fault
+          - integrity_failure
+      fault_mode:
+        description: "Runtime fault mode (used for runtime_fault)"
+        required: true
+        default: corrupt_weights
+        type: choice
+        options:
+          - corrupt_weights
+          - dead_camera
+          - cpu_starvation
+          - net_unstable
+          - disk_full
+          - wrong_arch
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: ss2-mitigation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.meta.outputs.run_id }}
+      mode: ${{ steps.meta.outputs.mode }}
+      scenario_id: ${{ steps.meta.outputs.scenario_id }}
+      commit_sha: ${{ steps.meta.outputs.commit_sha }}
+      incident_type: ${{ steps.meta.outputs.incident_type }}
+      fail_mode: ${{ steps.meta.outputs.fail_mode }}
+      approval_environment: ${{ steps.meta.outputs.approval_environment }}
+      gcs_prefix: ${{ steps.gcs.outputs.gcs_prefix }}
+      case_id: ${{ steps.hitl.outputs.case_id }}
+      action: ${{ steps.hitl.outputs.action }}
+      recommendation: ${{ steps.hitl.outputs.recommendation }}
+      decision: ${{ steps.hitl.outputs.decision }}
+      risk_score: ${{ steps.hitl.outputs.risk_score }}
+      risk_level: ${{ steps.hitl.outputs.risk_level }}
+      rationale: ${{ steps.hitl.outputs.rationale }}
+      inputs_json: ${{ steps.hitl.outputs.inputs_json }}
+      outputs_json: ${{ steps.hitl.outputs.outputs_json }}
+      evidence_json: ${{ steps.hitl.outputs.evidence_json }}
+      policy_refs_json: ${{ steps.hitl.outputs.policy_refs_json }}
+    env:
+      SCENARIO_ID: ss2
+      MODE: baseline
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
+      AR_REPO: apps
+      IMAGE_NAME: edge-cv-app
+
+      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}
+
+      INCIDENT_TYPE: ${{ github.event.inputs.incident_type || 'runtime_fault' }}
+      FAIL_MODE: ${{ github.event.inputs.fault_mode || 'corrupt_weights' }}
+      APPROVAL_ENVIRONMENT: ${{ github.event.inputs.approval_environment || vars.SS2_APPROVAL_ENV || 'staging' }}
+
+      # Detection budgets (can be overridden via repo variables)
+      LATENCY_BUDGET_SEC: ${{ vars.SS2_LATENCY_BUDGET_SEC || '2' }}
+      FPS_MIN: ${{ vars.SS2_FPS_MIN || '10' }}
+      DETECTION_RATE_MIN: ${{ vars.SS2_DETECTION_RATE_MIN || '0.01' }}
+
+      # Optional: enable PQC signing+verification of the OTA manifest (SS2 invokes S4 verifier but does not benchmark it here)
+      SS2_ENABLE_PQC: ${{ vars.SS2_ENABLE_PQC || 'true' }}
+      S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
+      S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require PQC enabled for SS2 (thesis mode)
+        run: |
+          set -euo pipefail
+          if [ "${SS2_ENABLE_PQC}" != "true" ]; then
+            echo "SS2 requires SS2_ENABLE_PQC=true (PQC trust is mandatory for thesis SS2 runs)." >&2
+            exit 1
+          fi
+          if [ "${S4_PQC_BACKEND}" != "oqs" ]; then
+            echo "SS2 requires S4_PQC_BACKEND=oqs (got '${S4_PQC_BACKEND}')." >&2
+            exit 1
+          fi
+
+      - name: Install PQC backend (OQS)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
+
+      - id: meta
+        name: Export run metadata
+        run: |
+          set -euo pipefail
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "scenario_id=${SCENARIO_ID}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "incident_type=${INCIDENT_TYPE}" >> "$GITHUB_OUTPUT"
+          echo "fail_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
+          echo "approval_environment=${APPROVAL_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+          echo "artifacts_name=ss2_${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Require METRICS_INGEST_URL
+        run: |
+          set -euo pipefail
+          if [ -z "${METRICS_INGEST_URL:-}" ]; then
+            echo "METRICS_INGEST_URL must be set (repo variable) to send SS2 metrics." >&2
+            exit 1
+          fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store SS2 artifacts in GCS." >&2
+            exit 1
+          fi
+
+      - name: Auth to GCP via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          gcloud auth configure-docker "$AR_HOST" -q
+
+      - name: Install jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y jq >/dev/null
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          IMAGE_TAG="${GITHUB_SHA}"
+          echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push image
+        id: buildpush
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t "$IMG" --push baseline/services/edge_cv_app
+
+          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
+          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          if [ -z "$DIGEST" ]; then
+            echo "Failed to resolve image digest for $IMG" >&2
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Create LKG OTA manifest (S2 substrate)
+        id: lkg
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/ss2/artifacts
+          python baseline/scripts/s2_make_ota_manifest.py \
+            --image "${{ steps.buildpush.outputs.image }}" \
+            --digest "${{ steps.buildpush.outputs.digest }}" \
+            --outdir baseline/metrics/ss2/artifacts \
+            --version "lkg_${{ github.sha }}"
+          echo "manifest=$(ls baseline/metrics/ss2/artifacts/ota_lkg_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Activate LKG on edge (S2 unchanged)
+        run: |
+          set -euo pipefail
+          cp "${{ steps.lkg.outputs.manifest }}" baseline/services/edge_cv_app/
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+          cd baseline/services/edge_cv_app
+          ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+
+      - name: Prepare incident artifact (candidate manifest)
+        id: incident
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/ss2/incidents
+
+          CAND="baseline/metrics/ss2/artifacts/ota_candidate_${GITHUB_SHA}.json"
+          cp "${{ steps.lkg.outputs.manifest }}" "$CAND"
+          cp "${{ steps.lkg.outputs.manifest }}.sha256" "${CAND}.sha256"
+
+          echo "candidate_manifest=$CAND" >> "$GITHUB_OUTPUT"
+
+      - name: PQC sign + verify candidate manifest (mandatory)
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/ss2/pqc
+          python baseline/security/pqc/sign.py \
+            --manifest "${{ steps.incident.outputs.candidate_manifest }}" \
+            --backend "${S4_PQC_BACKEND}" \
+            --algorithm "${S4_PQC_ALG}" \
+            --out-sig baseline/metrics/ss2/pqc/manifest.pqcsig \
+            --out-pub baseline/metrics/ss2/pqc/pub.key \
+            --out baseline/metrics/ss2/pqc/sign.json
+
+          if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
+            # Mutate the JSON after signature generation → PQC verify fails.
+            # Recompute sha256 so the S2 checksum check still passes; failure is attributed to PQC.
+            python - <<'PY'
+            import json
+            import hashlib
+            path = "baseline/metrics/ss2/artifacts/ota_candidate_%s.json" % "${GITHUB_SHA}"
+            d = json.load(open(path, "r", encoding="utf-8"))
+            d["digest"] = str(d.get("digest", "")) + "-tampered"
+            json.dump(d, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+            h = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            with open(path + ".sha256", "w", encoding="utf-8") as f:
+                f.write(h + "  " + path.split("/")[-1] + "\n")
+            PY
+          fi
+
+          set +e
+          python baseline/security/pqc/verify.py \
+            --manifest "${{ steps.incident.outputs.candidate_manifest }}" \
+            --sig baseline/metrics/ss2/pqc/manifest.pqcsig \
+            --pub baseline/metrics/ss2/pqc/pub.key \
+            --backend "${S4_PQC_BACKEND}" \
+            --algorithm "${S4_PQC_ALG}" \
+            --replay-cutoff-sec 900 \
+            --out baseline/metrics/ss2/pqc/verify.json
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            echo "TRUST_VERIFIED=true" >> "$GITHUB_ENV"
+          else
+            echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Attempt candidate activation (S2 unchanged)
+        id: candidate_activate
+        run: |
+          set -euo pipefail
+          if [ "${TRUST_VERIFIED:-}" != "true" ]; then
+            echo "Blocking S2 activation due to trust verification failure (PQC)." >&2
+            echo "candidate_activation=blocked" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cp "${{ steps.incident.outputs.candidate_manifest }}" baseline/services/edge_cv_app/
+          cp "${{ steps.incident.outputs.candidate_manifest }}.sha256" baseline/services/edge_cv_app/
+          cd baseline/services/edge_cv_app
+
+          if ./edge_pull_and_activate.sh "$(basename "${{ steps.incident.outputs.candidate_manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"; then
+            echo "candidate_activation=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "candidate_activation=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inject runtime fault (SS2 incident)
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        id: inject
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.candidate_activate.outputs.candidate_activation }}" != "success" ]; then
+            echo "Candidate activation failed; cannot inject runtime fault." >&2
+            exit 1
+          fi
+          T_INJECT=$(python - <<'PY'
+          import time
+          print(time.time())
+          PY
+          )
+          echo "t_inject_epoch=$T_INJECT" >> "$GITHUB_OUTPUT"
+
+          IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
+          docker rm -f edge_cv_app || true
+
+          # Inject a failure mode at runtime (simulates compromise/misconfig after a successful S2 activation).
+          docker run -d --restart=always \
+            --name edge_cv_app \
+            -p 8080:8080 \
+            -e MODE=twin \
+            -e FAIL_MODE="${FAIL_MODE}" \
+            "$IMG"
+
+      - name: Detect incident (SS2 MTTD)
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        id: detect
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/ss2
+          python baseline/scripts/ss2_detect.py \
+            --service-url "http://127.0.0.1:8080" \
+            --t-inject-epoch "${{ steps.inject.outputs.t_inject_epoch }}" \
+            --deadline-sec 180 \
+            --poll-interval-sec 2 \
+            --out baseline/metrics/ss2/detection.json \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --fault-mode "${FAIL_MODE}" \
+            --ingest-url "${METRICS_INGEST_URL}" \
+            --auth-token "${ID_TOKEN}"
+
+      - name: Contain (quarantine workload)
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        run: |
+          set -euo pipefail
+          docker rm -f edge_cv_app || true
+
+      - name: Build HITL case inputs
+        id: hitl
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          incident = os.environ.get("INCIDENT_TYPE", "runtime_fault")
+          fail_mode = os.environ.get("FAIL_MODE", "")
+          run_id = os.environ.get("RUN_ID", "")
+          path = "baseline/metrics/ss2/detection.json"
+          det = json.load(open(path, "r", encoding="utf-8")) if os.path.exists(path) else {}
+
+          case_id = f"SS2_{incident}_{fail_mode}".replace(" ", "_")
+          action = "rollback_release" if incident == "runtime_fault" else "block_activation"
+          recommendation = "rollback" if incident == "runtime_fault" else "block"
+          decision = "approve_then_rollback" if incident == "runtime_fault" else "block"
+
+          risk_score = 0.85 if incident == "runtime_fault" else 0.9
+          risk_level = "high" if incident == "runtime_fault" else "critical"
+
+          rationale = (
+              "Runtime anomaly detected after successful OTA activation; quarantine the workload and rollback to last-known-good."
+              if incident == "runtime_fault"
+              else "Integrity failure detected in OTA manifest; block activation and quarantine artifact."
+          )
+
+          inputs = {
+              "incident_type": incident,
+              "fault_mode": fail_mode,
+              "service": "edge_cv_app",
+              "candidate_manifest": os.environ.get("CANDIDATE_MANIFEST", ""),
+              "trust_verified": os.environ.get("TRUST_VERIFIED", ""),
+          }
+          outputs = {"detection": det}
+          evidence = [
+              {"type": "artifact", "ref": os.environ.get("GCS_PREFIX",""), "note": "SS2 artifacts in GCS (detection.json, manifests)"},
+          ]
+          policy_refs = [
+              "NIST SP 800-61 Rev.2 (incident response lifecycle)",
+              "SOAR playbooks pattern (industry)",
+          ]
+
+          # Export for workflow_call inputs (must be strings/numbers).
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"case_id={case_id}\n")
+              f.write(f"action={action}\n")
+              f.write(f"recommendation={recommendation}\n")
+              f.write(f"decision={decision}\n")
+              f.write(f"risk_score={risk_score}\n")
+              f.write(f"risk_level={risk_level}\n")
+              f.write("rationale=" + rationale.replace("\n", " ").strip() + "\n")
+              f.write("inputs_json=" + json.dumps(inputs, ensure_ascii=False) + "\n")
+              f.write("outputs_json=" + json.dumps(outputs, ensure_ascii=False) + "\n")
+              f.write("evidence_json=" + json.dumps(evidence, ensure_ascii=False) + "\n")
+              f.write("policy_refs_json=" + json.dumps(policy_refs, ensure_ascii=False) + "\n")
+          PY
+        env:
+          CANDIDATE_MANIFEST: ${{ steps.incident.outputs.candidate_manifest }}
+
+      - name: Upload SS2 artifacts to GCS (canonical)
+        id: gcs
+        run: |
+          set -euo pipefail
+          echo "Uploading SS2 artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/ss2 "${GCS_PREFIX}/"
+          echo "gcs_prefix=${GCS_PREFIX}" >> "$GITHUB_OUTPUT"
+
+  hitl_env:
+    needs: [prepare]
+    if: ${{ (vars.SS2_HITL_GATE_MODE || 'soft') != 'soft' }}
+    uses: ./.github/workflows/_hitl_explain_and_approve.yml
+    with:
+      environment: ${{ needs.prepare.outputs.approval_environment }}
+      scenario_id: ${{ needs.prepare.outputs.scenario_id }}
+      mode: ${{ needs.prepare.outputs.mode }}
+      run_id: ${{ needs.prepare.outputs.run_id }}
+      commit_sha: ${{ needs.prepare.outputs.commit_sha }}
+      case_id: ${{ needs.prepare.outputs.case_id }}
+      action: ${{ needs.prepare.outputs.action }}
+      recommendation: ${{ needs.prepare.outputs.recommendation }}
+      decision: ${{ needs.prepare.outputs.decision }}
+      risk_score: ${{ fromJson(needs.prepare.outputs.risk_score) }}
+      risk_level: ${{ needs.prepare.outputs.risk_level }}
+      rationale: ${{ needs.prepare.outputs.rationale }}
+      inputs_json: ${{ needs.prepare.outputs.inputs_json }}
+      outputs_json: ${{ needs.prepare.outputs.outputs_json }}
+      evidence_json: ${{ needs.prepare.outputs.evidence_json }}
+      policy_refs_json: ${{ needs.prepare.outputs.policy_refs_json }}
+      metrics_ingest_url: ${{ vars.METRICS_INGEST_URL }}
+
+  hitl_soft:
+    needs: [prepare]
+    if: ${{ (vars.SS2_HITL_GATE_MODE || 'soft') == 'soft' }}
+    uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
+    with:
+      scenario_id: ${{ needs.prepare.outputs.scenario_id }}
+      mode: ${{ needs.prepare.outputs.mode }}
+      run_id: ${{ needs.prepare.outputs.run_id }}
+      commit_sha: ${{ needs.prepare.outputs.commit_sha }}
+      case_id: ${{ needs.prepare.outputs.case_id }}
+      action: ${{ needs.prepare.outputs.action }}
+      recommendation: ${{ needs.prepare.outputs.recommendation }}
+      decision: ${{ needs.prepare.outputs.decision }}
+      risk_score: ${{ fromJson(needs.prepare.outputs.risk_score) }}
+      risk_level: ${{ needs.prepare.outputs.risk_level }}
+      rationale: ${{ needs.prepare.outputs.rationale }}
+      inputs_json: ${{ needs.prepare.outputs.inputs_json }}
+      outputs_json: ${{ needs.prepare.outputs.outputs_json }}
+      evidence_json: ${{ needs.prepare.outputs.evidence_json }}
+      policy_refs_json: ${{ needs.prepare.outputs.policy_refs_json }}
+      metrics_ingest_url: ${{ vars.METRICS_INGEST_URL }}
+      approvers_csv: ${{ vars.SS2_APPROVERS || github.actor }}
+      approval_timeout_min: ${{ fromJson(vars.SS2_APPROVAL_TIMEOUT_MIN || '60') }}
+      approval_poll_sec: ${{ fromJson(vars.SS2_APPROVAL_POLL_SEC || '20') }}
+
+  recover:
+    needs: [prepare, hitl_env, hitl_soft]
+    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && (needs.hitl_env.result == 'success' || needs.hitl_soft.result == 'success') }}
+    uses: ./.github/workflows/_s3_edge_rollback_action.yml
+    with:
+      gcs_prefix: ${{ needs.prepare.outputs.gcs_prefix }}
+      lkg_manifest_glob: "ss2/artifacts/ota_lkg_*.json"
+      gcp_project: ${{ vars.GCP_PROJECT_ID }}
+      gcp_region: ${{ vars.GCP_REGION }}
+      ar_location: ${{ vars.GCP_REPO_LOCATION }}

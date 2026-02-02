@@ -1,12 +1,8 @@
-name: HITL Explain + Approve (Reusable)
+name: HITL Explain + Approve (Soft Gate via Issue, Reusable)
 
 on:
   workflow_call:
     inputs:
-      environment:
-        type: string
-        required: false
-        default: hitl-approval
       scenario_id:
         type: string
         required: false
@@ -62,14 +58,32 @@ on:
         type: string
         required: false
         default: ""
+      approvers_csv:
+        description: "Comma-separated GitHub usernames allowed to approve/reject (default: workflow actor)."
+        type: string
+        required: false
+        default: ""
+      approval_timeout_min:
+        description: "Max minutes to wait for approval (default: 60)."
+        type: number
+        required: false
+        default: 60
+      approval_poll_sec:
+        description: "Polling interval seconds for checking issue comments (default: 20)."
+        type: number
+        required: false
+        default: 20
     outputs:
       al_sec:
         value: ${{ jobs.final.outputs.al_sec }}
       acr:
         value: ${{ jobs.final.outputs.acr }}
+      approval_issue_url:
+        value: ${{ jobs.approve.outputs.approval_issue_url }}
 
 permissions:
   contents: read
+  issues: write
   id-token: write
 
 jobs:
@@ -160,7 +174,8 @@ jobs:
   approve:
     runs-on: ubuntu-latest
     needs: [explain]
-    environment: ${{ inputs.environment }}
+    outputs:
+      approval_issue_url: ${{ steps.issue.outputs.issue_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -196,6 +211,111 @@ jobs:
           name: ${{ needs.explain.outputs.artifact_name }}
           path: baseline/metrics/hitl
 
+      - id: issue
+        name: Create approval issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const approversCsv = String(JSON.parse(`${{ toJson(inputs.approvers_csv) }}`) || '').trim();
+            const defaultApprover = context.actor; // fallback if inputs.approvers_csv is empty
+            const approvers = (approversCsv ? approversCsv.split(',') : [defaultApprover])
+              .map(s => s.trim())
+              .filter(Boolean);
+
+            const scenarioId = String(JSON.parse(`${{ toJson(inputs.scenario_id) }}`) || 'ss2');
+            const runId = String(JSON.parse(`${{ toJson(inputs.run_id) }}`) || '');
+            const caseId = String(JSON.parse(`${{ toJson(inputs.case_id) }}`) || '');
+            const action = String(JSON.parse(`${{ toJson(inputs.action) }}`) || '');
+            const recommendation = String(JSON.parse(`${{ toJson(inputs.recommendation) }}`) || '');
+            const decision = String(JSON.parse(`${{ toJson(inputs.decision) }}`) || '');
+            const riskLevel = String(JSON.parse(`${{ toJson(inputs.risk_level) }}`) || '');
+            const riskScore = Number(`${{ inputs.risk_score }}`); // numeric input
+            const rationale = String(JSON.parse(`${{ toJson(inputs.rationale) }}`) || '');
+
+            const title = `[HITL] ${scenarioId} approve: ${caseId} (${runId})`;
+            const body = [
+              `**Scenario:** \`${scenarioId}\``,
+              `**Run:** \`${runId}\``,
+              `**Case:** \`${caseId}\``,
+              `**Action:** \`${action}\``,
+              `**Recommendation:** \`${recommendation}\``,
+              `**Decision:** \`${decision}\``,
+              `**Risk:** \`${riskLevel}\` (score=${riskScore})`,
+              ``,
+              `**Rationale:** ${rationale}`,
+              ``,
+              `Allowed approvers: ${approvers.map(a => `@${a}`).join(', ')}`,
+              ``,
+              `Comment \`approve\` (or \`/approve\`) to continue, or \`reject\` (or \`/reject\`) to fail the run.`,
+              ``,
+              `_Note: This repo runs on GitHub Free + private, so Environment required reviewers are unavailable. This issue-based gate provides a reproducible, auditable soft-HITL control._`,
+            ].join('\n');
+
+            const resp = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['hitl', scenarioId],
+            });
+
+            core.setOutput('issue_number', String(resp.data.number));
+            core.setOutput('issue_url', resp.data.html_url);
+
+      - name: Wait for approval comment
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const timeoutMin = Number(`${{ inputs.approval_timeout_min }}`);
+            const pollSec = Number(`${{ inputs.approval_poll_sec }}`);
+
+            const approversCsv = String(JSON.parse(`${{ toJson(inputs.approvers_csv) }}`) || '').trim();
+            const defaultApprover = context.actor;
+            const approvers = new Set((approversCsv ? approversCsv.split(',') : [defaultApprover])
+              .map(s => s.trim())
+              .filter(Boolean)
+              .map(s => s.toLowerCase()));
+
+            const started = Date.now();
+            const deadline = started + timeoutMin * 60 * 1000;
+
+            async function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            core.info(`Waiting for approval on issue #${issueNumber} for up to ${timeoutMin} min (poll ${pollSec}s).`);
+            core.info(`Allowed approvers: ${Array.from(approvers).join(', ')}`);
+
+            while (Date.now() < deadline) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+
+              for (const c of comments.reverse()) {
+                const author = (c.user?.login || '').toLowerCase();
+                if (!approvers.has(author)) continue;
+
+                const text = (c.body || '').trim().toLowerCase();
+                if (['approve', '/approve'].includes(text)) {
+                  core.info(`Approved by @${c.user.login}.`);
+                  return;
+                }
+                if (['reject', '/reject'].includes(text)) {
+                  throw new Error(`Rejected by @${c.user.login}.`);
+                }
+              }
+
+              await sleep(pollSec * 1000);
+            }
+
+            throw new Error(`Approval timeout after ${timeoutMin} minutes (issue #${issueNumber}).`);
+
       - name: Stamp approval timestamp
         env:
           METRICS_INGEST_URL: ${{ inputs.metrics_ingest_url }}
@@ -210,6 +330,29 @@ jobs:
             --mode "${{ inputs.mode }}" \
             --ingest-url "${METRICS_INGEST_URL:-}" \
             --auth-token "${ID_TOKEN:-}"
+
+      - name: Close approval issue
+        if: ${{ always() }}
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            // Best-effort: comment + close the issue so the audit trail is self-contained.
+            const conclusion = '${{ job.status }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `Automation closing this HITL gate (job status: **${conclusion}**).`,
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed',
+            });
 
       - uses: actions/upload-artifact@v4
         with:
