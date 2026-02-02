@@ -10,11 +10,12 @@ on:
   workflow_dispatch:
     inputs:
       fault_mode:
-        description: "Injected runtime fault mode"
+        description: "Injected runtime fault mode (or all)"
         required: true
-        default: corrupt_weights
+        default: all
         type: choice
         options:
+          - all
           - corrupt_weights
           - dead_camera
           - cpu_starvation
@@ -31,13 +32,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
+  s3_edge:
+    name: s3_edge – ${{ matrix.fault_mode }}
     runs-on: ubuntu-latest
-    outputs:
-      artifact_name: ${{ steps.meta.outputs.artifact_name }}
-      t_detect_epoch: ${{ steps.detect_out.outputs.t_detect_epoch }}
-      fault_mode: ${{ steps.meta.outputs.fault_mode }}
-      gcs_prefix: ${{ steps.gcs.outputs.gcs_prefix }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        fault_mode:
+          - corrupt_weights
+          - dead_camera
+          - cpu_starvation
+          - net_unstable
+          - disk_full
+          - wrong_arch
+    if: >-
+      ${{
+        (github.event_name != 'push' || matrix.fault_mode == 'corrupt_weights')
+        && (
+          github.event_name != 'workflow_dispatch'
+          || github.event.inputs.fault_mode == 'all'
+          || matrix.fault_mode == github.event.inputs.fault_mode
+        )
+      }}
     env:
       SCENARIO_ID: s3
       MODE: baseline
@@ -50,9 +67,9 @@ jobs:
       IMAGE_NAME: edge-cv-app
 
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
-      FAIL_MODE: ${{ github.event.inputs.fault_mode || 'corrupt_weights' }}
+      FAIL_MODE: ${{ matrix.fault_mode }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
 
     steps:
       - uses: actions/checkout@v4
@@ -61,13 +78,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - id: meta
-        name: Export metadata
-        run: |
-          set -euo pipefail
-          echo "artifact_name=s3_edge_${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "fault_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Require METRICS_INGEST_URL
         run: |
@@ -159,6 +169,9 @@ jobs:
         run: |
           set -euo pipefail
           cp "${{ steps.lkg.outputs.manifest }}" baseline/services/edge_cv_app/
+          if [ -f "${{ steps.lkg.outputs.manifest }}.sha256" ]; then
+            cp "${{ steps.lkg.outputs.manifest }}.sha256" baseline/services/edge_cv_app/
+          fi
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
           cd baseline/services/edge_cv_app
           ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
@@ -214,54 +227,12 @@ jobs:
               f.write(f"t_detect_epoch={det['t_detect_epoch']}\n")
           PY
 
-      - name: Upload S3 edge artifacts to GCS (canonical)
-        id: gcs
+      - name: Rollback to LKG (edge activation)
+        id: rollback
         run: |
           set -euo pipefail
-          echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"
-          gcloud storage cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
-          echo "gcs_prefix=${GCS_PREFIX}" >> "$GITHUB_OUTPUT"
-
-  recover:
-    needs: [prepare]
-    uses: ./.github/workflows/_s3_edge_rollback_action.yml
-    with:
-      gcs_prefix: ${{ needs.prepare.outputs.gcs_prefix }}
-      lkg_manifest_glob: "s3_edge/artifacts/ota_lkg_*.json"
-      gcp_project: ${{ vars.GCP_PROJECT_ID }}
-      gcp_region: ${{ vars.GCP_REGION }}
-      ar_location: ${{ vars.GCP_REPO_LOCATION }}
-
-  emit:
-    needs: [prepare, recover]
-    runs-on: ubuntu-latest
-    env:
-      SCENARIO_ID: s3
-      MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
-      FAIL_MODE: ${{ needs.prepare.outputs.fault_mode }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Auth to GCP via WIF
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
-          create_credentials_file: true
-          export_environment_variables: true
-
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Resolve ingest token
-        run: |
-          set -euo pipefail
-          TOKEN="$(gcloud auth print-identity-token \
-            --audiences="${METRICS_INGEST_URL}" \
-            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
-          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          cd baseline/services/edge_cv_app
+          ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
       - name: Emit MTTR sample (s3_recover_edge)
         run: |
@@ -303,4 +274,11 @@ jobs:
               raise SystemExit(f"ingest failed: {resp.getcode()} {resp.read()!r}")
           PY
         env:
-          T_DETECT_EPOCH: ${{ needs.prepare.outputs.t_detect_epoch }}
+          T_DETECT_EPOCH: ${{ steps.detect_out.outputs.t_detect_epoch }}
+
+      - name: Upload S3 edge artifacts to GCS (canonical)
+        id: gcs
+        run: |
+          set -euo pipefail
+          echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
