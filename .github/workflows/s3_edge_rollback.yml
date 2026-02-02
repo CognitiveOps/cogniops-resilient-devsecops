@@ -1,0 +1,306 @@
+name: S3 Edge Rollback Benchmark (MTTD/MTTR)
+
+on:
+  push:
+    paths:
+      - ".github/workflows/s3_edge_rollback.yml"
+      - ".github/workflows/_s3_edge_rollback_action.yml"
+      - "baseline/scripts/ss2_detect.py"
+      - "baseline/services/edge_cv_app/**"
+  workflow_dispatch:
+    inputs:
+      fault_mode:
+        description: "Injected runtime fault mode"
+        required: true
+        default: corrupt_weights
+        type: choice
+        options:
+          - corrupt_weights
+          - dead_camera
+          - cpu_starvation
+          - net_unstable
+          - disk_full
+          - wrong_arch
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: s3-edge-rollback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+      t_detect_epoch: ${{ steps.detect_out.outputs.t_detect_epoch }}
+      fault_mode: ${{ steps.meta.outputs.fault_mode }}
+      gcs_prefix: ${{ steps.gcs.outputs.gcs_prefix }}
+    env:
+      SCENARIO_ID: s3
+      MODE: baseline
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
+      AR_REPO: apps
+      IMAGE_NAME: edge-cv-app
+
+      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      FAIL_MODE: ${{ github.event.inputs.fault_mode || 'corrupt_weights' }}
+      AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - id: meta
+        name: Export metadata
+        run: |
+          set -euo pipefail
+          echo "artifact_name=s3_edge_${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "fault_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Require METRICS_INGEST_URL
+        run: |
+          set -euo pipefail
+          if [ -z "${METRICS_INGEST_URL:-}" ]; then
+            echo "METRICS_INGEST_URL must be set (repo variable) to send S3 metrics." >&2
+            exit 1
+          fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S3 artifacts in GCS." >&2
+            exit 1
+          fi
+
+      - name: Auth to GCP via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          gcloud auth configure-docker "$AR_HOST" -q
+
+      - name: Install jq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y jq >/dev/null
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          IMAGE_TAG="${GITHUB_SHA}"
+          echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push image
+        id: buildpush
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t "$IMG" --push baseline/services/edge_cv_app
+
+          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
+          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          if [ -z "$DIGEST" ]; then
+            echo "Failed to resolve image digest for $IMG" >&2
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Create LKG OTA manifest
+        id: lkg
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s3_edge/artifacts
+          python baseline/scripts/s2_make_ota_manifest.py \
+            --image "${{ steps.buildpush.outputs.image }}" \
+            --digest "${{ steps.buildpush.outputs.digest }}" \
+            --outdir baseline/metrics/s3_edge/artifacts \
+            --version "lkg_${{ github.sha }}"
+          echo "manifest=$(ls baseline/metrics/s3_edge/artifacts/ota_lkg_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Activate LKG on edge
+        run: |
+          set -euo pipefail
+          cp "${{ steps.lkg.outputs.manifest }}" baseline/services/edge_cv_app/
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+          cd baseline/services/edge_cv_app
+          ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+
+      - name: Inject runtime fault
+        id: inject
+        run: |
+          set -euo pipefail
+          T_INJECT=$(python - <<'PY'
+          import time
+          print(time.time())
+          PY
+          )
+          echo "t_inject_epoch=$T_INJECT" >> "$GITHUB_OUTPUT"
+
+          IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
+          docker rm -f edge_cv_app || true
+          docker run -d --restart=always \
+            --name edge_cv_app \
+            -p 8080:8080 \
+            -e MODE=twin \
+            -e FAIL_MODE="${FAIL_MODE}" \
+            "$IMG"
+
+      - name: Detect incident (MTTD)
+        id: detect
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s3_edge
+          python baseline/scripts/ss2_detect.py \
+            --service-url "http://127.0.0.1:8080" \
+            --t-inject-epoch "${{ steps.inject.outputs.t_inject_epoch }}" \
+            --deadline-sec 180 \
+            --poll-interval-sec 2 \
+            --out baseline/metrics/s3_edge/detection.json \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --fault-mode "${FAIL_MODE}" \
+            --stage "s3_detect_edge" \
+            --ingest-url "${METRICS_INGEST_URL}" \
+            --auth-token "${ID_TOKEN}"
+
+      - id: detect_out
+        name: Export t_detect_epoch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"t_detect_epoch={det['t_detect_epoch']}\n")
+          PY
+
+      - name: Upload S3 edge artifacts to GCS (canonical)
+        id: gcs
+        run: |
+          set -euo pipefail
+          echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
+          echo "gcs_prefix=${GCS_PREFIX}" >> "$GITHUB_OUTPUT"
+
+  recover:
+    needs: [prepare]
+    uses: ./.github/workflows/_s3_edge_rollback_action.yml
+    with:
+      gcs_prefix: ${{ needs.prepare.outputs.gcs_prefix }}
+      lkg_manifest_glob: "s3_edge/artifacts/ota_lkg_*.json"
+      gcp_project: ${{ vars.GCP_PROJECT_ID }}
+      gcp_region: ${{ vars.GCP_REGION }}
+      ar_location: ${{ vars.GCP_REPO_LOCATION }}
+
+  emit:
+    needs: [prepare, recover]
+    runs-on: ubuntu-latest
+    env:
+      SCENARIO_ID: s3
+      MODE: baseline
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      FAIL_MODE: ${{ needs.prepare.outputs.fault_mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Emit MTTR sample (s3_recover_edge)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time, urllib.request
+          t_detect = float(os.environ["T_DETECT_EPOCH"])
+          t_end = time.time()
+          payload = {
+            "run_id": os.environ["RUN_ID"],
+            "scenario_id": os.environ["SCENARIO_ID"],
+            "stage": "s3_recover_edge",
+            "mode": os.environ["MODE"],
+            "status": "success",
+            "commit_sha": os.environ["GITHUB_SHA"],
+            "t_start": t_detect,
+            "t_end": t_end,
+            "metrics": {
+              "ttr_sample_sec": round(max(0.0, t_end - t_detect), 6),
+              "fault_mode": os.environ.get("FAIL_MODE",""),
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "env": "gh-runner",
+              "fault_type": os.environ.get("FAIL_MODE",""),
+            }
+          }
+          req = urllib.request.Request(
+            os.environ["METRICS_INGEST_URL"],
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+              "Content-Type":"application/json",
+              "Authorization": f"Bearer {os.environ.get('ID_TOKEN','')}"
+            },
+            method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.getcode() != 200:
+              raise SystemExit(f"ingest failed: {resp.getcode()} {resp.read()!r}")
+          PY
+        env:
+          T_DETECT_EPOCH: ${{ needs.prepare.outputs.t_detect_epoch }}

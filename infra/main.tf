@@ -454,6 +454,40 @@ resource "google_storage_bucket" "src" {
   uniform_bucket_level_access = true
 }
 
+###############################
+# Scenario artifacts bucket (canonical storage for SS2/S3 edge)
+###############################
+resource "google_storage_bucket" "artifacts" {
+  name                        = "${var.project_id}-agent-artifacts"
+  location                    = var.bucket_location
+  uniform_bucket_level_access = true
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 90
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+resource "google_storage_bucket_iam_member" "artifacts_app_rw" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+resource "google_storage_bucket_iam_member" "artifacts_infra_rw" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
 resource "google_storage_bucket_iam_member" "src_uploader_admin" {
   bucket = google_storage_bucket.src.name
   role   = "roles/storage.objectAdmin"
@@ -581,6 +615,11 @@ output "gha_app_sa_email" {
 
 output "run_exec_sa_email" {
   value = google_service_account.run_exec.email
+}
+
+output "agent_artifacts_bucket_name" {
+  description = "GCS bucket name for scenario artifacts (SS2/S3 edge)."
+  value       = google_storage_bucket.artifacts.name
 }
 
 output "cloud_run_service_url" {
