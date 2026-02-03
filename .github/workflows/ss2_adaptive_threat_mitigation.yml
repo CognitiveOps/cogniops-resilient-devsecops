@@ -248,21 +248,26 @@ jobs:
             --out-pub baseline/metrics/ss2/pqc/pub.key \
             --out baseline/metrics/ss2/pqc/sign.json
 
-          if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
-            # Mutate the JSON after signature generation → PQC verify fails.
-            # Recompute sha256 so the S2 checksum check still passes; failure is attributed to PQC.
-            python - <<'PY'
-            import json
-            import hashlib
-            path = "baseline/metrics/ss2/artifacts/ota_candidate_%s.json" % "${GITHUB_SHA}"
-            d = json.load(open(path, "r", encoding="utf-8"))
-            d["digest"] = str(d.get("digest", "")) + "-tampered"
-            json.dump(d, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-            h = hashlib.sha256(open(path, "rb").read()).hexdigest()
-            with open(path + ".sha256", "w", encoding="utf-8") as f:
-                f.write(h + "  " + path.split("/")[-1] + "\n")
-            PY
-          fi
+            if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
+              # Mutate the JSON after signature generation so PQC verify fails.
+              # Recompute sha256 so the S2 checksum check still passes; failure is attributed to PQC.
+              python - <<'PY'
+          import hashlib
+          import json
+          import os
+          
+          path = f"baseline/metrics/ss2/artifacts/ota_candidate_{os.environ['GITHUB_SHA']}.json"
+          with open(path, "r", encoding="utf-8") as f:
+              d = json.load(f)
+          d["digest"] = str(d.get("digest", "")) + "-tampered"
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(d, f, ensure_ascii=False, indent=2)
+          
+          h = hashlib.sha256(open(path, "rb").read()).hexdigest()
+          with open(path + ".sha256", "w", encoding="utf-8") as f:
+              f.write(h + "  " + os.path.basename(path) + "\n")
+          PY
+            fi
 
           set +e
           python baseline/security/pqc/verify.py \
