@@ -1412,8 +1412,10 @@ Supported incident modes (always-all run):
 
 Approval gate (SS2):
 
-- **Runtime faults only:** uses an **issue/comment soft gate** (creates a HITL issue and waits for `approve` / `reject`).
-- **Integrity failure:** auto‑block (no approval gate).
+- **Runtime faults only:** uses an **issue/comment soft gate** (creates a HITL issue and waits for `approve` / `reject`).  
+  → This is where **AL/ACR** are measured (reused from S5).
+- **Integrity failures:** **auto‑block before activation** (**no approval gate**, no HITL metrics).  
+  → Treated as **pre‑activation trust failures** (TUF/Uptane style), not remediation decisions.
 - Allowed approvers can be constrained via repository variable `SS2_APPROVERS` (CSV); default is the workflow actor.
 
 Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
