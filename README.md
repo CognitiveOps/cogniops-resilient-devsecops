@@ -1494,11 +1494,10 @@ Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
 
 - SS2 invokes the reusable S3 rollback action `.github/workflows/_s3_edge_rollback_action.yml` (recovery itself is benchmarked in `.github/workflows/s3_edge_rollback.yml` as part of S3).
 
-Optional PQC trust check (SS2 invokes S4 verifier without measuring S4 metrics):
+PQC trust check (SS2 invokes the S4 verifier without benchmarking S4 metrics):
 
-PQC trust is mandatory in SS2 (thesis mode):
-
-- SS2 requires repository variable `SS2_ENABLE_PQC=true` and signs + verifies the candidate manifest using `baseline/security/pqc/sign.py` and `baseline/security/pqc/verify.py`.
+- **Mandatory for SS2:** set repository variable `SS2_ENABLE_PQC=true`.
+- SS2 signs + verifies the candidate manifest using `baseline/security/pqc/sign.py` and `baseline/security/pqc/verify.py`.
 
 Artifact storage (canonical):
 
