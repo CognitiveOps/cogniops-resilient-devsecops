@@ -190,10 +190,7 @@ jobs:
             --digest "${{ steps.buildpush.outputs.digest }}" \
             --outdir baseline/metrics/s3_edge/artifacts \
             --version "lkg_${{ github.sha }}" \
-            | python - <<'PY'
-import json,sys
-print(json.load(sys.stdin)["manifest"])
-PY
+            | python -c 'import json,sys; print(json.load(sys.stdin)["manifest"])'
           )
           echo "manifest=${MANIFEST}" >> "$GITHUB_OUTPUT"
 
