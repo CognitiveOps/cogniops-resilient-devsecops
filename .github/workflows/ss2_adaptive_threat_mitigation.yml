@@ -533,16 +533,6 @@ jobs:
             fault_mode: disk_full
           - incident_type: runtime_fault
             fault_mode: wrong_arch
-          - incident_type: integrity_failure
-            fault_mode: integrity_sig_invalid
-          - incident_type: integrity_failure
-            fault_mode: integrity_hash_mismatch
-          - incident_type: integrity_failure
-            fault_mode: integrity_digest_mismatch
-          - incident_type: integrity_failure
-            fault_mode: integrity_replay
-          - incident_type: integrity_failure
-            fault_mode: integrity_unauthorized_target
     uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
     with:
       scenario_id: ${{ needs.prepare.outputs.scenario_id }}
@@ -583,16 +573,6 @@ jobs:
             fault_mode: disk_full
           - incident_type: runtime_fault
             fault_mode: wrong_arch
-          - incident_type: integrity_failure
-            fault_mode: integrity_sig_invalid
-          - incident_type: integrity_failure
-            fault_mode: integrity_hash_mismatch
-          - incident_type: integrity_failure
-            fault_mode: integrity_digest_mismatch
-          - incident_type: integrity_failure
-            fault_mode: integrity_replay
-          - incident_type: integrity_failure
-            fault_mode: integrity_unauthorized_target
     if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && needs.hitl.result == 'success' }}
     uses: ./.github/workflows/_s3_edge_rollback_action.yml
     with:
