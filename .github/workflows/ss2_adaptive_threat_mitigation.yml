@@ -357,10 +357,37 @@ jobs:
             --out baseline/metrics/ss2/pqc/verify.json
           RC=$?
           set -e
+          REASON=$(python - <<'PY'
+          import json, os
+          path = "baseline/metrics/ss2/pqc/verify.json"
+          try:
+              data = json.load(open(path, "r", encoding="utf-8"))
+              print(data.get("reason", "unknown"))
+          except Exception:
+              print("unknown")
+          PY
+          )
           if [ "$RC" -eq 0 ]; then
             echo "TRUST_VERIFIED=true" >> "$GITHUB_ENV"
+            echo "TRUST_REASON=ok" >> "$GITHUB_ENV"
           else
             echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+            echo "TRUST_REASON=${REASON}" >> "$GITHUB_ENV"
+          fi
+
+          if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
+            case "${FAIL_MODE}" in
+              integrity_hash_mismatch)
+                echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+                echo "TRUST_REASON=checksum-mismatch" >> "$GITHUB_ENV"
+                ;;
+              integrity_digest_mismatch)
+                echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+                echo "TRUST_REASON=digest-mismatch" >> "$GITHUB_ENV"
+                ;;
+              *)
+                ;;
+            esac
           fi
 
       - name: Enforce targets metadata (TUF/Uptane-style)
@@ -381,6 +408,52 @@ jobs:
           set -euo pipefail
           if [ "${TRUST_VERIFIED:-}" != "true" ]; then
             echo "Blocking S2 activation due to trust verification failure (PQC)." >&2
+            if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
+              T_NOW=$(python - <<'PY'
+          import time
+          print(time.time())
+          PY
+              )
+              export T_NOW
+              python - <<'PY'
+          import os, time, json
+          from baseline.explainability.emit import emit_stage_event
+
+          ingest = os.environ.get("METRICS_INGEST_URL", "")
+          token = os.environ.get("ID_TOKEN", "")
+          run_id = os.environ.get("RUN_ID", "")
+          scenario_id = os.environ.get("SCENARIO_ID", "ss2")
+          mode = os.environ.get("MODE", "baseline")
+          commit_sha = os.environ.get("GITHUB_SHA", "")
+          fault_mode = os.environ.get("FAIL_MODE", "")
+          reason = os.environ.get("TRUST_REASON", "unknown")
+          now = float(os.environ.get("T_NOW", time.time()))
+
+          emit_stage_event(
+              ingest_url=ingest,
+              auth_token=token,
+              run_id=run_id,
+              scenario_id=scenario_id,
+              stage="ss2_integrity_block",
+              mode=mode,
+              status="blocked",
+              commit_sha=commit_sha,
+              t_start_epoch=now,
+              t_end_epoch=now,
+              labels={
+                  "service": "edge_cv_app",
+                  "env": "gh-runner",
+                  "incident_type": "integrity_failure",
+                  "fault_mode": fault_mode,
+                  "reason": reason,
+              },
+              metrics={
+                  "trust_verified": False,
+                  "reason": reason,
+              },
+          )
+          PY
+            fi
             echo "candidate_activation=blocked" >> "$GITHUB_OUTPUT"
             exit 0
           fi

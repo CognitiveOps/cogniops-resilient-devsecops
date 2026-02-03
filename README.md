@@ -1416,6 +1416,78 @@ Approval gate (SS2):
   → This is where **AL/ACR** are measured (reused from S5).
 - **Integrity failures:** **auto‑block before activation** (**no approval gate**, no HITL metrics).  
   → Treated as **pre‑activation trust failures** (TUF/Uptane style), not remediation decisions.
+
+Integrity block stage (SS2):
+
+- `stage = ss2_integrity_block` with `status=blocked` and `labels.reason=integrity_*`
+
+**BigQuery – SS2 runtime vs integrity summary**
+
+```sql
+WITH detect AS (
+  SELECT
+    run_id,
+    JSON_VALUE(labels, '$.fault_mode') AS fault_mode,
+    SAFE_CAST(JSON_VALUE(metrics, '$.mttd_sample_sec') AS FLOAT64) AS mttd_sec
+  FROM `PROJECT_ID.agent_metrics.runs`
+  WHERE scenario_id = 'ss2'
+    AND stage = 'ss2_detect'
+    AND status = 'success'
+),
+hitl AS (
+  SELECT
+    run_id,
+    SAFE_CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64) AS al_sec,
+    SAFE_CAST(JSON_VALUE(metrics, '$.acr') AS FLOAT64) AS acr
+  FROM `PROJECT_ID.agent_metrics.runs`
+  WHERE scenario_id = 'ss2'
+    AND stage = 's5_final'
+    AND status = 'success'
+),
+runtime AS (
+  SELECT
+    fault_mode,
+    COUNT(*) AS runs,
+    AVG(mttd_sec) AS mttd_avg_sec,
+    AVG(al_sec) AS al_avg_sec,
+    AVG(acr) AS acr_avg
+  FROM detect
+  LEFT JOIN hitl USING (run_id)
+  GROUP BY fault_mode
+),
+blocks AS (
+  SELECT
+    JSON_VALUE(labels, '$.fault_mode') AS fault_mode,
+    COALESCE(JSON_VALUE(labels, '$.reason'), JSON_VALUE(metrics, '$.reason')) AS reason,
+    COUNT(*) AS blocks
+  FROM `PROJECT_ID.agent_metrics.runs`
+  WHERE scenario_id = 'ss2'
+    AND stage = 'ss2_integrity_block'
+  GROUP BY fault_mode, reason
+)
+SELECT
+  'runtime_fault' AS case_type,
+  fault_mode,
+  runs,
+  mttd_avg_sec,
+  al_avg_sec,
+  acr_avg,
+  NULL AS block_reason,
+  NULL AS blocks
+FROM runtime
+UNION ALL
+SELECT
+  'integrity_failure' AS case_type,
+  fault_mode,
+  NULL AS runs,
+  NULL AS mttd_avg_sec,
+  NULL AS al_avg_sec,
+  NULL AS acr_avg,
+  reason AS block_reason,
+  blocks
+FROM blocks
+ORDER BY case_type, fault_mode;
+```
 - Allowed approvers can be constrained via repository variable `SS2_APPROVERS` (CSV); default is the workflow actor.
 
 Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
