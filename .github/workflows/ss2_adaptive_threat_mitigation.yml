@@ -30,6 +30,16 @@ on:
           - net_unstable
           - disk_full
           - wrong_arch
+  workflow_call:
+    inputs:
+      incident_type:
+        required: false
+        type: string
+        default: runtime_fault
+      fault_mode:
+        required: false
+        type: string
+        default: corrupt_weights
 
 permissions:
   contents: read
@@ -77,8 +87,8 @@ jobs:
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
       GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}
 
-      INCIDENT_TYPE: ${{ github.event.inputs.incident_type || 'runtime_fault' }}
-      FAIL_MODE: ${{ github.event.inputs.fault_mode || 'corrupt_weights' }}
+      INCIDENT_TYPE: ${{ inputs.incident_type || github.event.inputs.incident_type || 'runtime_fault' }}
+      FAIL_MODE: ${{ inputs.fault_mode || github.event.inputs.fault_mode || 'corrupt_weights' }}
 
       # Detection budgets (can be overridden via repo variables)
       LATENCY_BUDGET_SEC: ${{ vars.SS2_LATENCY_BUDGET_SEC || '2' }}

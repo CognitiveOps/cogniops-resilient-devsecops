@@ -1,0 +1,35 @@
+name: SS2 Adaptive Threat Mitigation (all runtime faults)
+
+on:
+  workflow_dispatch:
+    inputs:
+      incident_type:
+        description: "Incident type (runtime_fault runs full matrix; integrity_failure runs once)"
+        required: true
+        default: runtime_fault
+        type: choice
+        options:
+          - runtime_fault
+          - integrity_failure
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: ss2-mitigation-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ss2_matrix:
+    name: ss2 – ${{ matrix.fault_mode }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        fault_mode: ${{ fromJson(github.event.inputs.incident_type == 'integrity_failure' && '["corrupt_weights"]' || '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]') }}
+    uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
+    with:
+      incident_type: ${{ github.event.inputs.incident_type }}
+      fault_mode: ${{ matrix.fault_mode }}
