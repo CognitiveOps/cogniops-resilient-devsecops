@@ -39,7 +39,15 @@ jobs:
           - incident_type: runtime_fault
             fault_mode: wrong_arch
           - incident_type: integrity_failure
-            fault_mode: integrity_failure
+            fault_mode: integrity_sig_invalid
+          - incident_type: integrity_failure
+            fault_mode: integrity_hash_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_digest_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_replay
+          - incident_type: integrity_failure
+            fault_mode: integrity_unauthorized_target
     outputs:
       run_id: ${{ steps.meta.outputs.run_id }}
       mode: ${{ steps.meta.outputs.mode }}
@@ -233,6 +241,71 @@ jobs:
 
           echo "candidate_manifest=$CAND" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare integrity_failure variant (pre-sign)
+        if: ${{ env.INCIDENT_TYPE == 'integrity_failure' }}
+        run: |
+          set -euo pipefail
+          CAND="${{ steps.incident.outputs.candidate_manifest }}"
+          VAR="${FAIL_MODE}"
+          echo "Preparing integrity variant: ${VAR}"
+
+          case "$VAR" in
+            integrity_replay)
+              # Make manifest stale (replay window violation) BEFORE signing.
+              python - <<'PY'
+          import json, time, os
+          path = os.environ["CAND"]
+          with open(path, "r", encoding="utf-8") as f:
+              d = json.load(f)
+          d["ts"] = int(time.time()) - 86400  # 24h old
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(d, f, ensure_ascii=False, indent=2)
+          PY
+              ;;
+            integrity_digest_mismatch)
+              # Corrupt digest while keeping signature valid for that manifest.
+              python - <<'PY'
+          import json, os
+          path = os.environ["CAND"]
+          with open(path, "r", encoding="utf-8") as f:
+              d = json.load(f)
+          d["digest"] = "sha256:" + "deadbeef"*8
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(d, f, ensure_ascii=False, indent=2)
+          PY
+              ;;
+            integrity_unauthorized_target)
+              # Point to unauthorized registry prefix (delegation/targets violation).
+              python - <<'PY'
+          import json, os
+          path = os.environ["CAND"]
+          with open(path, "r", encoding="utf-8") as f:
+              d = json.load(f)
+          d["image"] = "docker.io/library/busybox:latest"
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(d, f, ensure_ascii=False, indent=2)
+          PY
+              ;;
+            integrity_sig_invalid|integrity_hash_mismatch)
+              # No pre-sign change needed.
+              ;;
+            *)
+              echo "Unknown integrity variant: ${VAR}" >&2
+              exit 1
+              ;;
+          esac
+
+          # Refresh manifest checksum after any pre-sign change.
+          python - <<'PY'
+          import hashlib, os
+          path = os.environ["CAND"]
+          h = hashlib.sha256(open(path, "rb").read()).hexdigest()
+          with open(path + ".sha256", "w", encoding="utf-8") as f:
+              f.write(h + "  " + os.path.basename(path) + "\n")
+          PY
+        env:
+          CAND: ${{ steps.incident.outputs.candidate_manifest }}
+
       - name: PQC sign + verify candidate manifest (mandatory)
         run: |
           set -euo pipefail
@@ -245,26 +318,33 @@ jobs:
             --out-pub baseline/metrics/ss2/pqc/pub.key \
             --out baseline/metrics/ss2/pqc/sign.json
 
-            if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
-              # Mutate the JSON after signature generation so PQC verify fails.
-              # Recompute sha256 so the S2 checksum check still passes; failure is attributed to PQC.
-              python - <<'PY'
-          import hashlib
-          import json
-          import os
-          
+          if [ "${INCIDENT_TYPE}" = "integrity_failure" ]; then
+            case "${FAIL_MODE}" in
+              integrity_sig_invalid)
+                # Mutate manifest AFTER signing so PQC verify fails.
+                # Recompute sha256 so checksum still passes; failure is attributed to PQC.
+                python - <<'PY'
+          import hashlib, json, os
           path = f"baseline/metrics/ss2/artifacts/ota_candidate_{os.environ['GITHUB_SHA']}.json"
           with open(path, "r", encoding="utf-8") as f:
               d = json.load(f)
           d["digest"] = str(d.get("digest", "")) + "-tampered"
           with open(path, "w", encoding="utf-8") as f:
               json.dump(d, f, ensure_ascii=False, indent=2)
-          
           h = hashlib.sha256(open(path, "rb").read()).hexdigest()
           with open(path + ".sha256", "w", encoding="utf-8") as f:
               f.write(h + "  " + os.path.basename(path) + "\n")
           PY
-            fi
+                ;;
+              integrity_hash_mismatch)
+                # Corrupt checksum file AFTER signing; signature stays valid but checksum fails.
+                echo "0000000000000000000000000000000000000000000000000000000000000000  $(basename "${{ steps.incident.outputs.candidate_manifest }}")" > "${{ steps.incident.outputs.candidate_manifest }}.sha256"
+                ;;
+              *)
+                # Other integrity variants are handled pre-sign (replay/digest/unauthorized).
+                ;;
+            esac
+          fi
 
           set +e
           python baseline/security/pqc/verify.py \
@@ -281,6 +361,18 @@ jobs:
             echo "TRUST_VERIFIED=true" >> "$GITHUB_ENV"
           else
             echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Enforce targets metadata (TUF/Uptane-style)
+        if: ${{ env.INCIDENT_TYPE == 'integrity_failure' && env.FAIL_MODE == 'integrity_unauthorized_target' }}
+        run: |
+          set -euo pipefail
+          CAND="${{ steps.incident.outputs.candidate_manifest }}"
+          IMG=$(jq -r '.image // empty' "$CAND")
+          ALLOWED_PREFIX="${AR_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/"
+          if [[ "$IMG" != ${ALLOWED_PREFIX}* ]]; then
+            echo "TRUST_VERIFIED=false" >> "$GITHUB_ENV"
+            echo "TRUST_REASON=unauthorized-target" >> "$GITHUB_ENV"
           fi
 
       - name: Attempt candidate activation (S2 unchanged)
@@ -442,7 +534,15 @@ jobs:
           - incident_type: runtime_fault
             fault_mode: wrong_arch
           - incident_type: integrity_failure
-            fault_mode: integrity_failure
+            fault_mode: integrity_sig_invalid
+          - incident_type: integrity_failure
+            fault_mode: integrity_hash_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_digest_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_replay
+          - incident_type: integrity_failure
+            fault_mode: integrity_unauthorized_target
     uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
     with:
       scenario_id: ${{ needs.prepare.outputs.scenario_id }}
@@ -484,7 +584,15 @@ jobs:
           - incident_type: runtime_fault
             fault_mode: wrong_arch
           - incident_type: integrity_failure
-            fault_mode: integrity_failure
+            fault_mode: integrity_sig_invalid
+          - incident_type: integrity_failure
+            fault_mode: integrity_hash_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_digest_mismatch
+          - incident_type: integrity_failure
+            fault_mode: integrity_replay
+          - incident_type: integrity_failure
+            fault_mode: integrity_unauthorized_target
     if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && needs.hitl.result == 'success' }}
     uses: ./.github/workflows/_s3_edge_rollback_action.yml
     with:
