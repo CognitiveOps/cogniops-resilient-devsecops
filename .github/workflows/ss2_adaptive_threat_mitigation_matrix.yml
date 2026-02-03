@@ -1,16 +1,15 @@
-name: SS2 Adaptive Threat Mitigation (all runtime faults)
+name: SS2 Adaptive Threat Mitigation (all incidents)
 
 on:
+  push:
+    paths:
+      - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
+      - ".github/workflows/ss2_adaptive_threat_mitigation_matrix.yml"
+      - "baseline/scripts/ss2_detect.py"
+      - "baseline/services/edge_cv_app/**"
+      - "baseline/explainability/**"
+      - ".github/workflows/_hitl_explain_and_approve_soft.yml"
   workflow_dispatch:
-    inputs:
-      incident_type:
-        description: "Incident type (runtime_fault runs full matrix; integrity_failure runs once)"
-        required: true
-        default: runtime_fault
-        type: choice
-        options:
-          - runtime_fault
-          - integrity_failure
 
 permissions:
   contents: read
@@ -23,13 +22,27 @@ concurrency:
 
 jobs:
   ss2_matrix:
-    name: ss2 – ${{ matrix.fault_mode }}
+    name: ss2 – ${{ matrix.incident_type }} – ${{ matrix.fault_mode }}
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        fault_mode: ${{ fromJson(github.event.inputs.incident_type == 'integrity_failure' && '["corrupt_weights"]' || '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]') }}
+        include:
+          - incident_type: runtime_fault
+            fault_mode: corrupt_weights
+          - incident_type: runtime_fault
+            fault_mode: dead_camera
+          - incident_type: runtime_fault
+            fault_mode: cpu_starvation
+          - incident_type: runtime_fault
+            fault_mode: net_unstable
+          - incident_type: runtime_fault
+            fault_mode: disk_full
+          - incident_type: runtime_fault
+            fault_mode: wrong_arch
+          - incident_type: integrity_failure
+            fault_mode: integrity_failure
     uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
     with:
-      incident_type: ${{ github.event.inputs.incident_type }}
+      incident_type: ${{ matrix.incident_type }}
       fault_mode: ${{ matrix.fault_mode }}
