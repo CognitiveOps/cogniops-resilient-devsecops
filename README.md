@@ -863,7 +863,11 @@ Example query to extract **MTTD/MTTR summary per fault type**, **separated by su
 WITH s3 AS (
   SELECT
     run_id,
-    COALESCE(JSON_VALUE(labels, '$.fault_type'), JSON_VALUE(labels, '$.fault_mode'), 'unknown') AS fault_type,
+    REPLACE(
+      COALESCE(JSON_VALUE(labels, '$.fault_type'), JSON_VALUE(labels, '$.fault_mode'), 'unknown'),
+      '_',
+      '-'
+    ) AS fault_type,
     CASE
       WHEN JSON_VALUE(labels, '$.env') = 'gh-runner' THEN 'edge-ota'
       WHEN JSON_VALUE(labels, '$.env') = 'cloud-run' THEN 'cloud-run'
