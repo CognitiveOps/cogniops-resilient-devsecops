@@ -1406,7 +1406,8 @@ Supported incident modes (always-all run):
 
 Approval gate (SS2):
 
-- Uses an **issue/comment soft gate**: the workflow creates a HITL issue and waits for `approve` / `reject`.
+- **Runtime faults only:** uses an **issue/comment soft gate** (creates a HITL issue and waits for `approve` / `reject`).
+- **Integrity failure:** auto‑block (no approval gate).
 - Allowed approvers can be constrained via repository variable `SS2_APPROVERS` (CSV); default is the workflow actor.
 
 Recovery action (implemented & benchmarked in S3; orchestrated in SS2):

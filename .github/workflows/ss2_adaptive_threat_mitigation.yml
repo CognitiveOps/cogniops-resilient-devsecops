@@ -424,6 +424,7 @@ jobs:
 
   hitl:
     needs: [prepare]
+    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' }}
     strategy:
       max-parallel: 1
       matrix:
