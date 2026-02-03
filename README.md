@@ -1398,9 +1398,9 @@ HITL metrics (reused from S5, recorded under `scenario_id=ss2`):
 
 - `stage = s5_final` → `al_sec`, `acr` (via `.github/workflows/_hitl_explain_and_approve_soft.yml`)
 
-Supported incident modes (always-all matrix run):
+Supported incident modes (always-all run):
 
-- Entry point: `.github/workflows/ss2_adaptive_threat_mitigation_matrix.yml`
+- Entry point: `.github/workflows/ss2_adaptive_threat_mitigation.yml`
 - Runs **all** runtime faults sequentially (matrix): `corrupt_weights`, `dead_camera`, `cpu_starvation`, `net_unstable`, `disk_full`, `wrong_arch`
 - Also runs **one** `integrity_failure` case (tampered manifest → block/quarantine before activation)
 
