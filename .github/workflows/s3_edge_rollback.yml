@@ -213,7 +213,7 @@ jobs:
               f.write(f"t_detect_epoch={det['t_detect_epoch']}\n")
           PY
 
-      - name: Emit MTTD sample (s3_detect_edge)
+      - name: Emit TTD sample (s3_detect_edge)
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -222,7 +222,7 @@ jobs:
           det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
           t_inject = float(det["t_inject_epoch"])
           t_detect = float(det["t_detect_epoch"])
-          mttd = float(det.get("mttd_sec", max(0.0, t_detect - t_inject)))
+          ttd = float(det.get("mttd_sec", max(0.0, t_detect - t_inject)))
           detect_reason = det.get("detect_reason", "")
           obs = det.get("observation") or {}
 
@@ -236,7 +236,7 @@ jobs:
             "t_start": t_inject,
             "t_end": t_detect,
             "metrics": {
-              "mttd_sample_sec": round(mttd, 6),
+              "ttd_sample_sec": round(ttd, 6),
               "detect_reason": detect_reason,
               "http_code": obs.get("http_code"),
               "latency_sec": obs.get("latency_sec"),
