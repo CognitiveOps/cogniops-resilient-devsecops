@@ -225,6 +225,8 @@ jobs:
           ttd = float(det.get("mttd_sec", max(0.0, t_detect - t_inject)))
           detect_reason = det.get("detect_reason", "")
           obs = det.get("observation") or {}
+          fault_mode = os.environ.get("FAIL_MODE", "")
+          fault_type = fault_mode.replace("_", "-")
 
           payload = {
             "run_id": os.environ["RUN_ID"],
@@ -244,8 +246,8 @@ jobs:
             "labels": {
               "service": "edge_cv_app",
               "env": "gh-runner",
-              "fault_type": os.environ.get("FAIL_MODE",""),
-              "fault_mode": os.environ.get("FAIL_MODE",""),
+              "fault_type": fault_type,
+              "fault_mode": fault_mode,
             },
           }
 
@@ -277,6 +279,8 @@ jobs:
           import json, os, time, urllib.request
           t_detect = float(os.environ["T_DETECT_EPOCH"])
           t_end = time.time()
+          fault_mode = os.environ.get("FAIL_MODE","")
+          fault_type = fault_mode.replace("_", "-")
           payload = {
             "run_id": os.environ["RUN_ID"],
             "scenario_id": os.environ["SCENARIO_ID"],
@@ -288,12 +292,13 @@ jobs:
             "t_end": t_end,
             "metrics": {
               "ttr_sample_sec": round(max(0.0, t_end - t_detect), 6),
-              "fault_mode": os.environ.get("FAIL_MODE",""),
+              "fault_mode": fault_mode,
             },
             "labels": {
               "service": "edge_cv_app",
               "env": "gh-runner",
-              "fault_type": os.environ.get("FAIL_MODE",""),
+              "fault_type": fault_type,
+              "fault_mode": fault_mode,
             }
           }
           req = urllib.request.Request(
