@@ -665,6 +665,7 @@ Implementation (real edge + twin):
   - **Edge OTA (canonical for thesis scope and SS2/S2 alignment):** `.github/workflows/s3_edge_rollback.yml` where rollback is executed by re-running `baseline/services/edge_cv_app/edge_pull_and_activate.sh` against the LKG manifest (same OTA activation semantics as S2; SS2 invokes the same rollback mechanism via `.github/workflows/_s3_edge_rollback_action.yml`).
   - **Cloud Run (supplemental benchmark):** `.github/workflows/s3_rollback.yml` with Cloud Run redeploy-based recovery (useful for cloud workloads, not the OTA/edge loop).
   In both cases, metrics are ingested into `agent_metrics.runs`, but results are interpreted per-substrate (no mixing).
+  For comparability, both substrates emit the same metric keys (`ttd_sample_sec`, `ttr_sample_sec`) and use the same detection logic (HTTP non-200, latency budget, and `/status` threshold triggers) with 5s polling. However, **absolute values are not expected to match**: Cloud Run “injection” includes deploy + traffic shift, while edge‑OTA “injection” is a local container restart; Cloud Run “recovery” is redeploy, while edge‑OTA “recovery” applies an LKG OTA manifest (pull/run/health on the runner).
 
 Limitations & future work (edge OTA realism):
 - Replace the script-based activation with a persistent **edge-updater agent** (container/service) that exposes an `apply(manifest)` API and maintains state across reboots.
