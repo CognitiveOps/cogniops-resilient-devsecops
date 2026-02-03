@@ -39,22 +39,11 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        fault_mode:
-          - corrupt_weights
-          - dead_camera
-          - cpu_starvation
-          - net_unstable
-          - disk_full
-          - wrong_arch
-    if: >-
-      ${{
-        (github.event_name != 'push' || matrix.fault_mode == 'corrupt_weights')
-        && (
-          github.event_name != 'workflow_dispatch'
-          || github.event.inputs.fault_mode == 'all'
-          || matrix.fault_mode == github.event.inputs.fault_mode
-        )
-      }}
+        # GitHub evaluates job-level `if:` before matrix expansion, so we build the matrix dynamically instead.
+        # - push: run a single baseline fault to avoid 6x runs on every commit
+        # - workflow_dispatch fault_mode=all: run the full fault set
+        # - workflow_dispatch fault_mode=<x>: run only that fault
+        fault_mode: ${{ fromJson(github.event_name == 'push' && '["corrupt_weights"]' || (github.event_name == 'workflow_dispatch' && github.event.inputs.fault_mode != 'all') && format('["{0}"]', github.event.inputs.fault_mode) || '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]') }}
     env:
       SCENARIO_ID: s3
       MODE: baseline
