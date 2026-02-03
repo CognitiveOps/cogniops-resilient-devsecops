@@ -200,10 +200,7 @@ jobs:
             --commit-sha "${GITHUB_SHA}" \
             --scenario-id "${SCENARIO_ID}" \
             --mode "${MODE}" \
-            --fault-mode "${FAIL_MODE}" \
-            --stage "s3_detect_edge" \
-            --ingest-url "${METRICS_INGEST_URL}" \
-            --auth-token "${ID_TOKEN}"
+            --fault-mode "${FAIL_MODE}"
 
       - id: detect_out
         name: Export t_detect_epoch
@@ -214,6 +211,56 @@ jobs:
           det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"t_detect_epoch={det['t_detect_epoch']}\n")
+          PY
+
+      - name: Emit MTTD sample (s3_detect_edge)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+
+          det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
+          t_inject = float(det["t_inject_epoch"])
+          t_detect = float(det["t_detect_epoch"])
+          mttd = float(det.get("mttd_sec", max(0.0, t_detect - t_inject)))
+          detect_reason = det.get("detect_reason", "")
+          obs = det.get("observation") or {}
+
+          payload = {
+            "run_id": os.environ["RUN_ID"],
+            "scenario_id": os.environ["SCENARIO_ID"],
+            "stage": "s3_detect_edge",
+            "mode": os.environ["MODE"],
+            "status": "success",
+            "commit_sha": os.environ["GITHUB_SHA"],
+            "t_start": t_inject,
+            "t_end": t_detect,
+            "metrics": {
+              "mttd_sample_sec": round(mttd, 6),
+              "detect_reason": detect_reason,
+              "http_code": obs.get("http_code"),
+              "latency_sec": obs.get("latency_sec"),
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "env": "gh-runner",
+              "fault_type": os.environ.get("FAIL_MODE",""),
+              "fault_mode": os.environ.get("FAIL_MODE",""),
+            },
+          }
+
+          req = urllib.request.Request(
+            os.environ["METRICS_INGEST_URL"],
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+              "Content-Type":"application/json",
+              "Authorization": f"Bearer {os.environ.get('ID_TOKEN','')}"
+            },
+            method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.getcode() != 200:
+              raise SystemExit(f"ingest failed: {resp.getcode()} {resp.read()!r}")
           PY
 
       - name: Rollback to LKG (edge activation)
