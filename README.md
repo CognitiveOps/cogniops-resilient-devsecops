@@ -847,7 +847,7 @@ Example query to extract **MTTD/MTTR summary per fault type**, **separated by su
 -- S3 (both substrates) – MTTD/MTTR by fault type.
 --
 -- edge‑OTA (runner-simulated edge):
---   stage s3_detect_edge  → metrics.ttd_sample_sec
+--   stage s3_detect_edge  → metrics.ttd_sample_sec (legacy runs may have mttd_sample_sec)
 --   stage s3_recover_edge → metrics.ttr_sample_sec
 --
 -- Cloud Run:
@@ -880,8 +880,8 @@ WITH s3 AS (
     stage,
     SAFE_CAST(
       COALESCE(
-        JSON_VALUE(metrics, '$.mttd_sample_sec'),
-        JSON_VALUE(metrics, '$.ttd_sample_sec')
+        JSON_VALUE(metrics, '$.ttd_sample_sec'),
+        JSON_VALUE(metrics, '$.mttd_sample_sec')
       ) AS FLOAT64
     ) AS mttd_sample_sec,
     SAFE_CAST(JSON_VALUE(metrics, '$.ttr_sample_sec') AS FLOAT64) AS mttr_sample_sec
