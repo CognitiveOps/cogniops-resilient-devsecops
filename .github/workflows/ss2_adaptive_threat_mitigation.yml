@@ -1,35 +1,6 @@
 name: SS2 Adaptive Threat Mitigation (over S2)
 
 on:
-  push:
-    paths:
-      - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
-      - "baseline/scripts/ss2_detect.py"
-      - "baseline/services/edge_cv_app/**"
-      - "baseline/explainability/**"
-      - ".github/workflows/_hitl_explain_and_approve_soft.yml"
-  workflow_dispatch:
-    inputs:
-      incident_type:
-        description: "Which incident to simulate"
-        required: true
-        default: runtime_fault
-        type: choice
-        options:
-          - runtime_fault
-          - integrity_failure
-      fault_mode:
-        description: "Runtime fault mode (used for runtime_fault)"
-        required: true
-        default: corrupt_weights
-        type: choice
-        options:
-          - corrupt_weights
-          - dead_camera
-          - cpu_starvation
-          - net_unstable
-          - disk_full
-          - wrong_arch
   workflow_call:
     inputs:
       incident_type:
@@ -87,8 +58,8 @@ jobs:
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
       GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}
 
-      INCIDENT_TYPE: ${{ inputs.incident_type || github.event.inputs.incident_type || 'runtime_fault' }}
-      FAIL_MODE: ${{ inputs.fault_mode || github.event.inputs.fault_mode || 'corrupt_weights' }}
+      INCIDENT_TYPE: ${{ inputs.incident_type || 'runtime_fault' }}
+      FAIL_MODE: ${{ inputs.fault_mode || 'corrupt_weights' }}
 
       # Detection budgets (can be overridden via repo variables)
       LATENCY_BUDGET_SEC: ${{ vars.SS2_LATENCY_BUDGET_SEC || '2' }}
