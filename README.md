@@ -1403,9 +1403,10 @@ Supported incident modes (always-all run):
 - Entry point: `.github/workflows/ss2_adaptive_threat_mitigation.yml`
 - Runs **all** runtime faults sequentially (matrix): `corrupt_weights`, `dead_camera`, `cpu_starvation`, `net_unstable`, `disk_full`, `wrong_arch`
 - Also runs **one** `integrity_failure` case (tampered manifest → block/quarantine before activation).
-  Integrity failures (per **TUF/Uptane** and incident‑handling best practices) include:
+  Integrity failures (per **TUF/Uptane** and incident‑handling best practices) include — and are **simulated** as SS2 subcases:
   - **Invalid signature** / wrong key / threshold not met
-  - **Hash or digest mismatch** (manifest vs artifact)
+  - **Hash mismatch** (manifest checksum file does not match)
+  - **Digest mismatch** (manifest digest does not exist in registry)
   - **Replay / rollback** (stale version or metadata expiry)
   - **Unauthorized delegation / target metadata** (policy‑level integrity)
 
