@@ -43,15 +43,44 @@ fi
 # 5) stop old container
 docker rm -f edge_cv_app || true
 
-# 6) run new container (explicitly force real mode / no faults for S2 baseline)
+# 6) run new container
+# Defaults match S2 semantics (MODE=real, FAIL_MODE=0). S3/SS2 may override via env vars.
+EDGE_MODE="${EDGE_MODE:-real}"
+EDGE_FAIL_MODE="${EDGE_FAIL_MODE:-0}"
+EDGE_HEALTH_CHECK="${EDGE_HEALTH_CHECK:-1}"
+S3_ENV_VARS=(
+  S3_NET_FAIL_P
+  S3_NET_BURST_PROB
+  S3_CPU_DROP_FACTOR
+  S3_CPU_SPIKE_LAMBDA
+  S3_CAM_FAIL_P
+  S3_MODEL_BASE_FAIL_P
+  S3_MODEL_GROWTH
+  S3_DISK_TIME_TO_FULL
+  S3_DISK_BASE_FAIL_P
+  S3_WRONG_RETRY_INTERVAL
+  S3_WRONG_FAIL_WINDOW
+  S3_WRONG_RETRY_SUCCESS_P
+)
+EXTRA_ENVS=()
+for var in "${S3_ENV_VARS[@]}"; do
+  if [ -n "${!var:-}" ]; then
+    EXTRA_ENVS+=(-e "${var}=${!var}")
+  fi
+done
 docker run -d --restart=always \
   --name edge_cv_app \
   -p 8080:8080 \
-  -e MODE=real \
-  -e FAIL_MODE=0 \
+  -e MODE="${EDGE_MODE}" \
+  -e FAIL_MODE="${EDGE_FAIL_MODE}" \
+  "${EXTRA_ENVS[@]}" \
   "$FINAL_REF"
 
 # 7) health probe
+if [ "${EDGE_HEALTH_CHECK}" = "0" ]; then
+  echo "health check skipped (EDGE_HEALTH_CHECK=0)"
+  exit 0
+fi
 for i in {1..20}; do
   if curl -fsS http://127.0.0.1:8080/status >/dev/null; then
     echo "healthy"
