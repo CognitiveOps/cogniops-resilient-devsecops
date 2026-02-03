@@ -1,16 +1,14 @@
 name: SS2 Adaptive Threat Mitigation (over S2)
 
 on:
-  workflow_call:
-    inputs:
-      incident_type:
-        required: false
-        type: string
-        default: runtime_fault
-      fault_mode:
-        required: false
-        type: string
-        default: corrupt_weights
+  push:
+    paths:
+      - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
+      - "baseline/scripts/ss2_detect.py"
+      - "baseline/services/edge_cv_app/**"
+      - "baseline/explainability/**"
+      - ".github/workflows/_hitl_explain_and_approve_soft.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,6 +22,24 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - incident_type: runtime_fault
+            fault_mode: corrupt_weights
+          - incident_type: runtime_fault
+            fault_mode: dead_camera
+          - incident_type: runtime_fault
+            fault_mode: cpu_starvation
+          - incident_type: runtime_fault
+            fault_mode: net_unstable
+          - incident_type: runtime_fault
+            fault_mode: disk_full
+          - incident_type: runtime_fault
+            fault_mode: wrong_arch
+          - incident_type: integrity_failure
+            fault_mode: integrity_failure
     outputs:
       run_id: ${{ steps.meta.outputs.run_id }}
       mode: ${{ steps.meta.outputs.mode }}
@@ -58,8 +74,8 @@ jobs:
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
       GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}
 
-      INCIDENT_TYPE: ${{ inputs.incident_type || 'runtime_fault' }}
-      FAIL_MODE: ${{ inputs.fault_mode || 'corrupt_weights' }}
+      INCIDENT_TYPE: ${{ matrix.incident_type }}
+      FAIL_MODE: ${{ matrix.fault_mode }}
 
       # Detection budgets (can be overridden via repo variables)
       LATENCY_BUDGET_SEC: ${{ vars.SS2_LATENCY_BUDGET_SEC || '2' }}
@@ -408,6 +424,24 @@ jobs:
 
   hitl:
     needs: [prepare]
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - incident_type: runtime_fault
+            fault_mode: corrupt_weights
+          - incident_type: runtime_fault
+            fault_mode: dead_camera
+          - incident_type: runtime_fault
+            fault_mode: cpu_starvation
+          - incident_type: runtime_fault
+            fault_mode: net_unstable
+          - incident_type: runtime_fault
+            fault_mode: disk_full
+          - incident_type: runtime_fault
+            fault_mode: wrong_arch
+          - incident_type: integrity_failure
+            fault_mode: integrity_failure
     uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
     with:
       scenario_id: ${{ needs.prepare.outputs.scenario_id }}
@@ -432,6 +466,24 @@ jobs:
 
   recover:
     needs: [prepare, hitl]
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          - incident_type: runtime_fault
+            fault_mode: corrupt_weights
+          - incident_type: runtime_fault
+            fault_mode: dead_camera
+          - incident_type: runtime_fault
+            fault_mode: cpu_starvation
+          - incident_type: runtime_fault
+            fault_mode: net_unstable
+          - incident_type: runtime_fault
+            fault_mode: disk_full
+          - incident_type: runtime_fault
+            fault_mode: wrong_arch
+          - incident_type: integrity_failure
+            fault_mode: integrity_failure
     if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && needs.hitl.result == 'success' }}
     uses: ./.github/workflows/_s3_edge_rollback_action.yml
     with:
