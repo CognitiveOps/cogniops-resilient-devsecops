@@ -5,7 +5,6 @@ on:
     paths:
       - ".github/workflows/s3_edge_rollback.yml"
       - ".github/workflows/_s3_edge_rollback_action.yml"
-      - "baseline/scripts/ss2_detect.py"
       - "baseline/services/edge_cv_app/**"
   workflow_dispatch:
     inputs:
@@ -59,6 +58,19 @@ jobs:
       FAIL_MODE: ${{ matrix.fault_mode }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
       GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
+      # Tunable fault model parameters (keep aligned with Cloud Run defaults)
+      S3_NET_FAIL_P: "0.1"
+      S3_NET_BURST_PROB: "0.05"
+      S3_CPU_DROP_FACTOR: "0.4"
+      S3_CPU_SPIKE_LAMBDA: "0.2"
+      S3_CAM_FAIL_P: "0.25"
+      S3_MODEL_BASE_FAIL_P: "0.05"
+      S3_MODEL_GROWTH: "0.02"
+      S3_DISK_TIME_TO_FULL: "90.0"
+      S3_DISK_BASE_FAIL_P: "0.05"
+      S3_WRONG_RETRY_INTERVAL: "20.0"
+      S3_WRONG_FAIL_WINDOW: "10.0"
+      S3_WRONG_RETRY_SUCCESS_P: "0.2"
 
     steps:
       - uses: actions/checkout@v4
@@ -142,17 +154,48 @@ jobs:
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
+      - name: Set fault profile (thresholds)
+        run: |
+          set -euo pipefail
+          case "${FAIL_MODE}" in
+            net_unstable)
+              FAULT_NAME="net-unstable"; LATENCY_BUDGET_SEC=2; FPS_MIN=10; DETECTION_RATE_MIN=0.01 ;;
+            disk_full)
+              FAULT_NAME="disk-full"; LATENCY_BUDGET_SEC=0; FPS_MIN=10; DETECTION_RATE_MIN=0.01 ;;
+            cpu_starvation)
+              FAULT_NAME="cpu-starvation"; LATENCY_BUDGET_SEC=3; FPS_MIN=15; DETECTION_RATE_MIN=0.05 ;;
+            dead_camera)
+              FAULT_NAME="dead-camera"; LATENCY_BUDGET_SEC=0; FPS_MIN=10; DETECTION_RATE_MIN=0.001 ;;
+            wrong_arch)
+              FAULT_NAME="wrong-arch"; LATENCY_BUDGET_SEC=0; FPS_MIN=10; DETECTION_RATE_MIN=0.01 ;;
+            corrupt_weights)
+              FAULT_NAME="corrupt-weights"; LATENCY_BUDGET_SEC=0; FPS_MIN=10; DETECTION_RATE_MIN=0.01 ;;
+            *)
+              FAULT_NAME="${FAIL_MODE//_/-}"; LATENCY_BUDGET_SEC=0; FPS_MIN=10; DETECTION_RATE_MIN=0.01 ;;
+          esac
+          {
+            echo "FAULT_NAME=${FAULT_NAME}"
+            echo "LATENCY_BUDGET_SEC=${LATENCY_BUDGET_SEC}"
+            echo "FPS_MIN=${FPS_MIN}"
+            echo "DETECTION_RATE_MIN=${DETECTION_RATE_MIN}"
+          } >> "$GITHUB_ENV"
+
       - name: Create LKG OTA manifest
         id: lkg
         run: |
           set -euo pipefail
           mkdir -p baseline/metrics/s3_edge/artifacts
-          python baseline/scripts/s2_make_ota_manifest.py \
+          MANIFEST=$(python baseline/scripts/s2_make_ota_manifest.py \
             --image "${{ steps.buildpush.outputs.image }}" \
             --digest "${{ steps.buildpush.outputs.digest }}" \
             --outdir baseline/metrics/s3_edge/artifacts \
-            --version "lkg_${{ github.sha }}"
-          echo "manifest=$(ls baseline/metrics/s3_edge/artifacts/ota_lkg_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
+            --version "lkg_${{ github.sha }}" \
+            | python - <<'PY'
+import json,sys
+print(json.load(sys.stdin)["manifest"])
+PY
+          )
+          echo "manifest=${MANIFEST}" >> "$GITHUB_OUTPUT"
 
       - name: Activate LKG on edge
         run: |
@@ -163,18 +206,17 @@ jobs:
           fi
           chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
           cd baseline/services/edge_cv_app
-          ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          EDGE_MODE=real EDGE_FAIL_MODE=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
       - name: Inject runtime fault
-        id: inject
+        id: s3fault
         run: |
           set -euo pipefail
-          T_INJECT=$(python - <<'PY'
-          import time
-          print(time.time())
-          PY
-          )
-          echo "t_inject_epoch=$T_INJECT" >> "$GITHUB_OUTPUT"
+          SERVICE_URL="http://127.0.0.1:8080"
+          echo "Using edge service URL: ${SERVICE_URL}"
+
+          T_INJECT=$(date +%s)
+          echo "t_inject=${T_INJECT}" >> "$GITHUB_OUTPUT"
 
           IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
           docker rm -f edge_cv_app || true
@@ -183,139 +225,200 @@ jobs:
             -p 8080:8080 \
             -e MODE=twin \
             -e FAIL_MODE="${FAIL_MODE}" \
+            -e SCENARIO="${FAIL_MODE}" \
+            -e S3_NET_FAIL_P="${S3_NET_FAIL_P}" \
+            -e S3_NET_BURST_PROB="${S3_NET_BURST_PROB}" \
+            -e S3_CPU_DROP_FACTOR="${S3_CPU_DROP_FACTOR}" \
+            -e S3_CPU_SPIKE_LAMBDA="${S3_CPU_SPIKE_LAMBDA}" \
+            -e S3_CAM_FAIL_P="${S3_CAM_FAIL_P}" \
+            -e S3_MODEL_BASE_FAIL_P="${S3_MODEL_BASE_FAIL_P}" \
+            -e S3_MODEL_GROWTH="${S3_MODEL_GROWTH}" \
+            -e S3_DISK_TIME_TO_FULL="${S3_DISK_TIME_TO_FULL}" \
+            -e S3_DISK_BASE_FAIL_P="${S3_DISK_BASE_FAIL_P}" \
+            -e S3_WRONG_RETRY_INTERVAL="${S3_WRONG_RETRY_INTERVAL}" \
+            -e S3_WRONG_FAIL_WINDOW="${S3_WRONG_FAIL_WINDOW}" \
+            -e S3_WRONG_RETRY_SUCCESS_P="${S3_WRONG_RETRY_SUCCESS_P}" \
             "$IMG"
 
-      - name: Detect incident (MTTD)
-        id: detect
-        run: |
-          set -euo pipefail
-          mkdir -p baseline/metrics/s3_edge
-          python baseline/scripts/ss2_detect.py \
-            --service-url "http://127.0.0.1:8080" \
-            --t-inject-epoch "${{ steps.inject.outputs.t_inject_epoch }}" \
-            --deadline-sec 180 \
-            --poll-interval-sec 2 \
-            --out baseline/metrics/s3_edge/detection.json \
-            --run-id "${RUN_ID}" \
-            --commit-sha "${GITHUB_SHA}" \
-            --scenario-id "${SCENARIO_ID}" \
-            --mode "${MODE}" \
-            --fault-mode "${FAIL_MODE}"
+          DETECTED=0
+          DEADLINE=$((T_INJECT + 300)) # 5 minutes
+          while true; do
+            NOW=$(date +%s)
+            if [ "$NOW" -ge "$DEADLINE" ]; then
+              echo "Timeout while waiting for failure; aborting."
+              break
+            fi
 
-      - id: detect_out
-        name: Export t_detect_epoch
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, os
-          det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"t_detect_epoch={det['t_detect_epoch']}\n")
-          PY
+            HTTP_RESPONSE=$(curl -s -w "\n%{time_total} %{http_code}" "${SERVICE_URL}/status" || echo -e "{}\n10.0 000")
+            BODY=${HTTP_RESPONSE%$'\n'*}
+            read -r TIME_TOTAL HTTP_CODE <<<"${HTTP_RESPONSE##*$'\n'}"
+            echo "[$NOW] /status -> ${HTTP_CODE} (${TIME_TOTAL}s)"
+            export BODY
 
-      - name: Emit TTD sample (s3_detect_edge)
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, os, urllib.request
+            IS_SLOW=0
+            if [ -n "${LATENCY_BUDGET_SEC}" ] && awk "BEGIN {exit !(${TIME_TOTAL} > ${LATENCY_BUDGET_SEC})}"; then
+              IS_SLOW=1
+            fi
 
-          det = json.load(open("baseline/metrics/s3_edge/detection.json", "r", encoding="utf-8"))
-          t_inject = float(det["t_inject_epoch"])
-          t_detect = float(det["t_detect_epoch"])
-          ttd = float(det.get("mttd_sec", max(0.0, t_detect - t_inject)))
-          detect_reason = det.get("detect_reason", "")
-          obs = det.get("observation") or {}
-          fault_mode = os.environ.get("FAIL_MODE", "")
-          fault_type = fault_mode.replace("_", "-")
+            METRICS_TRIGGER=0
+            if [ "${HTTP_CODE}" = "200" ]; then
+              METRICS_TRIGGER=$(echo "$BODY" | env FPS_MIN="${FPS_MIN}" DETECTION_RATE_MIN="${DETECTION_RATE_MIN}" python baseline/scripts/s3_detect_status.py)
+            fi
 
-          payload = {
-            "run_id": os.environ["RUN_ID"],
-            "scenario_id": os.environ["SCENARIO_ID"],
-            "stage": "s3_detect_edge",
-            "mode": os.environ["MODE"],
-            "status": "success",
-            "commit_sha": os.environ["GITHUB_SHA"],
-            "t_start": t_inject,
-            "t_end": t_detect,
-            "metrics": {
-              "ttd_sample_sec": round(ttd, 6),
-              "detect_reason": detect_reason,
-              "http_code": obs.get("http_code"),
-              "latency_sec": obs.get("latency_sec"),
-            },
-            "labels": {
-              "service": "edge_cv_app",
-              "env": "gh-runner",
-              "fault_type": fault_type,
-              "fault_mode": fault_mode,
-            },
-          }
+            if [ "${HTTP_CODE}" != "200" ] || [ "${IS_SLOW}" -eq 1 ] || [ "${METRICS_TRIGGER}" -eq 1 ]; then
+              T_DETECT=${NOW}
+              DETECTED=1
+              DETECT_BODY=$(echo "$BODY" | tr -d '\n')
+              if [ "${HTTP_CODE}" != "200" ]; then
+                echo "Failure detected at ${T_DETECT} (HTTP ${HTTP_CODE})"
+              elif [ "${IS_SLOW}" -eq 1 ]; then
+                echo "Failure detected at ${T_DETECT} due to slow response (${TIME_TOTAL}s > ${LATENCY_BUDGET_SEC}s)"
+              else
+                echo "Failure detected at ${T_DETECT} due to metrics trigger (fps_min=${FPS_MIN}, detection_rate_min=${DETECTION_RATE_MIN})"
+              fi
+              echo "detect_metrics_raw=${DETECT_BODY}" >> "$GITHUB_OUTPUT"
+              break
+            fi
 
-          req = urllib.request.Request(
-            os.environ["METRICS_INGEST_URL"],
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-              "Content-Type":"application/json",
-              "Authorization": f"Bearer {os.environ.get('ID_TOKEN','')}"
-            },
-            method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=20) as resp:
-            if resp.getcode() != 200:
-              raise SystemExit(f"ingest failed: {resp.getcode()} {resp.read()!r}")
-          PY
+            sleep 5
+          done
+
+          if [ "${DETECTED}" -ne 1 ]; then
+            echo "Failure was not detected"
+            exit 1
+          fi
+
+          TTD_SAMPLE=$((T_DETECT - T_INJECT))
+          echo "TTD sample (sec) = ${TTD_SAMPLE}"
+
+          echo "t_detect=${T_DETECT}" >> "$GITHUB_OUTPUT"
+          echo "ttd_sample=${TTD_SAMPLE}" >> "$GITHUB_OUTPUT"
 
       - name: Rollback to LKG (edge activation)
-        id: rollback
+        id: s3recover
         run: |
           set -euo pipefail
           cd baseline/services/edge_cv_app
-          ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          EDGE_MODE=real EDGE_FAIL_MODE=0 EDGE_HEALTH_CHECK=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
-      - name: Emit MTTR sample (s3_recover_edge)
+      - name: Wait for recovery (MTTR)
+        id: s3recover_wait
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, os, time, urllib.request
-          t_detect = float(os.environ["T_DETECT_EPOCH"])
-          t_end = time.time()
-          fault_mode = os.environ.get("FAIL_MODE","")
-          fault_type = fault_mode.replace("_", "-")
-          payload = {
-            "run_id": os.environ["RUN_ID"],
-            "scenario_id": os.environ["SCENARIO_ID"],
-            "stage": "s3_recover_edge",
-            "mode": os.environ["MODE"],
-            "status": "success",
-            "commit_sha": os.environ["GITHUB_SHA"],
-            "t_start": t_detect,
-            "t_end": t_end,
+          SERVICE_URL="http://127.0.0.1:8080"
+          T_DETECT=${{ steps.s3fault.outputs.t_detect }}
+          echo "Starting recovery poll from detection time: ${T_DETECT}"
+
+          DEADLINE=$((T_DETECT + 600)) # 10 minutes
+          while true; do
+            NOW=$(date +%s)
+            if [ "$NOW" -ge "$DEADLINE" ]; then
+              echo "Timeout while waiting for recovery; aborting."
+              exit 1
+            fi
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/status" || echo "000")
+            echo "[$NOW] /status -> ${HTTP_CODE}"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              T_RECOVER_END=${NOW}
+              echo "Service recovered at ${T_RECOVER_END}"
+              RECOVER_BODY=$(curl -s "${SERVICE_URL}/status" || echo "{}")
+              echo "recover_metrics_raw=$(echo "$RECOVER_BODY" | tr -d '\n')" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+
+          TTR_SAMPLE=$((T_RECOVER_END - T_DETECT))
+          echo "TTR sample (sec) = ${TTR_SAMPLE}"
+          echo "t_recover_end=${T_RECOVER_END}" >> "$GITHUB_OUTPUT"
+          echo "ttr_sample=${TTR_SAMPLE}" >> "$GITHUB_OUTPUT"
+
+      - name: Send S3 metrics to BigQuery ingest
+        run: |
+          set -euo pipefail
+
+          RUN_ID="${{ env.RUN_ID }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SCENARIO_ID="${{ env.SCENARIO_ID }}"
+          MODE="baseline"
+          STATUS="success"
+          ID_TOKEN="${{ env.ID_TOKEN }}"
+          DETECT_METRICS_RAW='${{ steps.s3fault.outputs.detect_metrics_raw }}'
+          RECOVER_METRICS_RAW='${{ steps.s3recover_wait.outputs.recover_metrics_raw }}'
+
+          T_INJECT=${{ steps.s3fault.outputs.t_inject }}
+          T_DETECT=${{ steps.s3fault.outputs.t_detect }}
+          T_RECOVER_END=${{ steps.s3recover_wait.outputs.t_recover_end }}
+          TTD_SAMPLE=${{ steps.s3fault.outputs.ttd_sample }}
+          TTR_SAMPLE=${{ steps.s3recover_wait.outputs.ttr_sample }}
+
+          echo "S3 edge metrics:"
+          echo "  RUN_ID=${RUN_ID}"
+          echo "  COMMIT=${COMMIT_SHA}"
+          echo "  FAULT=${FAULT_NAME}"
+          echo "  TTD_sample=${TTD_SAMPLE} sec, TTR_sample=${TTR_SAMPLE} sec"
+          echo "  T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
+
+          # 1) Event: s3_detect_edge (MTTD sample)
+          curl -sS -X POST "${METRICS_INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "${SCENARIO_ID}",
+            "stage": "s3_detect_edge",
+            "mode": "${MODE}",
+            "status": "${STATUS}",
+            "commit_sha": "${COMMIT_SHA}",
+            "t_start": ${T_INJECT},
+            "t_end": ${T_DETECT},
             "metrics": {
-              "ttr_sample_sec": round(max(0.0, t_end - t_detect), 6),
-              "fault_mode": fault_mode,
+              "ttd_sample_sec": ${TTD_SAMPLE},
+              "metrics_raw": ${DETECT_METRICS_RAW:-"null"}
             },
             "labels": {
               "service": "edge_cv_app",
               "env": "gh-runner",
-              "fault_type": fault_type,
-              "fault_mode": fault_mode,
+              "fault_type": "${FAULT_NAME}",
+              "fault_mode": "${FAIL_MODE}",
+              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
+              "fps_min": "${FPS_MIN}",
+              "detection_rate_min": "${DETECTION_RATE_MIN}"
             }
           }
-          req = urllib.request.Request(
-            os.environ["METRICS_INGEST_URL"],
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-              "Content-Type":"application/json",
-              "Authorization": f"Bearer {os.environ.get('ID_TOKEN','')}"
+          EOF
+
+          # 2) Event: s3_recover_edge (MTTR sample)
+          curl -sS -X POST "${METRICS_INGEST_URL}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
+            -d @- <<EOF
+          {
+            "run_id": "${RUN_ID}",
+            "scenario_id": "${SCENARIO_ID}",
+            "stage": "s3_recover_edge",
+            "mode": "${MODE}",
+            "status": "${STATUS}",
+            "commit_sha": "${COMMIT_SHA}",
+            "t_start": ${T_DETECT},
+            "t_end": ${T_RECOVER_END},
+            "metrics": {
+              "ttr_sample_sec": ${TTR_SAMPLE},
+              "metrics_raw": ${RECOVER_METRICS_RAW:-"null"}
             },
-            method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=20) as resp:
-            if resp.getcode() != 200:
-              raise SystemExit(f"ingest failed: {resp.getcode()} {resp.read()!r}")
-          PY
-        env:
-          T_DETECT_EPOCH: ${{ steps.detect_out.outputs.t_detect_epoch }}
+            "labels": {
+              "service": "edge_cv_app",
+              "env": "gh-runner",
+              "fault_type": "${FAULT_NAME}",
+              "fault_mode": "${FAIL_MODE}",
+              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
+              "fps_min": "${FPS_MIN}",
+              "detection_rate_min": "${DETECTION_RATE_MIN}"
+            }
+          }
+          EOF
 
       - name: Upload S3 edge artifacts to GCS (canonical)
         id: gcs
