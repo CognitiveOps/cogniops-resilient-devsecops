@@ -846,7 +846,7 @@ Example query to extract **MTTD/MTTR summary per fault type**, **separated by su
 -- S3 (both substrates) – MTTD/MTTR by fault type.
 --
 -- edge‑OTA (runner-simulated edge):
---   stage s3_detect_edge  → metrics.mttd_sample_sec
+--   stage s3_detect_edge  → metrics.ttd_sample_sec
 --   stage s3_recover_edge → metrics.ttr_sample_sec
 --
 -- Cloud Run:
