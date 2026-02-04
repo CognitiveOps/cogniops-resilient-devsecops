@@ -167,7 +167,15 @@ jobs:
           echo "Downloading S5 pre-approval artifacts from ${GCS_PREFIX}"
           rm -rf baseline/metrics/s5
           mkdir -p baseline/metrics
-          gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+          if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+          else
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+            if [ -d baseline/metrics/preapprove/s5 ]; then
+              rm -rf baseline/metrics/s5
+              mv baseline/metrics/preapprove/s5 baseline/metrics/s5
+            fi
+          fi
 
       - name: Simulate approval delay (S5 benchmark)
         run: |
@@ -266,7 +274,15 @@ jobs:
           echo "Downloading S5 post-approval artifacts from ${GCS_PREFIX}"
           rm -rf baseline/metrics/s5
           mkdir -p baseline/metrics
-          gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+          if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+          else
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+            if [ -d baseline/metrics/postapprove/s5 ]; then
+              rm -rf baseline/metrics/s5
+              mv baseline/metrics/postapprove/s5 baseline/metrics/s5
+            fi
+          fi
 
       - name: Compute AL + ACR (finalize)
         run: |
