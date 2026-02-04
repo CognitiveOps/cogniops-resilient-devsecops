@@ -219,7 +219,8 @@ Examples:
 - **S3 edge‑OTA:** LKG/faulty manifests
 - **S4:** PQC artifacts (`results.json`, signatures, public key)
 - **S5:** explainability outputs (`recommendation.json`, `approved.json`, `results.json`)
-- **SS2:** integrity/mitigation artifacts (canonical)
+- **SS2:** integrity/mitigation artifacts (canonical), stored **per case** under:
+  `.../runs/ss2/<RUN_ID>/<incident_type>/<fault_mode>/`
 
 When a scenario needs artifacts downstream, the workflow **downloads from the same GCS prefix** (e.g., S5 pre‑approve → post‑approve chain, SS2 rollback inputs).
 
