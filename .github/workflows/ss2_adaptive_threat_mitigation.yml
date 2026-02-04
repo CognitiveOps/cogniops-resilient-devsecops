@@ -48,25 +48,6 @@ jobs:
             fault_mode: integrity_replay
           - incident_type: integrity_failure
             fault_mode: integrity_unauthorized_target
-    outputs:
-      run_id: ${{ steps.meta.outputs.run_id }}
-      mode: ${{ steps.meta.outputs.mode }}
-      scenario_id: ${{ steps.meta.outputs.scenario_id }}
-      commit_sha: ${{ steps.meta.outputs.commit_sha }}
-      incident_type: ${{ steps.meta.outputs.incident_type }}
-      fail_mode: ${{ steps.meta.outputs.fail_mode }}
-      gcs_prefix: ${{ steps.gcs.outputs.gcs_prefix }}
-      case_id: ${{ steps.hitl.outputs.case_id }}
-      action: ${{ steps.hitl.outputs.action }}
-      recommendation: ${{ steps.hitl.outputs.recommendation }}
-      decision: ${{ steps.hitl.outputs.decision }}
-      risk_score: ${{ steps.hitl.outputs.risk_score }}
-      risk_level: ${{ steps.hitl.outputs.risk_level }}
-      rationale: ${{ steps.hitl.outputs.rationale }}
-      inputs_json: ${{ steps.hitl.outputs.inputs_json }}
-      outputs_json: ${{ steps.hitl.outputs.outputs_json }}
-      evidence_json: ${{ steps.hitl.outputs.evidence_json }}
-      policy_refs_json: ${{ steps.hitl.outputs.policy_refs_json }}
     env:
       SCENARIO_ID: ss2
       MODE: baseline
@@ -80,7 +61,7 @@ jobs:
 
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.incident_type }}/${{ matrix.fault_mode }}
 
       INCIDENT_TYPE: ${{ matrix.incident_type }}
       FAIL_MODE: ${{ matrix.fault_mode }}
@@ -521,30 +502,26 @@ jobs:
           docker rm -f edge_cv_app || true
 
       - name: Build HITL case inputs
-        id: hitl
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
         run: |
           set -euo pipefail
+          mkdir -p baseline/metrics/hitl
           python - <<'PY'
           import json, os
           incident = os.environ.get("INCIDENT_TYPE", "runtime_fault")
           fail_mode = os.environ.get("FAIL_MODE", "")
-          run_id = os.environ.get("RUN_ID", "")
-          path = "baseline/metrics/ss2/detection.json"
-          det = json.load(open(path, "r", encoding="utf-8")) if os.path.exists(path) else {}
+          det_path = "baseline/metrics/ss2/detection.json"
+          det = json.load(open(det_path, "r", encoding="utf-8")) if os.path.exists(det_path) else {}
 
           case_id = f"SS2_{incident}_{fail_mode}".replace(" ", "_")
-          action = "rollback_release" if incident == "runtime_fault" else "block_activation"
-          recommendation = "rollback" if incident == "runtime_fault" else "block"
-          decision = "approve_then_rollback" if incident == "runtime_fault" else "block"
+          action = "rollback_release"
+          recommendation = "rollback"
+          decision = "approve_then_rollback"
 
-          risk_score = 0.85 if incident == "runtime_fault" else 0.9
-          risk_level = "high" if incident == "runtime_fault" else "critical"
+          risk_score = 0.85
+          risk_level = "high"
 
-          rationale = (
-              "Runtime anomaly detected after successful OTA activation; quarantine the workload and rollback to last-known-good."
-              if incident == "runtime_fault"
-              else "Integrity failure detected in OTA manifest; block activation and quarantine artifact."
-          )
+          rationale = "Runtime anomaly detected after successful OTA activation; quarantine the workload and rollback to last-known-good."
 
           inputs = {
               "incident_type": incident,
@@ -562,22 +539,226 @@ jobs:
               "SOAR playbooks pattern (industry)",
           ]
 
-          # Export for workflow_call inputs (must be strings/numbers).
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"case_id={case_id}\n")
-              f.write(f"action={action}\n")
-              f.write(f"recommendation={recommendation}\n")
-              f.write(f"decision={decision}\n")
-              f.write(f"risk_score={risk_score}\n")
-              f.write(f"risk_level={risk_level}\n")
-              f.write("rationale=" + rationale.replace("\n", " ").strip() + "\n")
-              f.write("inputs_json=" + json.dumps(inputs, ensure_ascii=False) + "\n")
-              f.write("outputs_json=" + json.dumps(outputs, ensure_ascii=False) + "\n")
-              f.write("evidence_json=" + json.dumps(evidence, ensure_ascii=False) + "\n")
-              f.write("policy_refs_json=" + json.dumps(policy_refs, ensure_ascii=False) + "\n")
+          case = {
+              "case_id": case_id,
+              "action": action,
+              "recommendation": recommendation,
+              "decision": decision,
+              "risk": {"score": risk_score, "level": risk_level},
+              "rationale": rationale,
+              "inputs": inputs,
+              "outputs": outputs,
+              "evidence": evidence,
+              "policy_refs": policy_refs,
+          }
+          json.dump([case], open("baseline/metrics/hitl/cases.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+          env_path = os.environ["GITHUB_ENV"]
+          with open(env_path, "a", encoding="utf-8") as f:
+              f.write(f"CASE_ID={case_id}\n")
+              f.write(f"ACTION={action}\n")
+              f.write(f"RECOMMENDATION={recommendation}\n")
+              f.write(f"DECISION={decision}\n")
+              f.write(f"RISK_SCORE={risk_score}\n")
+              f.write(f"RISK_LEVEL={risk_level}\n")
+              f.write("RATIONALE=" + rationale.replace("\n", " ").strip() + "\n")
           PY
         env:
           CANDIDATE_MANIFEST: ${{ steps.incident.outputs.candidate_manifest }}
+
+      - name: Generate explanation + ActionTrace
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        env:
+          METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage explain \
+            --outdir baseline/metrics/hitl \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --cases-file baseline/metrics/hitl/cases.json \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - id: issue
+        name: Create approval issue
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        uses: actions/github-script@v7
+        env:
+          APPROVERS_CSV: ${{ vars.SS2_APPROVERS || github.actor }}
+        with:
+          script: |
+            const approversCsv = String(process.env.APPROVERS_CSV || '').trim();
+            const defaultApprover = context.actor;
+            const approvers = (approversCsv ? approversCsv.split(',') : [defaultApprover])
+              .map(s => s.trim())
+              .filter(Boolean);
+
+            const caseId = process.env.CASE_ID || '';
+            const action = process.env.ACTION || '';
+            const recommendation = process.env.RECOMMENDATION || '';
+            const decision = process.env.DECISION || '';
+            const riskLevel = process.env.RISK_LEVEL || '';
+            const riskScore = Number(process.env.RISK_SCORE || 0);
+            const rationale = process.env.RATIONALE || '';
+
+            const title = `[HITL] ss2 approve: ${caseId} (${process.env.RUN_ID})`;
+            const body = [
+              `**Scenario:** \`ss2\``,
+              `**Run:** \`${process.env.RUN_ID}\``,
+              `**Case:** \`${caseId}\``,
+              `**Action:** \`${action}\``,
+              `**Recommendation:** \`${recommendation}\``,
+              `**Decision:** \`${decision}\``,
+              `**Risk:** \`${riskLevel}\` (score=${riskScore})`,
+              ``,
+              `**Rationale:** ${rationale}`,
+              ``,
+              `Allowed approvers: ${approvers.map(a => `@${a}`).join(', ')}`,
+              ``,
+              `Comment \`approve\` (or \`/approve\`) to continue, or \`reject\` (or \`/reject\`) to fail the run.`,
+              ``,
+              `_Note: This repo runs on GitHub Free + private, so Environment required reviewers are unavailable. This issue-based gate provides a reproducible, auditable soft-HITL control._`,
+            ].join('\n');
+
+            const resp = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['hitl', 'ss2'],
+            });
+
+            core.setOutput('issue_number', String(resp.data.number));
+            core.setOutput('issue_url', resp.data.html_url);
+
+      - name: Wait for approval comment
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+          APPROVERS_CSV: ${{ vars.SS2_APPROVERS || github.actor }}
+          APPROVAL_TIMEOUT_MIN: ${{ vars.SS2_APPROVAL_TIMEOUT_MIN || '60' }}
+          APPROVAL_POLL_SEC: ${{ vars.SS2_APPROVAL_POLL_SEC || '20' }}
+        with:
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const timeoutMin = Number(process.env.APPROVAL_TIMEOUT_MIN);
+            const pollSec = Number(process.env.APPROVAL_POLL_SEC);
+
+            const approversCsv = String(process.env.APPROVERS_CSV || '').trim();
+            const defaultApprover = context.actor;
+            const approvers = new Set((approversCsv ? approversCsv.split(',') : [defaultApprover])
+              .map(s => s.trim())
+              .filter(Boolean)
+              .map(s => s.toLowerCase()));
+
+            const started = Date.now();
+            const deadline = started + timeoutMin * 60 * 1000;
+
+            async function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            core.info(`Waiting for approval on issue #${issueNumber} for up to ${timeoutMin} min (poll ${pollSec}s).`);
+            core.info(`Allowed approvers: ${Array.from(approvers).join(', ')}`);
+
+            while (Date.now() < deadline) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+
+              for (const c of comments.reverse()) {
+                const author = (c.user?.login || '').toLowerCase();
+                if (!approvers.has(author)) continue;
+
+                const text = (c.body || '').trim().toLowerCase();
+                if (['approve', '/approve'].includes(text)) {
+                  core.info(`Approved by @${c.user.login}.`);
+                  return;
+                }
+                if (['reject', '/reject'].includes(text)) {
+                  throw new Error(`Rejected by @${c.user.login}.`);
+                }
+              }
+
+              await sleep(pollSec * 1000);
+            }
+
+            throw new Error(`Approval timeout after ${timeoutMin} minutes (issue #${issueNumber}).`);
+
+      - name: Stamp approval timestamp
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        env:
+          METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage approved \
+            --outdir baseline/metrics/hitl \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - name: Finalize AL + ACR
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        env:
+          METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage final \
+            --outdir baseline/metrics/hitl \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - name: Close approval issue
+        if: ${{ always() && env.INCIDENT_TYPE == 'runtime_fault' }}
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const conclusion = '${{ job.status }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `Automation closing this HITL gate (job status: **${conclusion}**).`,
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed',
+            });
+
+      - name: Rollback to LKG (edge activation)
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        run: |
+          set -euo pipefail
+          LKG="${{ steps.lkg.outputs.manifest }}"
+          cp "$LKG" baseline/services/edge_cv_app/
+          if [ -f "${LKG}.sha256" ]; then
+            cp "${LKG}.sha256" baseline/services/edge_cv_app/
+          fi
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+          cd baseline/services/edge_cv_app
+          ./edge_pull_and_activate.sh "$(basename "$LKG")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
       - name: Upload SS2 artifacts to GCS (canonical)
         id: gcs
@@ -585,72 +766,6 @@ jobs:
           set -euo pipefail
           echo "Uploading SS2 artifacts to ${GCS_PREFIX}"
           gcloud storage cp -r baseline/metrics/ss2 "${GCS_PREFIX}/"
-          echo "gcs_prefix=${GCS_PREFIX}" >> "$GITHUB_OUTPUT"
-
-  hitl:
-    needs: [prepare]
-    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' }}
-    strategy:
-      max-parallel: 1
-      matrix:
-        include:
-          - incident_type: runtime_fault
-            fault_mode: corrupt_weights
-          - incident_type: runtime_fault
-            fault_mode: dead_camera
-          - incident_type: runtime_fault
-            fault_mode: cpu_starvation
-          - incident_type: runtime_fault
-            fault_mode: net_unstable
-          - incident_type: runtime_fault
-            fault_mode: disk_full
-          - incident_type: runtime_fault
-            fault_mode: wrong_arch
-    uses: ./.github/workflows/_hitl_explain_and_approve_soft.yml
-    with:
-      scenario_id: ${{ needs.prepare.outputs.scenario_id }}
-      mode: ${{ needs.prepare.outputs.mode }}
-      run_id: ${{ needs.prepare.outputs.run_id }}
-      commit_sha: ${{ needs.prepare.outputs.commit_sha }}
-      case_id: ${{ needs.prepare.outputs.case_id }}
-      action: ${{ needs.prepare.outputs.action }}
-      recommendation: ${{ needs.prepare.outputs.recommendation }}
-      decision: ${{ needs.prepare.outputs.decision }}
-      risk_score: ${{ fromJson(needs.prepare.outputs.risk_score) }}
-      risk_level: ${{ needs.prepare.outputs.risk_level }}
-      rationale: ${{ needs.prepare.outputs.rationale }}
-      inputs_json: ${{ needs.prepare.outputs.inputs_json }}
-      outputs_json: ${{ needs.prepare.outputs.outputs_json }}
-      evidence_json: ${{ needs.prepare.outputs.evidence_json }}
-      policy_refs_json: ${{ needs.prepare.outputs.policy_refs_json }}
-      metrics_ingest_url: ${{ vars.METRICS_INGEST_URL }}
-      approvers_csv: ${{ vars.SS2_APPROVERS || github.actor }}
-      approval_timeout_min: ${{ fromJson(vars.SS2_APPROVAL_TIMEOUT_MIN || '60') }}
-      approval_poll_sec: ${{ fromJson(vars.SS2_APPROVAL_POLL_SEC || '20') }}
-
-  recover:
-    needs: [prepare, hitl]
-    strategy:
-      max-parallel: 1
-      matrix:
-        include:
-          - incident_type: runtime_fault
-            fault_mode: corrupt_weights
-          - incident_type: runtime_fault
-            fault_mode: dead_camera
-          - incident_type: runtime_fault
-            fault_mode: cpu_starvation
-          - incident_type: runtime_fault
-            fault_mode: net_unstable
-          - incident_type: runtime_fault
-            fault_mode: disk_full
-          - incident_type: runtime_fault
-            fault_mode: wrong_arch
-    if: ${{ needs.prepare.outputs.incident_type == 'runtime_fault' && needs.hitl.result == 'success' }}
-    uses: ./.github/workflows/_s3_edge_rollback_action.yml
-    with:
-      gcs_prefix: ${{ needs.prepare.outputs.gcs_prefix }}
-      lkg_manifest_glob: "ss2/artifacts/ota_lkg_*.json"
-      gcp_project: ${{ vars.GCP_PROJECT_ID }}
-      gcp_region: ${{ vars.GCP_REGION }}
-      ar_location: ${{ vars.GCP_REPO_LOCATION }}
+          if [ -d baseline/metrics/hitl ]; then
+            gcloud storage cp -r baseline/metrics/hitl "${GCS_PREFIX}/"
+          fi
