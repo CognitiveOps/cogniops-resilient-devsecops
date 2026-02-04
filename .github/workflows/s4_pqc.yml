@@ -22,6 +22,7 @@ env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
   S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+  AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
 jobs:
   s4-pqc:
@@ -46,6 +47,10 @@ jobs:
             echo "S4_PQC_BACKEND must be 'oqs' (got '${S4_PQC_BACKEND}')." >&2
             exit 1
           fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S4 artifacts in GCS." >&2
+            exit 1
+          fi
 
       - name: Install PQC backend (OQS)
         run: |
@@ -56,7 +61,6 @@ jobs:
           python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
 
       - name: Auth to GCP (for ingest token)
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -65,11 +69,9 @@ jobs:
           export_environment_variables: true
 
       - name: Setup gcloud
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Resolve ingest token
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         run: |
           set -euo pipefail
           TOKEN="$(gcloud auth print-identity-token \
@@ -108,12 +110,9 @@ jobs:
             --auth-token "${ID_TOKEN:-}" \
             --replay-cutoff-sec 900
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: s4_${{ env.RUN_ID }}
-          path: |
-            baseline/metrics/s4/results.json
-            baseline/metrics/s4/artifacts/ota_*.json
-            baseline/metrics/s4/artifacts/ota_*.json.sha256
-            baseline/metrics/s4/artifacts/ota_*.json.pqcsig
-            baseline/metrics/s4/artifacts/pub.key
+      - name: Upload S4 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s4/${RUN_ID}"
+          echo "Uploading S4 artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s4 "${GCS_PREFIX}/"

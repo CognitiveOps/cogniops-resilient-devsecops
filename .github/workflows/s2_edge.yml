@@ -37,6 +37,7 @@ jobs:
       IMAGE_NAME: edge-cv-app
       # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +60,14 @@ jobs:
 
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S2 artifacts in GCS." >&2
+            exit 1
+          fi
 
       - name: Configure Docker for Artifact Registry
         run: |
@@ -205,11 +214,10 @@ jobs:
           }
           EOF
 
-      # 6️⃣ Upload artifacts (manifest + checksum)
-      - name: Upload S2 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: s2_${{ env.RUN_ID }}
-          path: |
-            baseline/metrics/s2/artifacts/ota_*.json
-            baseline/metrics/s2/artifacts/ota_*.json.sha256
+      # 6️⃣ Upload artifacts to GCS (canonical)
+      - name: Upload S2 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s2/${RUN_ID}"
+          echo "Uploading S2 artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s2 "${GCS_PREFIX}/"

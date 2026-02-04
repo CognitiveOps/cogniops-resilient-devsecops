@@ -20,6 +20,7 @@ env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   # S5 is a standalone benchmark; approval is simulated for reproducibility.
   S5_APPROVAL_DELAY_SEC: ${{ vars.S5_APPROVAL_DELAY_SEC || '10' }}
+  AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
 jobs:
   s5_explain:
@@ -48,9 +49,12 @@ jobs:
             echo "METRICS_INGEST_URL must be set (repo variable) to send S5 metrics by default." >&2
             exit 1
           fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S5 artifacts in GCS." >&2
+            exit 1
+          fi
 
       - name: Auth to GCP (for ingest token)
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -59,11 +63,9 @@ jobs:
           export_environment_variables: true
 
       - name: Setup gcloud
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Resolve ingest token
-        if: ${{ env.METRICS_INGEST_URL != '' && vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
         run: |
           set -euo pipefail
           TOKEN="$(gcloud auth print-identity-token \
@@ -97,10 +99,12 @@ jobs:
               f.write(f"t_recommend_epoch={t}\n")
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: s5_${{ env.RUN_ID }}_preapprove
-          path: baseline/metrics/s5
+      - name: Upload pre-approval artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
+          echo "Uploading S5 pre-approval artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
 
   s5_approve:
     name: s5_approve
@@ -129,10 +133,41 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - name: Auth to GCP (for GCS)
+        uses: google-github-actions/auth@v2
         with:
-          name: s5_${{ env.RUN_ID }}_preapprove
-          path: baseline/metrics/s5
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to fetch S5 artifacts from GCS." >&2
+            exit 1
+          fi
+
+      - name: Download pre-approval artifacts from GCS
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
+          echo "Downloading S5 pre-approval artifacts from ${GCS_PREFIX}"
+          rm -rf baseline/metrics/s5
+          mkdir -p baseline/metrics/s5
+          gcloud storage cp -r "${GCS_PREFIX}/s5/." baseline/metrics/s5
 
       - name: Simulate approval delay (S5 benchmark)
         run: |
@@ -165,10 +200,12 @@ jobs:
               f.write(f"t_approved_epoch={t}\n")
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: s5_${{ env.RUN_ID }}_postapprove
-          path: baseline/metrics/s5
+      - name: Upload post-approval artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
+          echo "Uploading S5 post-approval artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
 
   s5_final:
     name: s5_final
@@ -195,10 +232,41 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - name: Auth to GCP (for GCS)
+        uses: google-github-actions/auth@v2
         with:
-          name: s5_${{ env.RUN_ID }}_postapprove
-          path: baseline/metrics/s5
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to fetch S5 artifacts from GCS." >&2
+            exit 1
+          fi
+
+      - name: Download post-approval artifacts from GCS
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
+          echo "Downloading S5 post-approval artifacts from ${GCS_PREFIX}"
+          rm -rf baseline/metrics/s5
+          mkdir -p baseline/metrics/s5
+          gcloud storage cp -r "${GCS_PREFIX}/s5/." baseline/metrics/s5
 
       - name: Compute AL + ACR (finalize)
         run: |
@@ -230,7 +298,9 @@ jobs:
           Path("${GITHUB_STEP_SUMMARY}").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: s5_${{ env.RUN_ID }}
-          path: baseline/metrics/s5
+      - name: Upload final S5 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/final"
+          echo "Uploading S5 final artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
