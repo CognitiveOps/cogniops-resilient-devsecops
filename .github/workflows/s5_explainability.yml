@@ -166,8 +166,8 @@ jobs:
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
           echo "Downloading S5 pre-approval artifacts from ${GCS_PREFIX}"
           rm -rf baseline/metrics/s5
-          mkdir -p baseline/metrics/s5
-          gcloud storage cp -r "${GCS_PREFIX}/s5/." baseline/metrics/s5
+          mkdir -p baseline/metrics
+          gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
 
       - name: Simulate approval delay (S5 benchmark)
         run: |
@@ -265,8 +265,8 @@ jobs:
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
           echo "Downloading S5 post-approval artifacts from ${GCS_PREFIX}"
           rm -rf baseline/metrics/s5
-          mkdir -p baseline/metrics/s5
-          gcloud storage cp -r "${GCS_PREFIX}/s5/." baseline/metrics/s5
+          mkdir -p baseline/metrics
+          gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
 
       - name: Compute AL + ACR (finalize)
         run: |
