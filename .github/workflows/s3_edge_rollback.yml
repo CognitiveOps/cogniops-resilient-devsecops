@@ -344,10 +344,6 @@ jobs:
           DETECT_METRICS_RAW='${{ steps.s3fault.outputs.detect_metrics_raw }}'
           RECOVER_METRICS_RAW='${{ steps.s3recover_wait.outputs.recover_metrics_raw }}'
 
-          # Ensure metrics_raw is valid JSON (or null) to avoid ingest rejection.
-          DETECT_METRICS_RAW=$(echo "${DETECT_METRICS_RAW}" | jq -c '.' 2>/dev/null || echo "null")
-          RECOVER_METRICS_RAW=$(echo "${RECOVER_METRICS_RAW}" | jq -c '.' 2>/dev/null || echo "null")
-
           T_INJECT=${{ steps.s3fault.outputs.t_inject }}
           T_DETECT=${{ steps.s3fault.outputs.t_detect }}
           T_RECOVER_END=${{ steps.s3recover_wait.outputs.t_recover_end }}
@@ -362,34 +358,45 @@ jobs:
           echo "  T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
 
           # 1) Event: s3_detect_edge (MTTD sample)
+          python - <<'PY'
+          import json, os
+          def parse_raw(raw):
+              if raw in ("", "null", None):
+                  return None
+              try:
+                  return json.loads(raw)
+              except Exception:
+                  return None
+          payload = {
+              "run_id": os.environ["RUN_ID"],
+              "scenario_id": os.environ["SCENARIO_ID"],
+              "stage": "s3_detect_edge",
+              "mode": os.environ["MODE"],
+              "status": os.environ["STATUS"],
+              "commit_sha": os.environ["COMMIT_SHA"],
+              "t_start": float(os.environ["T_INJECT"]),
+              "t_end": float(os.environ["T_DETECT"]),
+              "metrics": {
+                  "ttd_sample_sec": float(os.environ["TTD_SAMPLE"]),
+                  "metrics_raw": parse_raw(os.environ.get("DETECT_METRICS_RAW","")),
+              },
+              "labels": {
+                  "service": "edge_cv_app",
+                  "env": "gh-runner",
+                  "fault_type": os.environ["FAULT_NAME"],
+                  "fault_mode": os.environ["FAIL_MODE"],
+                  "latency_budget_sec": os.environ.get("LATENCY_BUDGET_SEC",""),
+                  "fps_min": os.environ.get("FPS_MIN",""),
+                  "detection_rate_min": os.environ.get("DETECTION_RATE_MIN",""),
+              },
+          }
+          open("/tmp/s3_detect.json","w",encoding="utf-8").write(json.dumps(payload, ensure_ascii=False))
+          PY
+
           RESP=$(curl -sS -w "\n%{http_code}" -X POST "${METRICS_INGEST_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
-            -d @- <<EOF
-          {
-            "run_id": "${RUN_ID}",
-            "scenario_id": "${SCENARIO_ID}",
-            "stage": "s3_detect_edge",
-            "mode": "${MODE}",
-            "status": "${STATUS}",
-            "commit_sha": "${COMMIT_SHA}",
-            "t_start": ${T_INJECT},
-            "t_end": ${T_DETECT},
-            "metrics": {
-              "ttd_sample_sec": ${TTD_SAMPLE},
-              "metrics_raw": ${DETECT_METRICS_RAW:-"null"}
-            },
-            "labels": {
-              "service": "edge_cv_app",
-              "env": "gh-runner",
-              "fault_type": "${FAULT_NAME}",
-              "fault_mode": "${FAIL_MODE}",
-              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
-              "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
-            }
-          }
-          EOF
+            -d @/tmp/s3_detect.json
           )
           BODY=${RESP%$'\n'*}
           CODE=${RESP##*$'\n'}
@@ -400,34 +407,45 @@ jobs:
           fi
 
           # 2) Event: s3_recover_edge (MTTR sample)
+          python - <<'PY'
+          import json, os
+          def parse_raw(raw):
+              if raw in ("", "null", None):
+                  return None
+              try:
+                  return json.loads(raw)
+              except Exception:
+                  return None
+          payload = {
+              "run_id": os.environ["RUN_ID"],
+              "scenario_id": os.environ["SCENARIO_ID"],
+              "stage": "s3_recover_edge",
+              "mode": os.environ["MODE"],
+              "status": os.environ["STATUS"],
+              "commit_sha": os.environ["COMMIT_SHA"],
+              "t_start": float(os.environ["T_DETECT"]),
+              "t_end": float(os.environ["T_RECOVER_END"]),
+              "metrics": {
+                  "ttr_sample_sec": float(os.environ["TTR_SAMPLE"]),
+                  "metrics_raw": parse_raw(os.environ.get("RECOVER_METRICS_RAW","")),
+              },
+              "labels": {
+                  "service": "edge_cv_app",
+                  "env": "gh-runner",
+                  "fault_type": os.environ["FAULT_NAME"],
+                  "fault_mode": os.environ["FAIL_MODE"],
+                  "latency_budget_sec": os.environ.get("LATENCY_BUDGET_SEC",""),
+                  "fps_min": os.environ.get("FPS_MIN",""),
+                  "detection_rate_min": os.environ.get("DETECTION_RATE_MIN",""),
+              },
+          }
+          open("/tmp/s3_recover.json","w",encoding="utf-8").write(json.dumps(payload, ensure_ascii=False))
+          PY
+
           RESP=$(curl -sS -w "\n%{http_code}" -X POST "${METRICS_INGEST_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
-            -d @- <<EOF
-          {
-            "run_id": "${RUN_ID}",
-            "scenario_id": "${SCENARIO_ID}",
-            "stage": "s3_recover_edge",
-            "mode": "${MODE}",
-            "status": "${STATUS}",
-            "commit_sha": "${COMMIT_SHA}",
-            "t_start": ${T_DETECT},
-            "t_end": ${T_RECOVER_END},
-            "metrics": {
-              "ttr_sample_sec": ${TTR_SAMPLE},
-              "metrics_raw": ${RECOVER_METRICS_RAW:-"null"}
-            },
-            "labels": {
-              "service": "edge_cv_app",
-              "env": "gh-runner",
-              "fault_type": "${FAULT_NAME}",
-              "fault_mode": "${FAIL_MODE}",
-              "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
-              "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
-            }
-          }
-          EOF
+            -d @/tmp/s3_recover.json
           )
           BODY=${RESP%$'\n'*}
           CODE=${RESP##*$'\n'}
