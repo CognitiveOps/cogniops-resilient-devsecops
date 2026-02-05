@@ -344,6 +344,10 @@ jobs:
           DETECT_METRICS_RAW='${{ steps.s3fault.outputs.detect_metrics_raw }}'
           RECOVER_METRICS_RAW='${{ steps.s3recover_wait.outputs.recover_metrics_raw }}'
 
+          # Ensure metrics_raw is valid JSON (or null) to avoid ingest rejection.
+          DETECT_METRICS_RAW=$(echo "${DETECT_METRICS_RAW}" | jq -c '.' 2>/dev/null || echo "null")
+          RECOVER_METRICS_RAW=$(echo "${RECOVER_METRICS_RAW}" | jq -c '.' 2>/dev/null || echo "null")
+
           T_INJECT=${{ steps.s3fault.outputs.t_inject }}
           T_DETECT=${{ steps.s3fault.outputs.t_detect }}
           T_RECOVER_END=${{ steps.s3recover_wait.outputs.t_recover_end }}
@@ -358,7 +362,7 @@ jobs:
           echo "  T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
 
           # 1) Event: s3_detect_edge (MTTD sample)
-          curl -sS -X POST "${METRICS_INGEST_URL}" \
+          RESP=$(curl -sS -w "\n%{http_code}" -X POST "${METRICS_INGEST_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -d @- <<EOF
@@ -386,9 +390,17 @@ jobs:
             }
           }
           EOF
+          )
+          BODY=${RESP%$'\n'*}
+          CODE=${RESP##*$'\n'}
+          echo "Ingest s3_detect_edge HTTP ${CODE}: ${BODY}"
+          if [ "${CODE}" -lt 200 ] || [ "${CODE}" -ge 300 ]; then
+            echo "Ingest failed for s3_detect_edge" >&2
+            exit 1
+          fi
 
           # 2) Event: s3_recover_edge (MTTR sample)
-          curl -sS -X POST "${METRICS_INGEST_URL}" \
+          RESP=$(curl -sS -w "\n%{http_code}" -X POST "${METRICS_INGEST_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${ID_TOKEN}" \
             -d @- <<EOF
@@ -416,6 +428,14 @@ jobs:
             }
           }
           EOF
+          )
+          BODY=${RESP%$'\n'*}
+          CODE=${RESP##*$'\n'}
+          echo "Ingest s3_recover_edge HTTP ${CODE}: ${BODY}"
+          if [ "${CODE}" -lt 200 ] || [ "${CODE}" -ge 300 ]; then
+            echo "Ingest failed for s3_recover_edge" >&2
+            exit 1
+          fi
 
       - name: Upload S3 edge artifacts to GCS (canonical)
         id: gcs
