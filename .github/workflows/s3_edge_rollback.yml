@@ -358,6 +358,7 @@ jobs:
           echo "  T_INJECT=${T_INJECT}, T_DETECT=${T_DETECT}, T_RECOVER_END=${T_RECOVER_END}"
 
           # 1) Event: s3_detect_edge (MTTD sample)
+          export RUN_ID SCENARIO_ID MODE STATUS COMMIT_SHA T_INJECT T_DETECT TTD_SAMPLE FAULT_NAME FAIL_MODE LATENCY_BUDGET_SEC FPS_MIN DETECTION_RATE_MIN DETECT_METRICS_RAW
           python - <<'PY'
           import json, os
           def parse_raw(raw):
@@ -407,6 +408,7 @@ jobs:
           fi
 
           # 2) Event: s3_recover_edge (MTTR sample)
+          export RUN_ID SCENARIO_ID MODE STATUS COMMIT_SHA T_DETECT T_RECOVER_END TTR_SAMPLE FAULT_NAME FAIL_MODE LATENCY_BUDGET_SEC FPS_MIN DETECTION_RATE_MIN RECOVER_METRICS_RAW
           python - <<'PY'
           import json, os
           def parse_raw(raw):
