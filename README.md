@@ -1545,8 +1545,8 @@ Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation
 
 | Month | Focus | Deliverable |
 |:--:|--|--|
-| **1** | **Full Baseline Implementation (S1–S5, SS1–SS2)** | Implement all baseline scenarios end-to-end: **S1 (CI/CD)**, **S2 (Edge OTA)**, **S3 (Rollback)**, **S4 (Security/PQC)**, **S5 (Explainability)**, plus **SS1/SS2 (Security & Adaptive Mitigation)**. Collect the complete set of metrics — **TTD, CFR, DF, TDL, DSR, MTTD, MTTR, TTV, VSR, FDR, AL, ACR** — and store them centrally in **BigQuery**. Deliver a unified **Baseline Metrics Report** establishing quantitative reference values before introducing the agent. |
-| **2** | Baseline Consolidation | Statistical analysis & report |
+| **1** | Full Baseline Implementation (S1–S5, SS1–SS2) | Implement all baseline scenarios end-to-end: **S1 (CI/CD)**, **S2 (Edge OTA)**, **S3 (Rollback)**, **S4 (Security/PQC)**, **S5 (Explainability)**, plus **SS1/SS2 (Security & Adaptive Mitigation)**. Collect the complete set of metrics — **TTD, CFR, DF, TDL, DSR, MTTD, MTTR, TTV, VSR, FDR, AL, ACR** — and store them centrally in **BigQuery**. Deliver a unified **Baseline Metrics Report** establishing quantitative reference values before introducing the agent. |
+| **2** | **Baseline Consolidation** | Statistical analysis & report |
 | **3** | Agent Development | Reasoning engine + PQC modules |
 | **4** | Evaluation | Baseline vs Agent quantitative comparison |
 | **5** | Optimization & Presentation | Final PoC demo + thesis submission |
@@ -1554,7 +1554,6 @@ Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation
 ---
 
 ## 🧠 Next Steps 
-- **SS2:** Adaptive threat mitigation simulation  
 - **Agent Core:** Autonomous reasoning + XAI integration  
 
 ---
