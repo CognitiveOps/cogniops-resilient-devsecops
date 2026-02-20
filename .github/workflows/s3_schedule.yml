@@ -1,0 +1,54 @@
+name: S3 Scheduled Resilience Runs
+
+on:
+  schedule:
+    # Daily at 02:00 UTC
+    - cron: "0 2 * * *"
+  # Manual trigger for debugging or ad-hoc runs
+  workflow_dispatch:
+  # External trigger via GitHub API (repository_dispatch)
+  repository_dispatch:
+    types: [s3_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check S3 record count
+        id: check
+        run: |
+          set -euo pipefail
+          COUNT=$(bq query --use_legacy_sql=false --format=csv \
+            "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\` WHERE scenario_id='s3'" | tail -n1)
+          echo "Current S3 rows: $COUNT"
+          if [ "$COUNT" -ge 500 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  s3-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2, 3] # cap to 3 runs per fault per schedule to limit record growth
+    uses: ./.github/workflows/s3_rollback.yml

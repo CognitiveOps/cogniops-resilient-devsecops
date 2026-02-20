@@ -1,0 +1,63 @@
+name: S5 Scheduled HITL Samples
+
+on:
+  schedule:
+    # Daily at 03:00 UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [s5_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check S5 approval sample count
+        id: check
+        run: |
+          set -euo pipefail
+          TARGET=50
+          COUNT=$(bq query --use_legacy_sql=false --format=csv \
+            "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\` WHERE scenario_id='s5' AND stage='s5_approve'" | tail -n1)
+          echo "Current S5 approval samples: $COUNT"
+          if [ "$COUNT" -ge "$TARGET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  s5-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repeat: 1
+            approval_delay_sec: "7"
+          - repeat: 2
+            approval_delay_sec: "17"
+          - repeat: 3
+            approval_delay_sec: "31"
+    uses: ./.github/workflows/s5_explainability.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+      approval_delay_sec: ${{ matrix.approval_delay_sec }}
+    secrets: inherit

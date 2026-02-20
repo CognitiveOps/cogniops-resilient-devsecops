@@ -1,0 +1,236 @@
+name: S2 Edge Deployment (OTA)
+
+on:
+  # Run S2 automatically after infra workflow completes
+  workflow_run:
+    workflows: ["admin - Terraform Apply (GCP infra)"]
+    types: [completed]
+
+  # Run automatically on app code changes (if infra is already up)
+  push:
+    paths:
+      - "baseline/services/edge_cv_app/**"
+      - ".github/workflows/s2_edge.yml"
+
+  # Manual trigger (for testing)
+  workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write   # required for OIDC auth to GCP
+
+concurrency:
+  group: s2-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s2:
+    runs-on: ubuntu-latest
+
+    env:
+      SCENARIO: s2
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
+      AR_REPO: apps
+      IMAGE_NAME: edge-cv-app
+      # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
+      METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 0️⃣ Start overall timer (used for TTD_edge)
+      - name: Start timer
+        id: t0
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      # 1️⃣ Authenticate to GCP via Workload Identity Federation (OIDC)
+      #    We also ask this step to mint an ID token for the CF audience (Option B).
+      - name: Auth to GCP via WIF
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S2 artifacts in GCS." >&2
+            exit 1
+          fi
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          echo "Configuring Docker for AR host: $AR_HOST"
+          gcloud auth configure-docker "$AR_HOST" -q
+
+      # 2️⃣ Build and Push Multi-Arch Image (amd64 + arm64)
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          set -euo pipefail
+          AR_HOST="${AR_LOCATION}-docker.pkg.dev"
+          IMAGE_REPO="${AR_HOST}/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          IMAGE_TAG="${GITHUB_SHA}"
+          echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push to Artifact Registry
+        id: buildpush
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
+          echo "Building image: $IMG"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t "$IMG" --push baseline/services/edge_cv_app
+
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y jq >/dev/null
+          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
+          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          if [ -z "$DIGEST" ]; then
+            echo "❌ Failed to resolve image digest for $IMG"
+            exit 1
+          fi
+          echo "✅ Resolved digest: $DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      # 3️⃣ Create OTA manifest (no PQC security layer yet)
+      - name: Create OTA manifest
+        id: ota
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s2/artifacts
+          python baseline/scripts/s2_make_ota_manifest.py \
+            --image "${{ steps.buildpush.outputs.image }}" \
+            --digest "${{ steps.buildpush.outputs.digest }}" \
+            --outdir baseline/metrics/s2/artifacts \
+            --version "${{ steps.refs.outputs.tag }}"
+          echo "manifest=$(ls baseline/metrics/s2/artifacts/ota_*.json | tail -n1)" >> "$GITHUB_OUTPUT"
+
+      # 4️⃣ Edge OTA activation simulation (measures TDL)
+      - name: Edge activate (sim)
+        id: activate
+        run: |
+          set -euo pipefail
+          MANIFEST_PATH="${{ steps.ota.outputs.manifest }}"
+          MANIFEST_FILE="$(basename "$MANIFEST_PATH")"
+
+          cp "$MANIFEST_PATH" baseline/services/edge_cv_app/
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+          cd baseline/services/edge_cv_app
+
+          T0=$(date +%s)
+          ./edge_pull_and_activate.sh \
+            "$MANIFEST_FILE" \
+            "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          T1=$(date +%s)
+
+          echo "ota_latency=$((T1 - T0))" >> "$GITHUB_OUTPUT"
+          echo "t_ota_start=$T0" >> "$GITHUB_OUTPUT"
+          echo "t_edge_end=$T1" >> "$GITHUB_OUTPUT"
+
+      # 5️⃣ Send metrics to Cloud Function (BigQuery ingest) using the ID token from auth@v2
+      - name: Send S2 metrics to BigQuery ingest
+        run: |
+          set -euo pipefail
+
+          RUN_ID="${{ env.RUN_ID }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SCENARIO_ID="${{ env.SCENARIO }}"
+          MODE="baseline"
+          STATUS="success"
+          T0=${{ steps.t0.outputs.ts }}
+          T_OTA_START=${{ steps.activate.outputs.t_ota_start }}
+          T_EDGE_END=${{ steps.activate.outputs.t_edge_end }}
+          TDL=${{ steps.activate.outputs.ota_latency }}
+
+          echo "📊 S2 Metrics:"
+          echo "  RUN_ID=$RUN_ID"
+          echo "  COMMIT=$COMMIT_SHA"
+          echo "  OTA Latency (TDL)=$TDL sec"
+          echo "  T0=$T0, T_OTA_START=$T_OTA_START, T_EDGE_END=$T_EDGE_END"
+
+          # 1) Event: s2_activate (TDL = OTA latency)
+          curl -sS -X POST "$METRICS_INGEST_URL" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "$RUN_ID",
+            "scenario_id": "$SCENARIO_ID",
+            "stage": "s2_activate",
+            "mode": "$MODE",
+            "status": "$STATUS",
+            "commit_sha": "$COMMIT_SHA",
+            "t_start": $T_OTA_START,
+            "t_end": $T_EDGE_END,
+            "metrics": {
+              "tdl_sec": $TDL
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "edge_device": "gh-runner"
+            }
+          }
+          EOF
+
+          # 2) Event: s2_ttd_edge (overall S2 pipeline start -> edge healthy)
+          curl -sS -X POST "$METRICS_INGEST_URL" \
+            -H "Content-Type: application/json" \
+            -d @- <<EOF
+          {
+            "run_id": "$RUN_ID",
+            "scenario_id": "$SCENARIO_ID",
+            "stage": "s2_ttd_edge",
+            "mode": "$MODE",
+            "status": "$STATUS",
+            "commit_sha": "$COMMIT_SHA",
+            "t_start": $T0,
+            "t_end": $T_EDGE_END,
+            "metrics": {
+              "ttd_edge_source": "s2_pipeline"
+            },
+            "labels": {
+              "service": "edge_cv_app",
+              "edge_device": "gh-runner"
+            }
+          }
+          EOF
+
+      # 6️⃣ Upload artifacts to GCS (canonical)
+      - name: Upload S2 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s2/${RUN_ID}"
+          echo "Uploading S2 artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s2 "${GCS_PREFIX}/"
