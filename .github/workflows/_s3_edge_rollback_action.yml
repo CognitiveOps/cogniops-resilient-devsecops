@@ -1,0 +1,117 @@
+name: S3 Edge Rollback Action (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        type: string
+        required: false
+        default: ""
+      gcs_prefix:
+        type: string
+        required: false
+        default: ""
+      lkg_manifest_glob:
+        type: string
+        required: false
+        default: "baseline/metrics/**/artifacts/ota_lkg_*.json"
+      gcp_project:
+        type: string
+        required: true
+      gcp_region:
+        type: string
+        required: true
+      ar_location:
+        type: string
+        required: true
+    outputs:
+      recovered:
+        value: ${{ jobs.rollback.outputs.recovered }}
+      lkg_manifest:
+        value: ${{ jobs.rollback.outputs.lkg_manifest }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    outputs:
+      recovered: ${{ steps.out.outputs.recovered }}
+      lkg_manifest: ${{ steps.out.outputs.lkg_manifest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          set -euo pipefail
+          AR_HOST="${{ inputs.ar_location }}-docker.pkg.dev"
+          gcloud auth configure-docker "$AR_HOST" -q
+
+      - name: Restore artifacts (GCS)
+        if: ${{ inputs.gcs_prefix != '' }}
+        run: |
+          set -euo pipefail
+          echo "Restoring from GCS: ${{ inputs.gcs_prefix }}"
+          gcloud storage cp -r "${{ inputs.gcs_prefix }}/" .
+
+      - name: Restore artifacts (GitHub)
+        if: ${{ inputs.gcs_prefix == '' && inputs.artifact_name != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: .
+
+      - name: Require artifacts source
+        if: ${{ inputs.gcs_prefix == '' && inputs.artifact_name == '' }}
+        run: |
+          set -euo pipefail
+          echo "Either inputs.gcs_prefix or inputs.artifact_name must be provided." >&2
+          exit 2
+
+      - id: out
+        name: Rollback to LKG (edge activation)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          # Try the provided glob first (caller-specific), then fall back to a repo-wide search.
+          CANDIDATES=( ${{ inputs.lkg_manifest_glob }} )
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            CANDIDATES=( **/ota_lkg_*.json )
+          fi
+
+          if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+            echo "No LKG manifest found (glob: ${{ inputs.lkg_manifest_glob }})." >&2
+            echo "Hint: ensure artifacts were restored from GCS and include an ota_lkg_*.json file." >&2
+            exit 1
+          fi
+
+          # Pick the last one in lexicographic order (stable across runs); filenames include version/sha.
+          IFS=$'\n' SORTED=( $(printf '%s\n' "${CANDIDATES[@]}" | sort) )
+          unset IFS
+          LKG="${SORTED[$((${#SORTED[@]}-1))]}"
+
+          cp "$LKG" baseline/services/edge_cv_app/
+          if [ -f "${LKG}.sha256" ]; then
+            cp "${LKG}.sha256" baseline/services/edge_cv_app/
+          fi
+          chmod +x baseline/services/edge_cv_app/edge_pull_and_activate.sh
+
+          cd baseline/services/edge_cv_app
+          ./edge_pull_and_activate.sh "$(basename "$LKG")" "${{ inputs.gcp_region }}" "${{ inputs.gcp_project }}"
+
+          echo "recovered=true" >> "$GITHUB_OUTPUT"
+          echo "lkg_manifest=$LKG" >> "$GITHUB_OUTPUT"
