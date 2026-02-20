@@ -16,7 +16,7 @@
 # - Calls gcloud artifacts repositories get-cleanup-policies to show the effective policy.
 #
 # Files & paths:
-# - Expected policy file: artifact-registry/policy.yaml (must exist in the repo)
+# - Expected policy file: artifact_registry/policy.yml (must exist in the repo)
 #
 # Environment & permissions:
 # - PROJECT_ID is read from repository variables: GCP_PROJECT_ID
@@ -43,7 +43,7 @@
 # - Scheduled run: no action required; runs automatically per cron schedule.
 #
 # Notes:
-# - The workflow validates presence of artifact-registry/policy.yaml before applying.
+# - The workflow validates presence of artifact_registry/policy.yml before applying.
 # - Replace repository variables with your project/provider/service account values prior to use.
 name: admin - apply Artifact Registry cleanup policy
 
@@ -84,14 +84,14 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
       - name: Validate policy file
         run: |
-          test -f artifact-registry/policy.yaml
+          test -f artifact_registry/policy.yml
       - name: Apply cleanup policy
         run: |
           REPO_ID="${{ github.event.inputs.repository_id || 'apps' }}"
           LOC="${{ github.event.inputs.location || 'europe' }}"
           gcloud artifacts repositories set-cleanup-policies "${REPO_ID}" \
             --project="${PROJECT_ID}" --location="${LOC}" \
-            --policy="artifact-registry/policy.yaml"
+            --policy="artifact_registry/policy.yml"
       - name: Show effective policy
         run: |
           REPO_ID="${{ github.event.inputs.repository_id || 'apps' }}"
