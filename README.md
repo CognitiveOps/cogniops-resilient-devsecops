@@ -20,7 +20,7 @@ The goal is to demonstrate how an autonomous cognitive agent can manage **secure
 ```
 cogniops-resilient-devsecops/
 ├── .github/workflows/ # GitHub Actions pipelines (S1–S5, SS1–SS2)
-├── artifact_registry/ # Artifact Registry policy/cleanup config
+├── artifact_registry/ # Artifact Registry cleanup policy config (policy.yml)
 ├── baseline/
 │ ├── services/ # demo microservices (FastAPI, test workloads)
 │ ├── scripts/ # metrics writers, rollback logic, helpers
@@ -35,6 +35,21 @@ cogniops-resilient-devsecops/
 
 ```
 Planned for Months 3–5 (not committed yet): `agent/`, `docs/`.
+---
+
+## 🧹 Artifact Registry Cleanup Policy (Admin)
+
+Optional housekeeping automation for image retention/cost control:
+
+- Workflow: `.github/workflows/ar_cleanup_policy.yml`
+- Policy file used by the workflow: `artifact_registry/policy.yml`
+- Triggers:
+  - Manual: `workflow_dispatch` (choose repo/location)
+  - Scheduled: weekly (Mondays, `03:00 UTC`)
+
+This admin workflow is **not required** for running/evaluating S1–S5 and SS1–SS2 metrics.  
+It is recommended when running repeated nightly benchmarks to prevent unbounded Artifact Registry growth.
+
 ---
 
 ## 🔹 Evaluation Scenarios (S1–S5 + SS1–SS2)
