@@ -1,0 +1,100 @@
+# Admin workflow: apply Artifact Registry cleanup policy
+#
+# Purpose:
+# - Validates and applies a cleanup policy YAML to a Google Artifact Registry repository,
+#   then displays the effective cleanup policy.
+#
+# Triggers:
+# - Manual (workflow_dispatch) with inputs:
+#     • repository_id (required) — AR repository id, default "apps"
+#     • location (required)      — AR location, default "europe"
+# - Scheduled weekly run (cron): Mondays at 03:00 UTC
+#
+# Key behavior:
+# - Uses Workload Identity Federation (OIDC/WIF) to authenticate to GCP as an infra service account.
+# - Calls gcloud artifacts repositories set-cleanup-policies to apply the YAML policy.
+# - Calls gcloud artifacts repositories get-cleanup-policies to show the effective policy.
+#
+# Files & paths:
+# - Expected policy file: artifact_registry/policy.yml (must exist in the repo)
+#
+# Environment & permissions:
+# - PROJECT_ID is read from repository variables: GCP_PROJECT_ID
+# - Repository variables required:
+#     • GCP_PROJECT_ID         — Google Cloud project id
+#     • GCP_WIF_PROVIDER       — Workload Identity Provider resource name
+#     • GCP_SA_INFRA_EMAIL     — Service account email used for infra operations
+# - Workflow permissions:
+#     • id-token: write (required for OIDC)
+#     • contents: read
+#
+# Actions used:
+# - actions/checkout@v4
+# - google-github-actions/auth@v2 (authenticate via workload identity)
+# - google-github-actions/setup-gcloud@v2 (install gcloud)
+#
+# Preconditions & IAM:
+# - Workload Identity Federation must be configured between the GitHub repo and the GCP provider.
+# - The service account (GCP_SA_INFRA_EMAIL) must have Artifact Registry permissions
+#   sufficient to set and get cleanup policies (e.g., roles/artifactregistry.admin or equivalent).
+#
+# Usage:
+# - Manual run: provide repository_id and location as inputs (or rely on defaults "apps"/"europe").
+# - Scheduled run: no action required; runs automatically per cron schedule.
+#
+# Notes:
+# - The workflow validates presence of artifact_registry/policy.yml before applying.
+# - Replace repository variables with your project/provider/service account values prior to use.
+name: admin - apply Artifact Registry cleanup policy
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository_id:
+        description: "AR repository_id (e.g. 'apps')"
+        required: true
+        default: "apps"
+      location:
+        description: "AR location (e.g. 'europe')"
+        required: true
+        default: "europe"
+  schedule:
+    - cron: "0 3 * * 1"  # Mondays 03:00 UTC
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+
+jobs:
+  apply-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Auth to GCP (OIDC/WIF) as INFRA
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_INFRA_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Validate policy file
+        run: |
+          test -f artifact_registry/policy.yml
+      - name: Apply cleanup policy
+        run: |
+          REPO_ID="${{ github.event.inputs.repository_id || 'apps' }}"
+          LOC="${{ github.event.inputs.location || 'europe' }}"
+          gcloud artifacts repositories set-cleanup-policies "${REPO_ID}" \
+            --project="${PROJECT_ID}" --location="${LOC}" \
+            --policy="artifact_registry/policy.yml"
+      - name: Show effective policy
+        run: |
+          REPO_ID="${{ github.event.inputs.repository_id || 'apps' }}"
+          LOC="${{ github.event.inputs.location || 'europe' }}"
+          gcloud artifacts repositories get-cleanup-policies "${REPO_ID}" \
+            --project="${PROJECT_ID}" --location="${LOC}"
