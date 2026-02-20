@@ -311,6 +311,16 @@ SS1 wraps the S1 CI/CD pipeline with an independent OPA policy gate and full aud
 
 All other pipeline stages remain unchanged; only the policy inputs change. Every stage still emits metrics (success, failure, or skipped) to preserve audit completeness.
 
+### Scheduled statistical sampling (SS1)
+
+- Scheduler workflow: `.github/workflows/ss1_schedule.yml`
+- Nightly cadence: `01:50 UTC`
+- Guard condition: stop when the **minimum** sample count across `SS1-P0..SS1-P4` (`stage='ss1_final'`) reaches `>=25` rows/sub-scenario.
+- Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
+- Reusable call: scheduler invokes `.github/workflows/ss1_ci.yml` with:
+  - `run_suffix=scheduled-r{repeat}` for unique run IDs
+  - `include_p5=false` so thesis-grade sampling targets deterministic policy cases `P0..P4` only.
+
 ---
 
 <a id="s2-ota-baseline"></a>
@@ -604,6 +614,14 @@ METRICS_INGEST_URL
 * Commit to `baseline/services/edge_cv_app/**`
 * or manually run:
   **Actions → S2 Edge Deployment (OTA) → Run workflow**
+
+### Scheduled statistical sampling (S2)
+
+- Scheduler workflow: `.github/workflows/s2_schedule.yml`
+- Nightly cadence: `02:20 UTC`
+- Guard condition: stop when `scenario_id='s2' AND stage='s2_activate'` has `>=50` rows in BigQuery.
+- Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
+- Reusable call: scheduler invokes `.github/workflows/s2_edge.yml` via `workflow_call` with `run_suffix=scheduled-r{repeat}`.
 
 ---
 
@@ -1059,6 +1077,14 @@ ORDER BY backend, alg;
 
 **Why isolated:** S4 establishes reproducible cryptographic baselines that SS2 will reuse for trust decisions without re-benchmarking crypto performance, keeping experimental boundaries clean.
 
+### Scheduled statistical sampling (S4)
+
+- Scheduler workflow: `.github/workflows/s4_schedule.yml`
+- Nightly cadence: `02:40 UTC`
+- Guard condition: stop when `stage='s4_p0_valid'` reaches `>=30` rows **for the configured backend/algorithm** (`labels.backend`, `labels.algorithm`).
+- Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
+- Reusable call: scheduler invokes `.github/workflows/s4_pqc.yml` with `run_suffix` and explicit `backend/algorithm` inputs.
+
 ---
 
 <a id="s5-explainability"></a>
@@ -1128,6 +1154,12 @@ Workflow:
 .github/workflows/s5_explainability.yml
 ```
 
+Run-time override for approval delay:
+
+- Input: `approval_delay_sec` (`workflow_dispatch` or `workflow_call`)
+- Resolution order: `approval_delay_sec` input → repo var `S5_APPROVAL_DELAY_SEC` → default `10`.
+- Purpose: allows controlled AL variance across repeated runs so `p95(AL)` is meaningful.
+
 ### Workflow behavior
 
 S5 executes **controlled synthetic cases**, independent of S1–S4 or SS2, such as:
@@ -1147,6 +1179,14 @@ S5 executes **controlled synthetic cases**, independent of S1–S4 or SS2, such 
 3. **`s5_final`**
    - computes **AL** and **ACR**
    - sends final metrics to `agent_metrics.runs` via `METRICS_INGEST_URL` (required by default)
+
+### Scheduled statistical sampling (S5)
+
+- Scheduler workflow: `.github/workflows/s5_schedule.yml`
+- Nightly cadence: `03:00 UTC`
+- Guard condition: stop when `scenario_id='s5' AND stage='s5_approve'` has `>=50` rows.
+- Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
+- Delay mix for repeat matrix: `approval_delay_sec ∈ {7,17,31}` to generate non-degenerate AL tails.
 
 ---
 
@@ -1430,6 +1470,7 @@ Approval gate (SS2):
 
 - **Runtime faults only:** uses an **issue/comment soft gate** (creates a HITL issue and waits for `approve` / `reject`).  
   → This is where **AL/ACR** are measured (reused from S5).
+- **Optional unattended sampling mode:** set `auto_approve=true` (with `auto_approve_delay_sec`) to bypass manual issue waiting for runtime-fault repeats; the workflow sleeps for the configured delay and then stamps approval timestamps. This is intended for high-volume statistical sampling runs.
 - **Integrity failures:** **auto‑block before activation** (**no approval gate**, no HITL metrics).  
   → Treated as **pre‑activation trust failures** (TUF/Uptane style), not remediation decisions.
 
@@ -1505,6 +1546,15 @@ FROM blocks
 ORDER BY case_type, fault_mode;
 ```
 - Allowed approvers can be constrained via repository variable `SS2_APPROVERS` (CSV); default is the workflow actor.
+- Unattended mode defaults can be set via repo vars `SS2_AUTO_APPROVE` and `SS2_AUTO_APPROVE_DELAY_SEC`.
+
+**Scheduled statistical sampling (SS2):**
+
+- Scheduler workflow: `.github/workflows/ss2_schedule.yml`
+- Nightly cadence: `03:25 UTC`
+- Guard condition: stop when the **minimum** `ss2_detect` sample count across runtime fault modes (`corrupt_weights`, `dead_camera`, `cpu_starvation`, `net_unstable`, `disk_full`, `wrong_arch`) reaches `>=50`.
+- Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
+- Scheduler runs with `auto_approve=true` and delay mix `auto_approve_delay_sec ∈ {11,23,37}` for unattended AL sampling.
 
 Recovery action (implemented & benchmarked in S3; orchestrated in SS2):
 
