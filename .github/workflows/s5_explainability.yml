@@ -7,6 +7,29 @@ on:
       - "baseline/explainability/**"
       - "baseline/scripts/s5_explainability_runner.py"
   workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      approval_delay_sec:
+        description: "Optional simulated approval delay override (seconds)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      approval_delay_sec:
+        description: "Optional simulated approval delay override (seconds)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +42,7 @@ concurrency:
 env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   # S5 is a standalone benchmark; approval is simulated for reproducibility.
-  S5_APPROVAL_DELAY_SEC: ${{ vars.S5_APPROVAL_DELAY_SEC || '10' }}
+  S5_APPROVAL_DELAY_SEC: ${{ github.event.inputs.approval_delay_sec || vars.S5_APPROVAL_DELAY_SEC || '10' }}
   AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
 jobs:
@@ -29,7 +52,7 @@ jobs:
     outputs:
       t_recommend_epoch: ${{ steps.recommend.outputs.t_recommend_epoch }}
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
 
@@ -113,7 +136,7 @@ jobs:
     outputs:
       t_approved_epoch: ${{ steps.approved.outputs.t_approved_epoch }}
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
 
@@ -220,7 +243,7 @@ jobs:
     needs: [s5_explain, s5_approve]
     runs-on: ubuntu-latest
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
 

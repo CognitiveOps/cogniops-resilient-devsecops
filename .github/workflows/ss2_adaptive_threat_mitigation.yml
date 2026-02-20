@@ -9,6 +9,39 @@ on:
       - "baseline/explainability/**"
       - ".github/workflows/_hitl_explain_and_approve_soft.yml"
   workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      auto_approve:
+        description: "Set true to auto-pass soft HITL gate (for unattended sampling)"
+        required: false
+        default: ""
+        type: string
+      auto_approve_delay_sec:
+        description: "Delay before auto-approval is stamped (seconds)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      auto_approve:
+        description: "Set true to auto-pass soft HITL gate (for unattended sampling)"
+        required: false
+        default: ""
+        type: string
+      auto_approve_delay_sec:
+        description: "Delay before auto-approval is stamped (seconds)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -51,7 +84,7 @@ jobs:
     env:
       SCENARIO_ID: ss2
       MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
@@ -61,7 +94,7 @@ jobs:
 
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.incident_type }}/${{ matrix.fault_mode }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}/${{ matrix.incident_type }}/${{ matrix.fault_mode }}
 
       INCIDENT_TYPE: ${{ matrix.incident_type }}
       FAIL_MODE: ${{ matrix.fault_mode }}
@@ -75,6 +108,8 @@ jobs:
       SS2_ENABLE_PQC: ${{ vars.SS2_ENABLE_PQC || 'true' }}
       S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
       S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+      SS2_AUTO_APPROVE: ${{ github.event.inputs.auto_approve || vars.SS2_AUTO_APPROVE || 'false' }}
+      SS2_AUTO_APPROVE_DELAY_SEC: ${{ github.event.inputs.auto_approve_delay_sec || vars.SS2_AUTO_APPROVE_DELAY_SEC || '15' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -585,7 +620,7 @@ jobs:
 
       - id: issue
         name: Create approval issue
-        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
         uses: actions/github-script@v7
         env:
           APPROVERS_CSV: ${{ vars.SS2_APPROVERS || github.actor }}
@@ -636,7 +671,7 @@ jobs:
             core.setOutput('issue_url', resp.data.html_url);
 
       - name: Wait for approval comment
-        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
@@ -693,6 +728,13 @@ jobs:
 
             throw new Error(`Approval timeout after ${timeoutMin} minutes (issue #${issueNumber}).`);
 
+      - name: Auto-approve soft gate (sampling mode)
+        if: ${{ env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "SS2_AUTO_APPROVE=true; sleeping ${SS2_AUTO_APPROVE_DELAY_SEC}s before stamping approval."
+          sleep "${SS2_AUTO_APPROVE_DELAY_SEC}"
+
       - name: Stamp approval timestamp
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
         env:
@@ -726,7 +768,7 @@ jobs:
             --auth-token "${ID_TOKEN:-}"
 
       - name: Close approval issue
-        if: ${{ always() && env.INCIDENT_TYPE == 'runtime_fault' }}
+        if: ${{ always() && env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}

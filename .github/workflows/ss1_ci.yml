@@ -8,6 +8,29 @@ on:
       - ".github/workflows/ss1_ci.yml"
       - "security/policies/**"
   workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      include_p5:
+        description: "Include P5 (audit-omit) subscenario"
+        required: false
+        default: "true"
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      include_p5:
+        description: "Include P5 (audit-omit) subscenario"
+        required: false
+        default: "true"
+        type: string
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -40,10 +63,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        subscenario: [P0, P1, P2, P3, P4, P5]
+        subscenario: ${{ fromJson((github.event.inputs.include_p5 || 'true') == 'true' && '["P0","P1","P2","P3","P4","P5"]' || '["P0","P1","P2","P3","P4"]') }}
 
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.subscenario }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
 
