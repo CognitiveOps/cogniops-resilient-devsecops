@@ -1,0 +1,56 @@
+name: S2 Scheduled OTA Samples
+
+on:
+  schedule:
+    # Daily at 02:20 UTC
+    - cron: "20 2 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [s2_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check S2 activation sample count
+        id: check
+        run: |
+          set -euo pipefail
+          TARGET=50
+          COUNT=$(bq query --use_legacy_sql=false --format=csv \
+            "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\` WHERE scenario_id='s2' AND stage='s2_activate'" | tail -n1)
+          echo "Current S2 s2_activate samples: $COUNT"
+          if [ "$COUNT" -ge "$TARGET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  s2-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2, 3] # capped nightly repeats
+    uses: ./.github/workflows/s2_edge.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+    secrets: inherit

@@ -1,0 +1,75 @@
+name: SS1 Scheduled Policy Samples
+
+on:
+  schedule:
+    # Daily at 01:50 UTC
+    - cron: "50 1 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [ss1_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check SS1 per-subscenario sample floor
+        id: check
+        run: |
+          set -euo pipefail
+          TARGET=25
+          MIN_COUNT=$(bq query --use_legacy_sql=false --format=csv "
+            WITH target AS (
+              SELECT 'SS1-P0' AS subscenario UNION ALL
+              SELECT 'SS1-P1' UNION ALL
+              SELECT 'SS1-P2' UNION ALL
+              SELECT 'SS1-P3' UNION ALL
+              SELECT 'SS1-P4'
+            ),
+            counts AS (
+              SELECT labels.subscenario AS subscenario, COUNT(*) AS n
+              FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
+              WHERE scenario_id='ss1'
+                AND stage='ss1_final'
+                AND labels.subscenario IN ('SS1-P0','SS1-P1','SS1-P2','SS1-P3','SS1-P4')
+              GROUP BY 1
+            )
+            SELECT MIN(IFNULL(c.n, 0))
+            FROM target t
+            LEFT JOIN counts c USING (subscenario)
+          " | tail -n1)
+          echo "Current SS1 minimum samples across P0..P4: $MIN_COUNT"
+          if [ "$MIN_COUNT" -ge "$TARGET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  ss1-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2, 3] # capped nightly repeats
+    uses: ./.github/workflows/ss1_ci.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+      include_p5: "false"
+    secrets: inherit

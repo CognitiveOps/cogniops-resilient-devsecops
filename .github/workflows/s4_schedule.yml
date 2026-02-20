@@ -1,0 +1,65 @@
+name: S4 Scheduled PQC Samples
+
+on:
+  schedule:
+    # Daily at 02:40 UTC
+    - cron: "40 2 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [s4_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    env:
+      BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
+      ALGORITHM: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check S4 sample count for configured backend/algorithm
+        id: check
+        run: |
+          set -euo pipefail
+          TARGET=30
+          COUNT=$(bq query --use_legacy_sql=false --format=csv \
+            "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
+             WHERE scenario_id='s4'
+               AND stage='s4_p0_valid'
+               AND labels.backend='${BACKEND}'
+               AND labels.algorithm='${ALGORITHM}'" | tail -n1)
+          echo "Current S4 P0 samples for ${BACKEND}/${ALGORITHM}: $COUNT"
+          if [ "$COUNT" -ge "$TARGET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  s4-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2, 3] # capped nightly repeats
+    uses: ./.github/workflows/s4_pqc.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+      backend: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
+      algorithm: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+    secrets: inherit

@@ -1,0 +1,345 @@
+name: S5 Explainability (HITL / AL / ACR)
+
+on:
+  push:
+    paths:
+      - ".github/workflows/s5_explainability.yml"
+      - "baseline/explainability/**"
+      - "baseline/scripts/s5_explainability_runner.py"
+  workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      approval_delay_sec:
+        description: "Optional simulated approval delay override (seconds)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      approval_delay_sec:
+        description: "Optional simulated approval delay override (seconds)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: s5-explainability-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+  # S5 is a standalone benchmark; approval is simulated for reproducibility.
+  S5_APPROVAL_DELAY_SEC: ${{ github.event.inputs.approval_delay_sec || vars.S5_APPROVAL_DELAY_SEC || '10' }}
+  AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+
+jobs:
+  s5_explain:
+    name: s5_explain
+    runs-on: ubuntu-latest
+    outputs:
+      t_recommend_epoch: ${{ steps.recommend.outputs.t_recommend_epoch }}
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      MODE: baseline
+      SCENARIO_ID: s5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require METRICS_INGEST_URL
+      # Metrics should be sent by default for thesis runs
+        run: |
+          set -euo pipefail
+          if [ -z "${METRICS_INGEST_URL:-}" ]; then
+            echo "METRICS_INGEST_URL must be set (repo variable) to send S5 metrics by default." >&2
+            exit 1
+          fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S5 artifacts in GCS." >&2
+            exit 1
+          fi
+
+      - name: Auth to GCP (for ingest token)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Generate explanations + ActionTraces
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s5
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage explain \
+            --outdir baseline/metrics/s5 \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - id: recommend
+        name: Export t_recommend_epoch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          data = json.load(open("baseline/metrics/s5/recommendation.json", "r", encoding="utf-8"))
+          t = float(data["t_recommend"]["epoch"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"t_recommend_epoch={t}\n")
+          PY
+
+      - name: Upload pre-approval artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
+          echo "Uploading S5 pre-approval artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
+
+  s5_approve:
+    name: s5_approve
+    needs: [s5_explain]
+    runs-on: ubuntu-latest
+    outputs:
+      t_approved_epoch: ${{ steps.approved.outputs.t_approved_epoch }}
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      MODE: baseline
+      SCENARIO_ID: s5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require METRICS_INGEST_URL
+        run: |
+          set -euo pipefail
+          if [ -z "${METRICS_INGEST_URL:-}" ]; then
+            echo "METRICS_INGEST_URL must be set (repo variable) to send S5 metrics by default." >&2
+            exit 1
+          fi
+
+      - name: Auth to GCP (for GCS)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to fetch S5 artifacts from GCS." >&2
+            exit 1
+          fi
+
+      - name: Download pre-approval artifacts from GCS
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
+          echo "Downloading S5 pre-approval artifacts from ${GCS_PREFIX}"
+          rm -rf baseline/metrics/s5
+          mkdir -p baseline/metrics
+          if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+          else
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+            if [ -d baseline/metrics/preapprove/s5 ]; then
+              rm -rf baseline/metrics/s5
+              mv baseline/metrics/preapprove/s5 baseline/metrics/s5
+            fi
+          fi
+
+      - name: Simulate approval delay (S5 benchmark)
+        run: |
+          set -euo pipefail
+          echo "Sleeping for S5_APPROVAL_DELAY_SEC=${S5_APPROVAL_DELAY_SEC} to simulate approval latency..."
+          sleep "${S5_APPROVAL_DELAY_SEC}"
+
+      - name: Stamp approval timestamp (after environment gate resumes)
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage approved \
+            --outdir baseline/metrics/s5 \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - id: approved
+        name: Export t_approved_epoch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          data = json.load(open("baseline/metrics/s5/approved.json", "r", encoding="utf-8"))
+          t = float(data["t_approved"]["epoch"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"t_approved_epoch={t}\n")
+          PY
+
+      - name: Upload post-approval artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
+          echo "Uploading S5 post-approval artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
+
+  s5_final:
+    name: s5_final
+    needs: [s5_explain, s5_approve]
+    runs-on: ubuntu-latest
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      MODE: baseline
+      SCENARIO_ID: s5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require METRICS_INGEST_URL
+        run: |
+          set -euo pipefail
+          if [ -z "${METRICS_INGEST_URL:-}" ]; then
+            echo "METRICS_INGEST_URL must be set (repo variable) to send S5 metrics by default." >&2
+            exit 1
+          fi
+
+      - name: Auth to GCP (for GCS)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Require AGENT_ARTIFACTS_BUCKET
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to fetch S5 artifacts from GCS." >&2
+            exit 1
+          fi
+
+      - name: Download post-approval artifacts from GCS
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
+          echo "Downloading S5 post-approval artifacts from ${GCS_PREFIX}"
+          rm -rf baseline/metrics/s5
+          mkdir -p baseline/metrics
+          if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+          else
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
+            if [ -d baseline/metrics/postapprove/s5 ]; then
+              rm -rf baseline/metrics/s5
+              mv baseline/metrics/postapprove/s5 baseline/metrics/s5
+            fi
+          fi
+
+      - name: Compute AL + ACR (finalize)
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s5_explainability_runner.py \
+            --stage final \
+            --outdir baseline/metrics/s5 \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}"
+
+      - name: Write job summary
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s = json.loads(Path("baseline/metrics/s5/results.json").read_text(encoding="utf-8"))["summary"]
+          lines = [
+              "## S5 Explainability (HITL)",
+              "",
+              f"- AL: `{s['al_sec']}` sec",
+              f"- ACR: `{s['acr']}`",
+              f"- Cases: `{s['cases']}`",
+          ]
+          Path("${GITHUB_STEP_SUMMARY}").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload final S5 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/final"
+          echo "Uploading S5 final artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"

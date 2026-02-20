@@ -1,0 +1,151 @@
+name: S4 Security PQC Validation
+
+on:
+  push:
+    paths:
+      - ".github/workflows/s4_pqc.yml"
+      - "baseline/scripts/s4_pqc_runner.py"
+      - "baseline/scripts/s2_make_ota_manifest.py"
+      - "baseline/security/pqc/**"
+      - "baseline/metrics/s4/**"
+  workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      backend:
+        description: "Optional PQC backend override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+      algorithm:
+        description: "Optional PQC algorithm override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      backend:
+        description: "Optional PQC backend override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+      algorithm:
+        description: "Optional PQC algorithm override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: s4-pqc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+  S4_PQC_BACKEND: ${{ github.event.inputs.backend || vars.S4_PQC_BACKEND || 'oqs' }}
+  S4_PQC_ALG: ${{ github.event.inputs.algorithm || vars.S4_PQC_ALG || 'Dilithium2' }}
+  AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+
+jobs:
+  s4-pqc:
+    runs-on: ubuntu-latest
+    env:
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      MODE: baseline
+      SCENARIO_ID: s4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Enforce OQS backend
+        run: |
+          set -euo pipefail
+          if [ "${S4_PQC_BACKEND}" != "oqs" ]; then
+            echo "S4_PQC_BACKEND must be 'oqs' (got '${S4_PQC_BACKEND}')." >&2
+            exit 1
+          fi
+          if [ -z "${AGENT_ARTIFACTS_BUCKET:-}" ]; then
+            echo "AGENT_ARTIFACTS_BUCKET must be set (repo variable) to store S4 artifacts in GCS." >&2
+            exit 1
+          fi
+
+      - name: Install PQC backend (OQS)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
+
+      - name: Auth to GCP (for ingest token)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve ingest token
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-identity-token \
+            --audiences="${METRICS_INGEST_URL}" \
+            --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")"
+          echo "ID_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Create OTA manifest fixture
+        id: manifest
+        run: |
+          set -euo pipefail
+          mkdir -p baseline/metrics/s4/artifacts
+          DIGEST="sha256:${GITHUB_SHA}"
+          python baseline/scripts/s2_make_ota_manifest.py \
+            --image "example.com/edge_cv_app:${GITHUB_SHA}" \
+            --digest "$DIGEST" \
+            --outdir baseline/metrics/s4/artifacts \
+            --version "${GITHUB_SHA}"
+          MANIFEST_PATH="$(ls baseline/metrics/s4/artifacts/ota_*.json | tail -n1)"
+          echo "manifest=$MANIFEST_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Run PQC validation scenarios (P0–P3)
+        run: |
+          set -euo pipefail
+          python baseline/scripts/s4_pqc_runner.py \
+            --manifest "${{ steps.manifest.outputs.manifest }}" \
+            --out baseline/metrics/s4/results.json \
+            --emit-artifacts-dir baseline/metrics/s4/artifacts \
+            --run-id "${RUN_ID}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --scenario-id "${SCENARIO_ID}" \
+            --mode "${MODE}" \
+            --backend "${S4_PQC_BACKEND}" \
+            --algorithm "${S4_PQC_ALG}" \
+            --ingest-url "${METRICS_INGEST_URL:-}" \
+            --auth-token "${ID_TOKEN:-}" \
+            --replay-cutoff-sec 900
+
+      - name: Upload S4 artifacts to GCS (canonical)
+        run: |
+          set -euo pipefail
+          GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s4/${RUN_ID}"
+          echo "Uploading S4 artifacts to ${GCS_PREFIX}"
+          gcloud storage cp -r baseline/metrics/s4 "${GCS_PREFIX}/"

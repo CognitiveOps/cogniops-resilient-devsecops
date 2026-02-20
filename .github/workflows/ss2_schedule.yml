@@ -1,0 +1,83 @@
+name: SS2 Scheduled Adaptive Mitigation Samples
+
+on:
+  schedule:
+    # Daily at 03:25 UTC
+    - cron: "25 3 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [ss2_schedule]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Auth to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check SS2 runtime-fault sample floor
+        id: check
+        run: |
+          set -euo pipefail
+          TARGET=50
+          MIN_COUNT=$(bq query --use_legacy_sql=false --format=csv "
+            WITH target AS (
+              SELECT 'corrupt_weights' AS fault_mode UNION ALL
+              SELECT 'dead_camera' UNION ALL
+              SELECT 'cpu_starvation' UNION ALL
+              SELECT 'net_unstable' UNION ALL
+              SELECT 'disk_full' UNION ALL
+              SELECT 'wrong_arch'
+            ),
+            counts AS (
+              SELECT COALESCE(labels.fault_mode, labels.fault_type) AS fault_mode, COUNT(*) AS n
+              FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
+              WHERE scenario_id='ss2'
+                AND stage='ss2_detect'
+              GROUP BY 1
+            )
+            SELECT MIN(IFNULL(c.n, 0))
+            FROM target t
+            LEFT JOIN counts c USING (fault_mode)
+          " | tail -n1)
+          echo "Current SS2 minimum runtime-fault samples across modes: $MIN_COUNT"
+          if [ "$MIN_COUNT" -ge "$TARGET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  ss2-scheduled:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repeat: 1
+            auto_approve_delay_sec: "11"
+          - repeat: 2
+            auto_approve_delay_sec: "23"
+          - repeat: 3
+            auto_approve_delay_sec: "37"
+    uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+      auto_approve: "true"
+      auto_approve_delay_sec: ${{ matrix.auto_approve_delay_sec }}
+    secrets: inherit
