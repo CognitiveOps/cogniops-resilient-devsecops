@@ -9,6 +9,39 @@ on:
       - "baseline/security/pqc/**"
       - "baseline/metrics/s4/**"
   workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      backend:
+        description: "Optional PQC backend override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+      algorithm:
+        description: "Optional PQC algorithm override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+      backend:
+        description: "Optional PQC backend override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
+      algorithm:
+        description: "Optional PQC algorithm override (default from repo vars)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -20,15 +53,15 @@ concurrency:
 
 env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
-  S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
-  S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
+  S4_PQC_BACKEND: ${{ github.event.inputs.backend || vars.S4_PQC_BACKEND || 'oqs' }}
+  S4_PQC_ALG: ${{ github.event.inputs.algorithm || vars.S4_PQC_ALG || 'Dilithium2' }}
   AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
 jobs:
   s4-pqc:
     runs-on: ubuntu-latest
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s4
 
