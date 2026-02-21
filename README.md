@@ -1096,7 +1096,7 @@ ORDER BY backend, alg;
 
 - Scheduler workflow: `.github/workflows/s4_schedule.yml`
 - Nightly cadence: `02:40 UTC`
-- Guard condition: stop when `stage='s4_p0_valid'` reaches `>=30` rows **for the configured backend/algorithm** (`labels.backend`, `labels.algorithm`).
+- Guard condition: stop when `stage='s4_p0_valid'` reaches `>=30` rows **for the configured backend/algorithm** (`JSON_VALUE(labels,'$.backend')`, `JSON_VALUE(labels,'$.algorithm')`).
 - Repeat policy: capped matrix repeats `[1,2,3]` per schedule.
 - Reusable call: scheduler invokes `.github/workflows/s4_pqc.yml` with `run_suffix` and explicit `backend/algorithm` inputs.
 

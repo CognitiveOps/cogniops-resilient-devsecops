@@ -41,8 +41,8 @@ jobs:
             "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
              WHERE scenario_id='s4'
                AND stage='s4_p0_valid'
-               AND labels.backend='${BACKEND}'
-               AND labels.algorithm='${ALGORITHM}'" | tail -n1)
+               AND JSON_VALUE(labels, '$.backend')='${BACKEND}'
+               AND JSON_VALUE(labels, '$.algorithm')='${ALGORITHM}'" | tail -n1)
           echo "Current S4 P0 samples for ${BACKEND}/${ALGORITHM}: $COUNT"
           if [ "$COUNT" -ge "$TARGET" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"

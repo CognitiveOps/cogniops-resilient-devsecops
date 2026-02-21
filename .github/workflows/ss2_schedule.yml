@@ -45,7 +45,10 @@ jobs:
               SELECT 'wrong_arch'
             ),
             counts AS (
-              SELECT COALESCE(labels.fault_mode, labels.fault_type) AS fault_mode, COUNT(*) AS n
+              SELECT COALESCE(
+                JSON_VALUE(labels, '$.fault_mode'),
+                JSON_VALUE(labels, '$.fault_type')
+              ) AS fault_mode, COUNT(*) AS n
               FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
               WHERE scenario_id='ss2'
                 AND stage='ss2_detect'

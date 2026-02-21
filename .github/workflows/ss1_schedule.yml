@@ -43,11 +43,11 @@ jobs:
               SELECT 'SS1-P4'
             ),
             counts AS (
-              SELECT labels.subscenario AS subscenario, COUNT(*) AS n
+              SELECT JSON_VALUE(labels, '$.subscenario') AS subscenario, COUNT(*) AS n
               FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\`
               WHERE scenario_id='ss1'
                 AND stage='ss1_final'
-                AND labels.subscenario IN ('SS1-P0','SS1-P1','SS1-P2','SS1-P3','SS1-P4')
+                AND JSON_VALUE(labels, '$.subscenario') IN ('SS1-P0','SS1-P1','SS1-P2','SS1-P3','SS1-P4')
               GROUP BY 1
             )
             SELECT MIN(IFNULL(c.n, 0))
