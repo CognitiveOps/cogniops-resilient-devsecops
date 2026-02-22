@@ -19,12 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
+    env:
+      BQ_LOCATION: ${{ vars.GCP_BIGQUERY_LOCATION || 'EU' }}
     steps:
       - name: Auth to GCP (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          service_account: ${{ vars.GCP_SA_INFRA_EMAIL || vars.GCP_SA_APP_EMAIL }}
           create_credentials_file: true
           export_environment_variables: true
 
@@ -35,7 +37,7 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          COUNT=$(bq query --use_legacy_sql=false --format=csv \
+          COUNT=$(bq query --use_legacy_sql=false --format=csv --location="${BQ_LOCATION}" \
             "SELECT COUNT(*) FROM \`${{ vars.GCP_PROJECT_ID }}.agent_metrics.runs\` WHERE scenario_id='s3'" | tail -n1)
           echo "Current S3 rows: $COUNT"
           if [ "$COUNT" -ge 500 ]; then

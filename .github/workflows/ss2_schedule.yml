@@ -18,12 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
+    env:
+      BQ_LOCATION: ${{ vars.GCP_BIGQUERY_LOCATION || 'EU' }}
     steps:
       - name: Auth to GCP (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          service_account: ${{ vars.GCP_SA_INFRA_EMAIL || vars.GCP_SA_APP_EMAIL }}
           create_credentials_file: true
           export_environment_variables: true
 
@@ -35,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           TARGET=50
-          MIN_COUNT=$(bq query --use_legacy_sql=false --format=csv "
+          MIN_COUNT=$(bq query --use_legacy_sql=false --format=csv --location="${BQ_LOCATION}" "
             WITH target AS (
               SELECT 'corrupt_weights' AS fault_mode UNION ALL
               SELECT 'dead_camera' UNION ALL
