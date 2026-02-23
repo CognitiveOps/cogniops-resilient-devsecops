@@ -49,7 +49,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: ss2-mitigation-${{ github.ref }}
+  group: ss2-mitigation-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -84,7 +84,7 @@ jobs:
     env:
       SCENARIO_ID: ss2
       MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
@@ -94,7 +94,7 @@ jobs:
 
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}/${{ matrix.incident_type }}/${{ matrix.fault_mode }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/ss2/${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}/${{ matrix.incident_type }}/${{ matrix.fault_mode }}
 
       INCIDENT_TYPE: ${{ matrix.incident_type }}
       FAIL_MODE: ${{ matrix.fault_mode }}
@@ -108,8 +108,8 @@ jobs:
       SS2_ENABLE_PQC: ${{ vars.SS2_ENABLE_PQC || 'true' }}
       S4_PQC_BACKEND: ${{ vars.S4_PQC_BACKEND || 'oqs' }}
       S4_PQC_ALG: ${{ vars.S4_PQC_ALG || 'Dilithium2' }}
-      SS2_AUTO_APPROVE: ${{ github.event.inputs.auto_approve || vars.SS2_AUTO_APPROVE || 'false' }}
-      SS2_AUTO_APPROVE_DELAY_SEC: ${{ github.event.inputs.auto_approve_delay_sec || vars.SS2_AUTO_APPROVE_DELAY_SEC || '15' }}
+      SS2_AUTO_APPROVE: ${{ inputs.auto_approve || vars.SS2_AUTO_APPROVE || 'false' }}
+      SS2_AUTO_APPROVE_DELAY_SEC: ${{ inputs.auto_approve_delay_sec || vars.SS2_AUTO_APPROVE_DELAY_SEC || '15' }}
 
     steps:
       - uses: actions/checkout@v4

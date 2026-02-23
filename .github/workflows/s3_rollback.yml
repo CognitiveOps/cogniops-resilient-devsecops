@@ -14,15 +14,27 @@ on:
 
   # Manual trigger (for testing)
   workflow_dispatch:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
   # Reusable workflow
   workflow_call:
+    inputs:
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
   id-token: write   # required for OIDC to GCP
 
 concurrency:
-  group: s3-resilience-${{ github.ref }}
+  group: s3-resilience-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -49,7 +61,7 @@ jobs:
 
     env:
       SCENARIO: s3
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       # Cloud Run service for edge_cv_app

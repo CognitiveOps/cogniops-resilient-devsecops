@@ -51,7 +51,7 @@ permissions:
   contents: read
   
 concurrency:
-  group: ss1-${{ github.repository }}-${{ github.ref_name }}
+  group: ss1-${{ github.repository }}-${{ github.ref_name }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -63,10 +63,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        subscenario: ${{ fromJson((github.event.inputs.include_p5 || 'true') == 'true' && '["P0","P1","P2","P3","P4","P5"]' || '["P0","P1","P2","P3","P4"]') }}
+        subscenario: ${{ fromJson((inputs.include_p5 || 'true') == 'true' && '["P0","P1","P2","P3","P4","P5"]' || '["P0","P1","P2","P3","P4"]') }}
 
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}-${{ matrix.subscenario }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
 

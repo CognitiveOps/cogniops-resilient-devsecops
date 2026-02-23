@@ -54,3 +54,6 @@ jobs:
       matrix:
         repeat: [1, 2, 3] # cap to 3 runs per fault per schedule to limit record growth
     uses: ./.github/workflows/s3_rollback.yml
+    with:
+      run_suffix: scheduled-r${{ matrix.repeat }}
+    secrets: inherit
