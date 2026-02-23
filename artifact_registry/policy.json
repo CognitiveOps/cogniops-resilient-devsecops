@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "action": "KEEP",
+      "matchVersion": {
+        "versionNamePrefixes": [
+          ""
+        ]
+      },
+      "mostRecentVersions": {
+        "keepCount": 5
+      }
+    },
+    {
+      "action": "DELETE",
+      "matchVersion": {
+        "tagStates": [
+          "UNTAGGED"
+        ]
+      },
+      "olderThan": "604800s"
+    }
+  ]
+}
