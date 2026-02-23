@@ -48,20 +48,20 @@ permissions:
   id-token: write
 
 concurrency:
-  group: s4-pqc-${{ github.ref }}
+  group: s4-pqc-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true
 
 env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
-  S4_PQC_BACKEND: ${{ github.event.inputs.backend || vars.S4_PQC_BACKEND || 'oqs' }}
-  S4_PQC_ALG: ${{ github.event.inputs.algorithm || vars.S4_PQC_ALG || 'Dilithium2' }}
+  S4_PQC_BACKEND: ${{ inputs.backend || vars.S4_PQC_BACKEND || 'oqs' }}
+  S4_PQC_ALG: ${{ inputs.algorithm || vars.S4_PQC_ALG || 'Dilithium2' }}
   AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
 
 jobs:
   s4-pqc:
     runs-on: ubuntu-latest
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (github.event.inputs.run_suffix || '') != '' && format('-{0}', github.event.inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s4
 
