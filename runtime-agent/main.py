@@ -28,6 +28,8 @@ from models.schemas import (
 )
 from perception.handler import perceive
 from planning.playbook import select_playbook
+from storage.bigquery_writer import build_decision_row, write_decision
+from telemetry.agentops_client import trace_pipeline
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -117,35 +119,64 @@ async def receive_runtime_event(request: Request):
         event.source,
     )
 
-    # ── 4. Perception ────────────────────────────────────────────────
-    anomaly = perceive(event)
+    # ── 4–7. Pipeline wrapped in AgentOps trace ─────────────────────
+    with trace_pipeline(event.event_id) as trace:
 
-    # ── 5. Planning ──────────────────────────────────────────────────
-    decision = select_playbook(anomaly)
+        # ── 4. Perception ────────────────────────────────────────────
+        anomaly = perceive(event)
 
-    # ── 6. Guard ─────────────────────────────────────────────────────
-    verdict = check_policy(decision)
+        # ── 5. Planning ──────────────────────────────────────────────
+        decision = select_playbook(anomaly)
 
-    # ── 7. Execution ─────────────────────────────────────────────────
-    result = execute(decision, verdict)
+        # ── 6. Guard ─────────────────────────────────────────────────
+        verdict = check_policy(decision)
 
-    # ── 8. Build response ────────────────────────────────────────────
-    processed_at = datetime.now(timezone.utc).isoformat()
+        # ── 7. Execution ─────────────────────────────────────────────
+        result = execute(decision, verdict)
 
+        # Store trace metadata for AgentOps
+        trace["decision"] = decision.decision.value
+        trace["executed"] = result.decision_executed
+
+    agentops_trace_id = trace.get("trace_id")
+
+    # ── 8. Write decision to BigQuery ────────────────────────────────
+    processed_at = datetime.now(timezone.utc)
+
+    row = build_decision_row(
+        event_id=event.event_id,
+        event_type=event.event_type,
+        occurred_at=event.occurred_at,
+        source=event.source,
+        context=event.context.model_dump() if event.context else None,
+        decision=decision.decision.value,
+        decision_executed=result.decision_executed,
+        rationale=decision.rationale,
+        policy_refs=decision.policy_refs,
+        agentops_trace_id=agentops_trace_id,
+    )
+
+    bq_ok = write_decision(row)
+
+    # ── 9. Build response ────────────────────────────────────────────
     response_body = {
         "status": "accepted",
         "event_id": event.event_id,
         "decision": decision.decision.value,
         "decision_executed": result.decision_executed,
         "mode": "shadow",
-        "processed_at": processed_at,
+        "processed_at": processed_at.isoformat(),
+        "agentops_trace_id": agentops_trace_id,
+        "bq_written": bq_ok,
     }
 
     logger.info(
-        "Pipeline complete: event_id=%s decision=%s executed=%s",
+        "Pipeline complete: event_id=%s decision=%s executed=%s bq=%s trace=%s",
         event.event_id,
         decision.decision.value,
         result.decision_executed,
+        bq_ok,
+        agentops_trace_id,
     )
 
     return JSONResponse(status_code=200, content=response_body)
