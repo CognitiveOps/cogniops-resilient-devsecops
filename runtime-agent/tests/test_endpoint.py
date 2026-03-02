@@ -88,7 +88,9 @@ class TestEndpoint:
         import base64
         import json
 
-        bad_event = {"event_id": "x"}  # missing event_type, occurred_at, source, context
+        bad_event = {
+            "event_id": "x"
+        }  # missing event_type, occurred_at, source, context
         encoded = base64.b64encode(json.dumps(bad_event).encode()).decode()
         body = {"message": {"data": encoded}}
 

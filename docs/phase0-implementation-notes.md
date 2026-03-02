@@ -12,7 +12,9 @@
 | 3 | BQ writer + AgentOps | `5563274` | storage/bigquery_writer.py, telemetry/agentops_client.py |
 | 4 | Unit tests | `0dfcca7` | runtime-agent/tests/ (20 tests, all green) |
 | 5 | Integration scripts | `40b9176` | scripts/test_publish_runtime_event.sh, scripts/verify_runtime_decision.sh |
-| 6 | Documentation | — | docs/phase0-implementation-notes.md (this file) |
+| 6 | Documentation | `0baf775`+ | docs/phase0-implementation-notes.md, runtime-agent/README.md |
+
+> Service-level documentation lives in [`runtime-agent/README.md`](../runtime-agent/README.md).
 
 ## 2. Architecture Overview
 
@@ -75,7 +77,37 @@ All resources are **additive** — `infra/main.tf` is unchanged.
 | `storage/bigquery_writer.py` | `write_decision(row)` | Best-effort insert, failures logged |
 | `telemetry/agentops_client.py` | `trace_pipeline(event_id)` | Context manager; skipped if `AGENTOPS_ENABLED≠true` |
 
-## 5. Environment Variables
+## 5. Pydantic Models (models/schemas.py)
+
+| Model | Fields | Role |
+|-------|--------|------|
+| `RuntimeEvent` | event_id, event_type, occurred_at, source, context | Incoming event (per runtime-event-contract.md) |
+| `EventContext` | run_id, scenario_id, stage, status, severity, commit_sha | Nested context block (extra="allow") |
+| `PubSubPushEnvelope` | message, subscription | Pub/Sub push wrapper |
+| `PubSubMessage` | data (base64), messageId, publishTime | Inner message |
+| `AnomalyOutput` | scenario, anomaly_type, severity, risk_score, source_event_id | Perception output |
+| `DecisionType` | NO_OP, BLOCK, ROLLBACK, QUARANTINE, ESCALATE | Bounded action surface enum |
+| `PlanningDecision` | decision, rationale, policy_refs | Planning output |
+| `GuardVerdict` | approved, reason | Policy gate result |
+| `ExecutionResult` | decision_executed, log_message | Execution output |
+| `DecisionRow` | 12 fields mirroring BQ schema | BigQuery row model |
+
+## 6. Bounded Decision Surface
+
+The `DecisionType` enum defines exactly five possible actions:
+
+```
+NO_OP  →  Do nothing (Phase 0 default)
+BLOCK  →  Prevent deployment     (Phase 1+)
+ROLLBACK  →  Revert to previous  (Phase 1+)
+QUARANTINE  →  Isolate artefact  (Phase 1+)
+ESCALATE  →  Human-in-the-loop   (Phase 1+)
+```
+
+In Phase 0, only `NO_OP` is ever returned. The bounded surface exists so that
+Phase 1 can introduce real actions without schema changes.
+
+## 7. Environment Variables
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
@@ -87,7 +119,7 @@ All resources are **additive** — `infra/main.tf` is unchanged.
 | `AGENTOPS_API_KEY` | no | — | Future: inject via Secret Manager |
 | `LOG_LEVEL` | no | `INFO` | Python logging level |
 
-## 6. Phase 0 Invariants
+## 8. Phase 0 Invariants
 
 Every processed event **must** produce a decision row that satisfies:
 
@@ -97,7 +129,7 @@ Every processed event **must** produce a decision row that satisfies:
 
 The `verify_runtime_decision.sh` script enforces these assertions automatically.
 
-## 7. Testing
+## 9. Testing
 
 ### Unit Tests (offline, no GCP)
 
@@ -120,7 +152,7 @@ cd runtime-agent && python -m pytest tests/ -v
 
 The publish script prints the generated `event_id`; pass it to the verify script.
 
-## 8. Known Gaps / Phase 1 Prep
+## 10. Known Gaps / Phase 1 Prep
 
 | Gap | Severity | Resolution plan |
 |-----|----------|-----------------|
@@ -130,8 +162,10 @@ The publish script prints the generated `event_id`; pass it to the verify script
 | Guard always approves | By design | Integrate OPA/Rego evaluation in Phase 1 |
 | Execution never acts | By design | Enable controlled actions in Phase 1+ |
 | Cloud Run image is placeholder | Expected | First real image built after `docker build` + push to Artifact Registry |
+| No CI/CD workflow for runtime-agent yet | Low | Add `.github/workflows/runtime_agent_deploy.yml` in Phase 1 |
+| `runtime_decisions` table has no expiration | Low | Set partition expiration (e.g., 90 days) when data volume grows |
 
-## 9. Deployment Sequence (first time)
+## 11. Deployment Sequence (first time)
 
 ```bash
 # 1. Apply infrastructure
