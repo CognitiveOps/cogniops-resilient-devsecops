@@ -84,7 +84,9 @@ def trace_pipeline(event_id: str) -> Generator[dict[str, Any], None, None]:
 
         session = agentops.start_session(tags=[f"event:{event_id}"])
         trace_ctx["trace_id"] = (
-            str(session.session_id) if hasattr(session, "session_id") else f"ao-{uuid.uuid4().hex[:12]}"
+            str(session.session_id)
+            if hasattr(session, "session_id")
+            else f"ao-{uuid.uuid4().hex[:12]}"
         )
 
         yield trace_ctx

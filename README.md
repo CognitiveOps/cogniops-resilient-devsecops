@@ -31,10 +31,12 @@ cogniops-resilient-devsecops/
 ├── infra/ # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
 ├── functions/ingest_runs/ # Cloud Function Gen2 for scenario metrics ingest
 ├── security/ # OPA policies (SS1)
+├── runtime-agent/ # Phase 0 runtime agent (Cloud Run, shadow mode)
+├── scripts/ # Integration test scripts
+├── docs/ # Phase 0 specs, event contract, IAM, implementation notes
 └── README.md
 
 ```
-Planned for Months 3–5 (not committed yet): `agent/`, `docs/`.
 ---
 
 ## 🧹 Artifact Registry Cleanup Policy (Admin)
@@ -1603,6 +1605,37 @@ SS2 extends the S2 OTA delivery scenario by layering adaptive detection, orchest
 | SS2 | Adaptive mitigation orchestration over S2 | Detection + playbook orchestration over the unchanged S2 pipeline; invokes S3 recovery actions; invokes S4 trust verification; invokes S5 explainability/HITL | MTTD (orchestration loop), AL, ACR (reused from S5) | Recovery efficiency (MTTR) and rollback performance (benchmarked in S3); cryptographic performance (TTV/VSR/FDR, benchmarked in S4) |
 
 Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation chapter)
+
+---
+
+## 🤖 Phase 0 – Runtime-Ready Infrastructure
+
+Phase 0 introduces the **additive** infrastructure needed to support the future Runtime Agent (Phase 1), while preserving the deterministic baseline (S1–S5, SS1–SS2). No baseline components are modified.
+
+### What Phase 0 Adds
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Terraform resources** | `infra/runtime.tf` | Pub/Sub topics, Cloud Run service, BQ table, IAM bindings |
+| **Runtime Agent** | `runtime-agent/` | FastAPI service — Perception → Planning → Guard → Execution pipeline |
+| **Integration scripts** | `scripts/test_publish_runtime_event.sh`, `scripts/verify_runtime_decision.sh` | Manual smoke-test tooling |
+| **Specifications** | `docs/` | Spec, event contract, IAM doc, implementation notes |
+
+### Phase 0 Invariants
+
+Every processed event produces a decision row with:
+
+- `decision = NO_OP` — no real actions taken
+- `decision_executed = false` — execution module never acts
+- `mode = shadow` — hard-coded for Phase 0
+
+### Quick Links
+
+- [Phase 0 Specification](docs/phase0-runtime-ready-spec.md)
+- [Runtime Event Contract](docs/runtime-event-contract.md)
+- [IAM Specification](docs/runtime_agent_iam.md)
+- [Implementation Notes](docs/phase0-implementation-notes.md)
+- [Runtime Agent README](runtime-agent/README.md)
 
 ---
 

@@ -39,7 +39,11 @@ class TestSelectPlaybook:
         """NO_OP regardless of anomaly type."""
         from models.schemas import AnomalyOutput
 
-        for event_type in ["pipeline_failure", "policy_violation", "resilience_degradation"]:
+        for event_type in [
+            "pipeline_failure",
+            "policy_violation",
+            "resilience_degradation",
+        ]:
             anomaly = AnomalyOutput(
                 scenario="S1",
                 anomaly_type=event_type,
