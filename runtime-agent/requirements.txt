@@ -1,0 +1,15 @@
+# ── Phase 0 runtime-agent dependencies ──
+# Core
+fastapi>=0.111,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.7,<3.0
+
+# GCP
+google-cloud-bigquery>=3.25,<4.0
+
+# Telemetry (optional – AgentOps)
+agentops>=0.3,<1.0
+
+# Testing
+pytest>=8.0,<9.0
+httpx>=0.27,<1.0
