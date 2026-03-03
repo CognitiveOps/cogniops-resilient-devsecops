@@ -1,24 +1,21 @@
-{
-  "rules": [
-    {
-      "action": "KEEP",
-      "matchVersion": {
-        "versionNamePrefixes": [
-          ""
-        ]
-      },
-      "mostRecentVersions": {
-        "keepCount": 5
-      }
+[
+  {
+    "name": "keep-recent",
+    "action": {
+      "type": "Keep"
     },
-    {
-      "action": "DELETE",
-      "matchVersion": {
-        "tagStates": [
-          "UNTAGGED"
-        ]
-      },
+    "mostRecentVersions": {
+      "keepCount": 5
+    }
+  },
+  {
+    "name": "delete-old-untagged",
+    "action": {
+      "type": "Delete"
+    },
+    "condition": {
+      "tagState": "UNTAGGED",
       "olderThan": "604800s"
     }
-  ]
-}
+  }
+]
