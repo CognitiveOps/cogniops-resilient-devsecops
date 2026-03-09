@@ -1,12 +1,11 @@
 name: S2 Edge Deployment (OTA)
 
 on:
-  # Run S2 automatically after infra workflow completes
-  workflow_run:
-    workflows: ["admin - Terraform Apply (GCP infra)"]
-    types: [completed]
+  # Baseline sampling complete — removed workflow_run trigger on infra_apply
+  # to prevent Phase 0+ infra changes from cascading into baseline runs.
+  # Use workflow_dispatch or schedulers for any future baseline runs.
 
-  # Run automatically on app code changes (if infra is already up)
+  # Run automatically on app code changes
   push:
     paths:
       - "baseline/services/edge_cv_app/**"
