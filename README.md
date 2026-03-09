@@ -19,21 +19,26 @@ The goal is to demonstrate how an autonomous cognitive agent can manage **secure
 
 ```
 cogniops-resilient-devsecops/
-├── .github/workflows/ # GitHub Actions pipelines (S1–S5, SS1–SS2)
-├── artifact_registry/ # Artifact Registry cleanup policy config (policy.json)
+├── .github/
+│ ├── workflows/           # GitHub Actions pipelines (S1–S5, SS1–SS2)
+│ ├── copilot-instructions.md  # AI Engineering governance (workspace-wide)
+│ ├── instructions/        # Per-module Copilot guardrails (auto-loaded)
+│ ├── prompts/             # Step-by-step implementation prompts
+│ └── agents/              # Specialist Copilot agents (LLM, evaluator, security)
+├── artifact_registry/     # Artifact Registry cleanup policy config (policy.json)
 ├── baseline/
-│ ├── services/ # demo microservices (FastAPI, test workloads)
-│ ├── scripts/ # metrics writers, rollback logic, helpers
-│ ├── security/ # PQC signing/verification utilities
-│ ├── explainability/ # S5/SS2 explainability + HITL kit
-│ └── metrics/ # generated artifacts (not committed)
+│ ├── services/            # demo microservices (FastAPI, test workloads)
+│ ├── scripts/             # metrics writers, rollback logic, helpers
+│ ├── security/            # PQC signing/verification utilities
+│ ├── explainability/      # S5/SS2 explainability + HITL kit
+│ └── metrics/             # generated artifacts (not committed)
 │
-├── infra/ # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
+├── infra/                 # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
 ├── functions/ingest_runs/ # Cloud Function Gen2 for scenario metrics ingest
-├── security/ # OPA policies (SS1)
-├── runtime-agent/ # Phase 0 runtime agent (Cloud Run, shadow mode)
-├── scripts/ # Integration test scripts
-├── docs/ # Phase 0 specs, event contract, IAM, implementation notes
+├── security/              # OPA policies (SS1)
+├── runtime-agent/         # Phase 0 runtime agent (Cloud Run, shadow mode)
+├── scripts/               # Integration test scripts
+├── docs/                  # Architecture specs, AI design, guardrails
 └── README.md
 
 ```
@@ -1636,6 +1641,9 @@ Every processed event produces a decision row with:
 - [IAM Specification](docs/runtime_agent_iam.md)
 - [Implementation Notes](docs/phase0-implementation-notes.md)
 - [Runtime Agent README](runtime-agent/README.md)
+- [AI Audit Report](docs/ai-audit-report.md)
+- [AI Design Architecture](docs/ai-design-architecture.md)
+- [System Guardrails](docs/system-guardrails.md)
 
 ---
 
@@ -1651,8 +1659,136 @@ Every processed event produces a decision row with:
 
 ---
 
+---
+
+## 🤖 AI Agent Architecture
+
+CogniOps uses a **Hybrid Cognitive-SOAR** architecture with two AI agents built on [Google ADK](https://google.github.io/adk-docs/) (Agent Development Kit) + Vertex AI Gemini.
+
+### Two-Layer System
+
+```
+┌──────────────────────────────────────────────────────┐
+│              COGNITIVE CONTROL PLANE                   │
+│                                                        │
+│  Runtime Agent          Design-Time Agent              │
+│  (operational)          (structural)                   │
+│  Event → Perceive →     Metrics → Context →            │
+│  Plan → Guard → Act     Plan → Validate → Propose      │
+│                                                        │
+├────────────────────────────────────────────────────────┤
+│              DETERMINISTIC SUBSTRATE                    │
+│  S1–S5, SS1–SS2 │ BQ │ OPA │ PQC │ Explainability     │
+└──────────────────────────────────────────────────────┘
+```
+
+### Runtime Agent Pipeline
+
+| Stage | Module | Deterministic | Description |
+|-------|--------|:---:|---|
+| **Perception** | `agent/tools/perception_tool.py` | ✅ | Z-score anomaly detection against BQ baselines |
+| **Planning** | `agent/cogniops_agent.py` (LlmAgent) | ❌ LLM | Gemini selects bounded action via tool calling |
+| **Guard** | `agent/callbacks/guard_callback.py` | ✅ | OPA policy check + PQC integrity verification |
+| **Execution** | `agent/tools/execution_tools.py` | ✅ | Mode-gated actions (shadow/advisory/enforce) |
+
+**Bounded Action Surface** — the LLM may ONLY select:
+
+| Action | Description |
+|--------|---|
+| `NO_OP` | Safe default — log only (always safe) |
+| `BLOCK` | Block a deployment from proceeding |
+| `ROLLBACK` | Trigger rollback to last known-good state |
+| `QUARANTINE` | Isolate suspect artifact |
+| `ESCALATE` | Create human-in-the-loop issue |
+
+**Mode Progression**: `shadow` (log only) → `advisory` (log + notify) → `enforce` (log + execute)
+
+### Design-Time Agent
+
+Analyzes accumulated metrics and produces **structural improvement proposals** (JSON documents stored in GCS). Never executes operational actions. Separate service account.
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Agent Framework | Google ADK | Built-in Agent, Tools, Callbacks, InMemoryRunner, Eval |
+| LLM | Gemini 2.0 Flash (via ADK) | Native GCP, function calling, low latency |
+| LLM Scope | Planning module ONLY | Minimize hallucination surface, all other modules deterministic |
+| Fail-Safe | NO_OP on any failure | Zero operational risk from AI errors |
+| Schemas | Pydantic v2 | LLM output validated before any action |
+| Memory | ADK Session.state + BQ views | No new tables needed |
+
+For complete architecture details, see [AI Design Architecture](docs/ai-design-architecture.md).  
+For safety constraints, see [System Guardrails](docs/system-guardrails.md).  
+For pre-implementation audit, see [AI Audit Report](docs/ai-audit-report.md).
+
+---
+
+## 🔄 Way of Working (AI-Assisted Development)
+
+Development is governed through VS Code Copilot customization files that enforce architecture, security, and design constraints at coding time.
+
+### Automatic (always active)
+
+| Context | Governance File | Effect |
+|---------|----------------|--------|
+| Any Copilot interaction | `.github/copilot-instructions.md` | Bounded actions, LLM confinement, baseline immutability |
+| Editing `runtime-agent/**` | `.github/instructions/runtime-agent.instructions.md` | ADK pipeline rules, module separation |
+| Editing `baseline/**` | `.github/instructions/baseline.instructions.md` | IMMUTABLE — no AI logic allowed |
+| Editing `infra/**` | `.github/instructions/terraform.instructions.md` | Additive-only, never edit main.tf |
+
+### On-Demand Prompts
+
+```
+/implement-cogniops Step N: description    # Master orchestrator
+/step1-adk-bootstrap                       # ADK skeleton + FastAPI integration
+/step2-perception                          # Real anomaly detection (z-score + BQ)
+/step3-planning-llm                        # Gemini integration (→ @llm-specialist)
+/step4-guard-execution                     # OPA guard + mode-gated execution
+/step5-telemetry                           # LLM logging + explainability
+/step6-design-agent                        # Design-time agent (separate service)
+/step7-evaluation                          # 2-Axis evaluation (→ @evaluator)
+```
+
+### Specialist Agents
+
+| Agent | Invoke | Expertise |
+|-------|--------|-----------|
+| `@llm-specialist` | Auto in Step 3 | ADK, Gemini, prompt engineering, tool definitions |
+| `@evaluator` | Auto in Step 7 | BQ metrics, statistical analysis, variant comparison |
+| `@security-reviewer` | Manual | OPA, PQC, IAM, secrets — read-only audit |
+
+### Per-Step Workflow
+
+```
+1. Run step prompt (e.g., /step2-perception)
+2. Copilot reads governance + existing code automatically
+3. Copilot implements code + tests following all guardrails
+4. Copilot updates README (this section) + relevant docs
+5. Developer reviews → commit → push
+```
+
+---
+
+## 📊 Implementation Progress
+
+| Step | Description | Status | Key Deliverables |
+|:--:|---|:--:|---|
+| **0** | Copilot Governance Infrastructure | ✅ | Instructions, prompts, agents in `.github/` |
+| **0** | Phase 0 Runtime Skeleton | ✅ | FastAPI + Pub/Sub + BQ + stubs (20 tests) |
+| **0** | AI Audit + Design Docs | ✅ | `docs/ai-audit-report.md`, `ai-design-architecture.md`, `system-guardrails.md` |
+| **1** | ADK Bootstrap | ⬜ | SequentialAgent, tools, callbacks, InMemoryRunner |
+| **2** | Real Anomaly Detection | ⬜ | Z-score + BQ baselines in perception tool |
+| **3** | LLM Planning (Gemini) | ⬜ | Tool-calling agent, system prompt, few-shot, fallback |
+| **4** | Guard + Execution | ⬜ | OPA callback, PQC check, mode-gated actions |
+| **5** | Telemetry + Explainability | ⬜ | LLM logger, ActionTraces, ISO/NIST mapping |
+| **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
+| **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
+
+---
+
 ## 🧠 Next Steps 
-- **Agent Core:** Autonomous reasoning + XAI integration  
+- Begin **Step 1: ADK Bootstrap** via `/step1-adk-bootstrap`
 
 ---
 
