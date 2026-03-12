@@ -26,7 +26,9 @@ runtime-agent/
 │   ├── __init__.py
 │   ├── cogniops_agent.py       # Root LlmAgent "cogniops_planning" definition
 │   ├── tools/
-│   │   ├── perception_tool.py  # ADK FunctionTool wrapping perception logic
+│   │   ├── perception_tool.py  # ADK FunctionTool — z-score + threshold anomaly detection
+│   │   ├── anomaly_detection.py # Z-score & threshold scoring engine (Step 2)
+│   │   ├── baseline_reader.py  # BQ 7-day rolling baseline queries (Step 2)
 │   │   ├── execution_tools.py  # Bounded actions: NO_OP, BLOCK, ROLLBACK, QUARANTINE, ESCALATE
 │   │   └── memory_tools.py     # Episodic memory: query recent decisions from BQ
 │   ├── callbacks/
@@ -48,14 +50,17 @@ runtime-agent/
 ├── telemetry/
 │   └── agentops_client.py      # trace_pipeline(event_id)  context manager
 │
-└── tests/                      # pytest unit tests (38 tests)
+└── tests/                      # pytest unit tests (72 tests)
     ├── conftest.py
     ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
-    ├── test_perception.py
+    ├── test_perception.py      # Phase 0 perception stub tests
+    ├── test_perception_real.py # Step 2: z-score, threshold, combined scoring, graceful degradation
     ├── test_playbook.py
     ├── test_guard.py
     ├── test_executor.py
-    └── test_endpoint.py
+    ├── test_endpoint.py
+    └── fixtures/
+        └── mock_bq_baselines.json  # Mock BQ baseline data for S1-S4
 ```
 
 ---
@@ -83,6 +88,36 @@ Pub/Sub push  →  POST /events/runtime
          BigQuery           Cloud Logging
    (runtime_decisions)    (structured JSON)
 ```
+
+---
+
+## Perception — Anomaly Detection (Step 2)
+
+The perception layer uses **deterministic** anomaly detection — no LLM involved.
+
+### Detection Methods
+
+| Method | Source | Trigger |
+|--------|--------|---------|
+| Z-score | BQ 7-day rolling average | \|z\| > 1σ (severity 0.1–1.0) |
+| Threshold | Per-scenario rules | Warning / Critical bounds |
+
+### Scenario Thresholds
+
+| Scenario | Metric | Warning | Critical | Direction |
+|----------|--------|---------|----------|-----------|
+| S1 | `ttd_sec` | 180s | 300s | above |
+| S1 | `cfr` | 10% | 25% | above |
+| S2 | `dsr` | 95% | 85% | below |
+| S3 | `mttd_sec` | 60s | 120s | above |
+| S3 | `mttr_sec` | 120s | 300s | above |
+| S4 | `fdr` | 90% | 70% | below |
+
+### Graceful Degradation
+
+- BQ unavailable → threshold-only detection
+- No thresholds for scenario → severity = 0.5 (neutral → NO_OP)
+- Invalid metrics → silently ignored, safe default
 
 ---
 
@@ -181,8 +216,9 @@ cd runtime-agent
 python -m pytest tests/ -v
 ```
 
-All 38 tests run offline (no GCP credentials or Gemini API required).
+All 72 tests run offline (no GCP credentials or Gemini API required).
 ADK pipeline tests use `InMemoryRunner` with mocked model callbacks.
+Step 2 perception tests mock `query_baseline` — no BQ required.
 The BigQuery writer is not invoked during tests — the endpoint tests
 mock the full pipeline via ASGI transport.
 

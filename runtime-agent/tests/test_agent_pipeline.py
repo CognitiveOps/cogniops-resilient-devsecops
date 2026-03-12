@@ -15,7 +15,7 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Any, Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -71,9 +71,10 @@ class TestAgentStructure:
 
 
 class TestPerceptionTool:
-    """Verify perception tool wraps the Phase 0 perceive() stub."""
+    """Verify perception tool wraps z-score + threshold detection."""
 
-    def test_perceive_anomaly_returns_dict(self):
+    @patch("agent.tools.perception_tool.query_baseline", return_value=None)
+    def test_perceive_anomaly_returns_dict(self, mock_bq):
         result = perceive_anomaly(
             event_id="test-001",
             event_type="pipeline_failure",
@@ -83,8 +84,9 @@ class TestPerceptionTool:
             status="fail",
         )
         assert isinstance(result, dict)
+        # No duration/metrics → neutral severity, weighted risk (S1 weight=0.8)
         assert result["severity"] == 0.5
-        assert result["risk_score"] == 0.5
+        assert result["risk_score"] == 0.4
         assert result["anomaly_type"] == "pipeline_failure"
         assert result["scenario"] == "S1"
 
@@ -125,7 +127,9 @@ class TestExecutionTools:
         assert result["artifact_id"] == "art-789"
 
     def test_escalate_to_human(self):
-        result = escalate_to_human(rationale="Ambiguous signals", summary="Review needed")
+        result = escalate_to_human(
+            rationale="Ambiguous signals", summary="Review needed"
+        )
         assert result["action"] == "ESCALATE"
         assert result["executed"] is False
         assert result["summary"] == "Review needed"
@@ -213,7 +217,9 @@ class TestAgentPipeline:
                             types.Part(
                                 function_call=types.FunctionCall(
                                     name="no_action",
-                                    args={"rationale": "Test: severity 0.5 — safe default"},
+                                    args={
+                                        "rationale": "Test: severity 0.5 — safe default"
+                                    },
                                 )
                             )
                         ],
