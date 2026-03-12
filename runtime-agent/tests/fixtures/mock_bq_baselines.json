@@ -1,0 +1,55 @@
+{
+    "S1": {
+        "avg_duration": 120.0,
+        "stddev_duration": 25.0,
+        "sample_count": 50,
+        "metric_averages": {
+            "ttd_sec": 110.0
+        },
+        "metric_stddevs": {
+            "ttd_sec": 20.0
+        }
+    },
+    "S3": {
+        "avg_duration": 45.0,
+        "stddev_duration": 10.0,
+        "sample_count": 30,
+        "metric_averages": {
+            "mttd_sec": 30.0,
+            "mttr_sec": 60.0
+        },
+        "metric_stddevs": {
+            "mttd_sec": 8.0,
+            "mttr_sec": 15.0
+        }
+    },
+    "S2": {
+        "avg_duration": 90.0,
+        "stddev_duration": 15.0,
+        "sample_count": 20,
+        "metric_averages": {
+            "dsr": 0.98
+        },
+        "metric_stddevs": {
+            "dsr": 0.02
+        }
+    },
+    "S4": {
+        "avg_duration": 5.0,
+        "stddev_duration": 1.0,
+        "sample_count": 40,
+        "metric_averages": {
+            "fdr": 0.95
+        },
+        "metric_stddevs": {
+            "fdr": 0.03
+        }
+    },
+    "empty": {
+        "avg_duration": 0,
+        "stddev_duration": 0,
+        "sample_count": 0,
+        "metric_averages": {},
+        "metric_stddevs": {}
+    }
+}
