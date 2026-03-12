@@ -1777,7 +1777,7 @@ Development is governed through VS Code Copilot customization files that enforce
 | **0** | Copilot Governance Infrastructure | ✅ | Instructions, prompts, agents in `.github/` |
 | **0** | Phase 0 Runtime Skeleton | ✅ | FastAPI + Pub/Sub + BQ + stubs (20 tests) |
 | **0** | AI Audit + Design Docs | ✅ | `docs/ai-audit-report.md`, `ai-design-architecture.md`, `system-guardrails.md` |
-| **1** | ADK Bootstrap | ⬜ | SequentialAgent, tools, callbacks, InMemoryRunner |
+| **1** | ADK Bootstrap | ✅ | LlmAgent, tools, callbacks, InMemoryRunner (38 tests) |
 | **2** | Real Anomaly Detection | ⬜ | Z-score + BQ baselines in perception tool |
 | **3** | LLM Planning (Gemini) | ⬜ | Tool-calling agent, system prompt, few-shot, fallback |
 | **4** | Guard + Execution | ⬜ | OPA callback, PQC check, mode-gated actions |
@@ -1788,7 +1788,7 @@ Development is governed through VS Code Copilot customization files that enforce
 ---
 
 ## 🧠 Next Steps 
-- Begin **Step 1: ADK Bootstrap** via `/step1-adk-bootstrap`
+- Begin **Step 2: Real Anomaly Detection** via `/step2-perception`
 
 ---
 

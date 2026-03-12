@@ -1,9 +1,12 @@
-# Runtime Agent – Phase 0 (Shadow Mode)
+# Runtime Agent – Phase 0 + ADK Bootstrap (Shadow Mode)
 
 Cloud Run micro-service that receives runtime events via Pub/Sub,
 runs a four-stage decision pipeline, and logs every decision to BigQuery.
 
-> **Phase 0 constraint:** all decisions are `NO_OP`, nothing is executed,
+Includes the **ADK cognitive agent** (`agent/` module) which provides the
+LlmAgent structure for future Gemini-based planning (Step 3+).
+
+> **Current constraint:** all decisions are `NO_OP`, nothing is executed,
 > and `mode` is always `shadow`.
 
 ---
@@ -12,29 +15,42 @@ runs a four-stage decision pipeline, and logs every decision to BigQuery.
 
 ```
 runtime-agent/
-├── main.py                     # FastAPI app (POST /events/runtime, GET /healthz)
+├── main.py                     # FastAPI app (POST /events/runtime, GET /healthz, GET /agent/info)
 ├── Dockerfile                  # python:3.12-slim + uvicorn
 ├── requirements.txt
 │
 ├── models/
 │   └── schemas.py              # Pydantic v2 models (event envelope, pipeline stages, BQ row)
 │
+├── agent/                      # ── ADK Cognitive Agent (Step 1+) ──
+│   ├── __init__.py
+│   ├── cogniops_agent.py       # Root LlmAgent "cogniops_planning" definition
+│   ├── tools/
+│   │   ├── perception_tool.py  # ADK FunctionTool wrapping perception logic
+│   │   ├── execution_tools.py  # Bounded actions: NO_OP, BLOCK, ROLLBACK, QUARANTINE, ESCALATE
+│   │   └── memory_tools.py     # Episodic memory: query recent decisions from BQ
+│   ├── callbacks/
+│   │   └── guard_callback.py   # before_tool_callback (OPA guard — stub in Step 1)
+│   └── prompts/
+│       └── system.txt          # Bounded-action system prompt
+│
 ├── perception/
-│   └── handler.py              # perceive(event) → AnomalyOutput
+│   └── handler.py              # perceive(event) → AnomalyOutput (Phase 0 stub)
 ├── planning/
-│   └── playbook.py             # select_playbook(anomaly) → PlanningDecision
+│   └── playbook.py             # select_playbook(anomaly) → PlanningDecision (Phase 0 stub)
 ├── guard/
-│   └── policy_check.py         # check_policy(decision) → GuardVerdict
+│   └── policy_check.py         # check_policy(decision) → GuardVerdict (Phase 0 stub)
 ├── execution/
-│   └── executor.py             # execute(decision, verdict) → ExecutionResult
+│   └── executor.py             # execute(decision, verdict) → ExecutionResult (Phase 0 stub)
 │
 ├── storage/
 │   └── bigquery_writer.py      # write_decision(row) → bool  (best-effort)
 ├── telemetry/
 │   └── agentops_client.py      # trace_pipeline(event_id)  context manager
 │
-└── tests/                      # pytest unit tests (20 tests)
+└── tests/                      # pytest unit tests (38 tests)
     ├── conftest.py
+    ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
     ├── test_perception.py
     ├── test_playbook.py
     ├── test_guard.py
@@ -76,6 +92,7 @@ Pub/Sub push  →  POST /events/runtime
 |--------|------|---------|
 | `POST` | `/events/runtime` | Pub/Sub push receiver — decodes envelope, runs pipeline, writes to BQ |
 | `GET`  | `/healthz` | Liveness / readiness probe (`{"status":"ok","mode":"shadow","phase":0}`) |
+| `GET`  | `/agent/info` | ADK agent metadata — tools, model, guard status |
 
 ### Response Codes
 
@@ -121,6 +138,7 @@ Unknown types are logged as warnings but still processed.
 | `BIGQUERY_TABLE` | ✅ | `runtime_decisions` | Target BQ table |
 | `AGENTOPS_ENABLED` | — | `false` | Enable AgentOps telemetry |
 | `AGENTOPS_API_KEY` | — | — | AgentOps API key (from Secret Manager) |
+| `COGNIOPS_MODEL` | — | `gemini-2.0-flash` | ADK agent LLM model (Step 3+) |
 | `LOG_LEVEL` | — | `INFO` | Python logging level |
 
 ---
@@ -163,9 +181,10 @@ cd runtime-agent
 python -m pytest tests/ -v
 ```
 
-All 20 tests run offline (no GCP credentials required). The BigQuery writer
-is not invoked during tests — the endpoint tests mock the full pipeline via
-ASGI transport.
+All 38 tests run offline (no GCP credentials or Gemini API required).
+ADK pipeline tests use `InMemoryRunner` with mocked model callbacks.
+The BigQuery writer is not invoked during tests — the endpoint tests
+mock the full pipeline via ASGI transport.
 
 ---
 
