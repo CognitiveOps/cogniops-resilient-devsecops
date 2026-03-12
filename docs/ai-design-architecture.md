@@ -568,7 +568,7 @@ All infrastructure is defined in `infra/runtime.tf` (additive to `main.tf`):
 ```
 Phase 0 ✅ ──── Phase 1 ──────────────────── Phase 2 ──── Phase 3
                 │                              │              │
-           Step 1: ADK Bootstrap          Step 6: Design  Step 7: Eval
+           Step 1: ADK Bootstrap ✅       Step 6: Design  Step 7: Eval
            Step 2: Perception               Agent
            Step 3: Planning (LLM)
            Step 4: Guard + Execution
@@ -592,7 +592,7 @@ Step 0 (Copilot governance) ✅
 
 | Step | Exit Criteria |
 |------|---------------|
-| Step 1 | ADK SequentialAgent runs in InMemoryRunner, FastAPI coexists |
+| Step 1 | ADK LlmAgent runs in InMemoryRunner, FastAPI coexists, 38 tests pass |
 | Step 2 | Perception detects anomalies against real BQ baselines (mocked in tests) |
 | Step 3 | Gemini selects correct tool for 90%+ of test cases, fallback works |
 | Step 4 | OPA guard blocks invalid actions, mode gating works for all 3 modes |

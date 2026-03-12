@@ -1,9 +1,10 @@
 """
-runtime-agent – Phase 0 FastAPI application.
+runtime-agent – CogniOps Runtime Agent (Phase 0 + ADK bootstrap).
 
 Endpoints:
   POST /events/runtime   – Pub/Sub push receiver (runtime event pipeline)
   GET  /healthz           – Liveness probe for Cloud Run
+  GET  /agent/info        – ADK agent metadata (Step 1+)
 
 Pipeline:  Event → Perception → Planning → Guard → Execution → (BQ write)
 """
@@ -44,8 +45,8 @@ logger = logging.getLogger("runtime-agent")
 
 app = FastAPI(
     title="CogniOps Runtime Agent",
-    description="Phase 0 – shadow mode runtime agent (no destructive actions)",
-    version="0.1.0",
+    description="Runtime agent with ADK cognitive planning (shadow mode)",
+    version="0.2.0",
 )
 
 
@@ -180,3 +181,28 @@ async def receive_runtime_event(request: Request):
     )
 
     return JSONResponse(status_code=200, content=response_body)
+
+
+# ── ADK Agent Integration (Step 1+) ─────────────────────────────────
+
+
+@app.get("/agent/info")
+async def agent_info():
+    """Return ADK agent metadata — confirms the cognitive module loads."""
+    try:
+        from agent.cogniops_agent import cogniops_agent
+
+        tool_names = [
+            t.__name__ if callable(t) else str(t)
+            for t in cogniops_agent.tools
+        ]
+        return {
+            "agent_name": cogniops_agent.name,
+            "model": str(cogniops_agent.model),
+            "tools": tool_names,
+            "has_guard": cogniops_agent.before_tool_callback is not None,
+            "status": "loaded",
+        }
+    except Exception as exc:
+        logger.warning("ADK agent not available: %s", exc)
+        return {"status": "not_loaded", "detail": str(exc)}
