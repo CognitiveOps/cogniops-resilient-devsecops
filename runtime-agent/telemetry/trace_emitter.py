@@ -55,10 +55,9 @@ def build_action_trace(
     _commit_sha = commit_sha or os.getenv("COMMIT_SHA", "unknown")
 
     risk_level = (
-        "critical" if risk_score >= 0.9
-        else "high" if risk_score >= 0.7
-        else "medium" if risk_score >= 0.4
-        else "low"
+        "critical"
+        if risk_score >= 0.9
+        else "high" if risk_score >= 0.7 else "medium" if risk_score >= 0.4 else "low"
     )
 
     data: dict[str, Any] = {

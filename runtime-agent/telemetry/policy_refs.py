@@ -18,24 +18,24 @@ from models.schemas import DecisionType
 _CONTROL_MAP: dict[DecisionType, list[str]] = {
     DecisionType.NO_OP: [],
     DecisionType.BLOCK: [
-        "NIST SP 800-53 CM-3",       # Configuration Change Control
-        "ISO 27001:2022 A.12.1.2",   # Change Management
-        "IMO MSC.428(98) §4.1",      # Identify — risk assessment
+        "NIST SP 800-53 CM-3",  # Configuration Change Control
+        "ISO 27001:2022 A.12.1.2",  # Change Management
+        "IMO MSC.428(98) §4.1",  # Identify — risk assessment
     ],
     DecisionType.ROLLBACK: [
-        "NIST SP 800-53 CP-10",      # System Recovery and Reconstitution
-        "ISO 27001:2022 A.17.1.2",   # Implementing Information Security Continuity
-        "IMO MSC.428(98) §4.4",      # Respond — contingency plans
+        "NIST SP 800-53 CP-10",  # System Recovery and Reconstitution
+        "ISO 27001:2022 A.17.1.2",  # Implementing Information Security Continuity
+        "IMO MSC.428(98) §4.4",  # Respond — contingency plans
     ],
     DecisionType.QUARANTINE: [
-        "NIST SP 800-53 SI-3",       # Malicious Code Protection
-        "ISO 27001:2022 A.12.2.1",   # Controls Against Malware
-        "IMO MSC.428(98) §4.3",      # Detect — anomaly detection
+        "NIST SP 800-53 SI-3",  # Malicious Code Protection
+        "ISO 27001:2022 A.12.2.1",  # Controls Against Malware
+        "IMO MSC.428(98) §4.3",  # Detect — anomaly detection
     ],
     DecisionType.ESCALATE: [
-        "NIST SP 800-53 IR-6",       # Incident Reporting
-        "ISO 27001:2022 A.16.1.2",   # Reporting Information Security Events
-        "IMO MSC.428(98) §4.5",      # Recover — lessons learned
+        "NIST SP 800-53 IR-6",  # Incident Reporting
+        "ISO 27001:2022 A.16.1.2",  # Reporting Information Security Events
+        "IMO MSC.428(98) §4.5",  # Recover — lessons learned
     ],
 }
 
