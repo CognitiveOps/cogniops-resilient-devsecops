@@ -1790,56 +1790,45 @@ Development is governed through VS Code Copilot customization files that enforce
 | **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
 | **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
 | **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
+| **5b** | Deploy & Wire Runtime Agent | ⬜ | IaC (Terraform), CI/CD workflow, OPA service, ADK runner wiring, smoke test |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
 | **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
 
 ---
 
-## 🚀 Deployment & Wiring Checklist (pre–Step 6)
+## 🚀 Step 5b: Deploy & Wire Runtime Agent (pre–Step 6)
 
 Before starting the Design-Time Agent, the Runtime Agent must be deployed
-and validated end-to-end in shadow mode.
+and validated end-to-end in shadow mode. **This is fully automated via IaC + CI/CD.**
 
-### Infrastructure Deploy
+Invoke: `/step5b-deploy-wire`
 
-| Task | Command / Action | Verify |
-|------|-----------------|--------|
-| Build Docker image | `docker build -t runtime-agent:v0.5.0 runtime-agent/` | Image builds without errors |
-| Push to Artifact Registry | `docker push <REGION>-docker.pkg.dev/<PROJECT>/cogniops/runtime-agent:v0.5.0` | Image visible in Console |
-| Deploy to Cloud Run | `gcloud run deploy runtime-agent --image=... --set-env-vars=...` | `GET /healthz` returns `{"status":"ok"}` |
-| Verify ADK agent loads | `curl <CLOUD_RUN_URL>/agent/info` | `{"status":"loaded","agent_name":"cogniops_planning"}` |
+### Deliverables
 
-### Service Wiring
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **IaC** | `infra/runtime.tf` extensions | Missing env vars (`COGNIOPS_MODE`, `OPA_URL`, `METRICS_INGEST_URL`, `COMMIT_SHA`), Secret Manager resources, OPA Cloud Run service, image tag variable |
+| **CI/CD** | `.github/workflows/runtime_agent_deploy.yml` | test → build → push to AR → deploy Cloud Run → smoke test (triggers on `runtime-agent/**`) |
+| **CaC** | OPA policy bundling | `security/policies/` → OPA service (GCS mount or embedded) |
+| **Code** | ADK runner wiring in `main.py` | Replace Phase 0 stubs with `InMemoryRunner` + `cogniops_agent`, fallback to NO_OP on failure |
+| **Validation** | `scripts/smoke_test_runtime.sh` | Publish test event → verify BQ row + ActionTrace |
 
-| Task | Details | Verify |
-|------|---------|--------|
-| Pub/Sub topic | Create `runtime-events` topic (if not exists) | `gcloud pubsub topics describe runtime-events` |
-| Push subscription | Create push subscription → `POST <CLOUD_RUN_URL>/events/runtime` | Subscription visible in Console |
-| OPA endpoint | Deploy OPA server/sidecar with `security/policies/` | Set `OPA_URL` env var, `GET <OPA_URL>/health` |
-| BQ table | Confirm `agent_metrics.runtime_decisions` schema matches `DecisionRow` | `bq show agent_metrics.runtime_decisions` |
-| Secrets | `GITHUB_TOKEN`, `AGENTOPS_API_KEY` in Secret Manager, mounted as env vars | `gcloud secrets versions access latest --secret=...` |
+### Infrastructure (already in Terraform)
 
-### End-to-End Validation (Shadow Mode)
-
-| Task | Details | Expected |
-|------|---------|----------|
-| Publish test event | `scripts/test_publish_runtime_event.sh` | Pipeline completes, 200 response |
-| Verify BQ row | `scripts/verify_runtime_decision.sh` | Row with `mode=shadow`, `decision_executed=false` |
-| Verify ActionTrace | Check Cloud Logging for `ActionTrace valid` log | `trace_valid=true` in response |
-| Verify LLM logging | Check Cloud Logging for `LLM call:` entries | Prompt hash, latency, model version present |
-
-### Wire ADK Runner (optional before Step 6)
-
-> **Note:** `main.py` currently uses Phase 0 stubs (`perceive()` → `select_playbook()`
-> → `check_policy()` → `execute()`). The ADK agent exists but is only loaded at
-> `GET /agent/info`. Wiring the ADK `InMemoryRunner` into the `POST /events/runtime`
-> endpoint replaces the stubs with real LLM-driven planning. This should be done
-> in shadow mode first.
+| Resource | Status | Notes |
+|----------|:------:|-------|
+| Cloud Run `runtime-agent` | ✅ provisioned | Placeholder image → replaced by CI/CD |
+| Service account + IAM | ✅ provisioned | logging, BQ, secrets, AR reader |
+| Pub/Sub topic + push sub | ✅ provisioned | `runtime-events-v1` → `/events/runtime` |
+| BQ `runtime_decisions` | ✅ provisioned | Schema matches `DecisionRow` |
+| Secret Manager resources | ⬜ Step 5b | `github-token`, `agentops-key` |
+| OPA service | ⬜ Step 5b | Lightweight Cloud Run |
+| Missing env vars | ⬜ Step 5b | `COGNIOPS_MODE`, `OPA_URL`, etc. |
 
 ---
 
 ## 🧠 Next Steps
-- Complete **Deployment & Wiring Checklist** (above)
+- Run **Step 5b: Deploy & Wire** via `/step5b-deploy-wire` (IaC + CI/CD + ADK runner)
 - Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
 
 ---
