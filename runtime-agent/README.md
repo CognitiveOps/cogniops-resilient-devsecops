@@ -1,11 +1,12 @@
-# Runtime Agent – Phase 0 + ADK Bootstrap + Guard & Execution (Shadow Mode)
+# Runtime Agent – Phase 0 + ADK Bootstrap + Guard & Execution + Telemetry (Shadow Mode)
 
 Cloud Run micro-service that receives runtime events via Pub/Sub,
 runs a four-stage decision pipeline, and logs every decision to BigQuery.
 
 Includes the **ADK cognitive agent** (`agent/` module) with Gemini-based
 planning via ADK tool calling (LLM confined to Planning module only),
-**OPA + PQC guard** (fail-closed), and **mode-gated execution** (shadow/advisory/enforce).
+**OPA + PQC guard** (fail-closed), **mode-gated execution** (shadow/advisory/enforce),
+and **explainability telemetry** (ISO/NIST control mapping + CloudEvent ActionTraces).
 
 > **Current constraint:** all decisions default to `shadow` mode —
 > decisions are logged but not executed.
@@ -56,15 +57,19 @@ runtime-agent/
 │   └── bigquery_writer.py      # write_decision(row) → bool  (best-effort)
 ├── telemetry/
 │   ├── agentops_client.py      # trace_pipeline(event_id)  context manager
-│   └── llm_logger.py           # LLM call logging (prompt hash, latency, tokens)
+│   ├── llm_logger.py           # LLM call logging (prompt hash, latency, tokens)
+│   ├── policy_refs.py          # ISO/NIST/IMO control mapping per DecisionType (Step 5)
+│   └── trace_emitter.py        # ActionTrace CloudEvent builder + emitter (Step 5)
 │
-└── tests/                      # pytest unit tests (145 tests)
+└── tests/                      # pytest unit tests (195 tests)
     ├── conftest.py
     ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
     ├── test_planning_llm.py    # Step 3: LLM planning, few-shots, episodic context, fallback, logger
     ├── test_guard_opa.py       # Step 4: OPA guard, PQC check, observation/execution gating
     ├── test_execution_modes.py # Step 4: shadow/advisory/enforce mode gating per tool
     ├── test_github_client.py   # Step 4: GitHub API mock tests (dispatch, issues)
+    ├── test_explainability.py  # Step 5: ActionTrace validation, ACR compliance, emission
+    ├── test_policy_refs.py     # Step 5: ISO/NIST/IMO control mapping per decision type
     ├── test_perception.py      # Phase 0 perception stub tests
     ├── test_perception_real.py # Step 2: z-score, threshold, combined scoring, graceful degradation
     ├── test_playbook.py
@@ -99,6 +104,10 @@ Pub/Sub push  →  POST /events/runtime
               ▼                  ▼
          BigQuery           Cloud Logging
    (runtime_decisions)    (structured JSON)
+              │
+              ▼
+       ActionTrace CE
+   (explainability kit)
 ```
 
 ---
@@ -130,6 +139,46 @@ The perception layer uses **deterministic** anomaly detection — no LLM involve
 - BQ unavailable → threshold-only detection
 - No thresholds for scenario → severity = 0.5 (neutral → NO_OP)
 - Invalid metrics → silently ignored, safe default
+
+---
+
+## Telemetry & Explainability (Step 5)
+
+Every pipeline decision generates a **CloudEvent ActionTrace** validated
+against the baseline explainability kit (`baseline/explainability/schema.py`).
+
+### ISO/NIST Control Mapping
+
+| Decision | NIST SP 800-53 | ISO 27001:2022 | IMO MSC.428(98) |
+|----------|---------------|----------------|-----------------|
+| `BLOCK` | CM-3 | A.12.1.2 | §4.1 |
+| `ROLLBACK` | CP-10 | A.17.1.2 | §4.4 |
+| `QUARANTINE` | SI-3 | A.12.2.1 | §4.3 |
+| `ESCALATE` | IR-6 | A.16.1.2 | §4.5 |
+| `NO_OP` | — | — | — |
+
+### ActionTrace CloudEvent
+
+```json
+{
+  "specversion": "1.0",
+  "type": "cogniops.runtime.decision",
+  "source": "cogniops/runtime-agent",
+  "data": {
+    "schema_version": "1.0",
+    "scenario_id": "S3",
+    "action": "ROLLBACK",
+    "rationale": "High severity anomaly ...",
+    "risk": {"score": 0.85, "level": "high"},
+    "policy_refs": ["NIST SP 800-53 CP-10", "ISO 27001:2022 A.17.1.2", "IMO MSC.428(98) §4.4"],
+    "timestamps": {"t_recommend_epoch": 1719945600.0},
+    "provenance": {"commit_sha": "abc123"}
+  }
+}
+```
+
+Every trace passes `validate_action_trace()` (**ACR = 1.0**) and is emitted
+to the metrics ingest endpoint (when `METRICS_INGEST_URL` is configured).
 
 ---
 
@@ -186,6 +235,9 @@ Unknown types are logged as warnings but still processed.
 | `AGENTOPS_ENABLED` | — | `false` | Enable AgentOps telemetry |
 | `AGENTOPS_API_KEY` | — | — | AgentOps API key (from Secret Manager) |
 | `COGNIOPS_MODEL` | — | `gemini-2.0-flash` | ADK agent LLM model (Step 3+) |
+| `COGNIOPS_MODE`  | — | `shadow` | Execution mode: `shadow`, `advisory`, `enforce` |
+| `METRICS_INGEST_URL` | — | — | Endpoint for ActionTrace CloudEvent emission |
+| `COMMIT_SHA` | — | `unknown` | Git commit SHA for provenance field |
 | `LOG_LEVEL` | — | `INFO` | Python logging level |
 
 ---
@@ -228,7 +280,7 @@ cd runtime-agent
 python -m pytest tests/ -v
 ```
 
-All 72 tests run offline (no GCP credentials or Gemini API required).
+All 195 tests run offline (no GCP credentials or Gemini API required).
 ADK pipeline tests use `InMemoryRunner` with mocked model callbacks.
 Step 2 perception tests mock `query_baseline` — no BQ required.
 The BigQuery writer is not invoked during tests — the endpoint tests

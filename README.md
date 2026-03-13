@@ -1789,14 +1789,14 @@ Development is governed through VS Code Copilot customization files that enforce
 | **2** | Real Anomaly Detection | ✅ | Z-score + threshold scoring, BQ baselines, graceful degradation (72 tests) |
 | **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
 | **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
-| **5** | Telemetry + Explainability | ⬜ | LLM logger, ActionTraces, ISO/NIST mapping |
+| **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
 | **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
 
 ---
 
 ## 🧠 Next Steps 
-- Begin **Step 5: Telemetry + Explainability** via `/step5-telemetry`
+- Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
 
 ---
 

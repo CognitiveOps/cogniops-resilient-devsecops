@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
@@ -24,6 +25,7 @@ from execution.executor import execute
 from guard.policy_check import check_policy
 from models.schemas import (
     ALLOWED_EVENT_TYPES_PHASE0,
+    DecisionType,
     PubSubPushEnvelope,
     RuntimeEvent,
 )
@@ -31,6 +33,8 @@ from perception.handler import perceive
 from planning.playbook import select_playbook
 from storage.bigquery_writer import build_decision_row, write_decision
 from telemetry.agentops_client import trace_pipeline
+from telemetry.policy_refs import get_policy_refs
+from telemetry.trace_emitter import build_action_trace, emit_action_trace
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -121,6 +125,9 @@ async def receive_runtime_event(request: Request):
     )
 
     # ── 4–7. Pipeline wrapped in AgentOps trace ─────────────────────
+    t_start = time.monotonic()
+    t_start_epoch = time.time()
+
     with trace_pipeline(event.event_id) as trace:
 
         # ── 4. Perception ────────────────────────────────────────────
@@ -128,6 +135,15 @@ async def receive_runtime_event(request: Request):
 
         # ── 5. Planning ──────────────────────────────────────────────
         decision = select_playbook(anomaly)
+
+        # ── 5b. Enrich with ISO/NIST control references ─────────────
+        try:
+            decision_enum = DecisionType(decision.decision.value)
+            policy_refs = get_policy_refs(decision_enum)
+            if policy_refs:
+                decision.policy_refs = policy_refs
+        except (ValueError, KeyError):
+            pass  # Unknown decision type — keep existing policy_refs
 
         # ── 6. Guard ─────────────────────────────────────────────────
         verdict = check_policy(decision)
@@ -159,16 +175,39 @@ async def receive_runtime_event(request: Request):
 
     bq_ok = write_decision(row)
 
+    # ── 8b. Build + emit ActionTrace CloudEvent ──────────────────────
+    action_trace = build_action_trace(
+        event_id=event.event_id,
+        event_type=event.event_type,
+        scenario_id=event.context.scenario_id or "unknown",
+        run_id=event.context.run_id or event.event_id,
+        mode="shadow",
+        decision=decision.decision.value,
+        rationale=decision.rationale,
+        policy_refs=decision.policy_refs,
+        severity=anomaly.severity,
+        risk_score=anomaly.risk_score,
+        guard_approved=verdict.approved,
+        guard_reason=verdict.reason,
+        executed=result.decision_executed,
+        agentops_trace_id=agentops_trace_id or "",
+        t_start_epoch=t_start_epoch,
+    )
+
+    trace_ok = emit_action_trace(action_trace)
+
     # ── 9. Build response ────────────────────────────────────────────
     response_body = {
         "status": "accepted",
         "event_id": event.event_id,
         "decision": decision.decision.value,
         "decision_executed": result.decision_executed,
+        "policy_refs": decision.policy_refs,
         "mode": "shadow",
         "processed_at": processed_at.isoformat(),
         "agentops_trace_id": agentops_trace_id,
         "bq_written": bq_ok,
+        "trace_valid": trace_ok,
     }
 
     logger.info(
@@ -177,7 +216,7 @@ async def receive_runtime_event(request: Request):
         decision.decision.value,
         result.decision_executed,
         bq_ok,
-        agentops_trace_id,
+        trace_ok,
     )
 
     return JSONResponse(status_code=200, content=response_body)

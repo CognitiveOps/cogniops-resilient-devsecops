@@ -357,6 +357,11 @@ Every transition between modules is a Pydantic model boundary.
 | `mode` | shadow / advisory / enforce | BQ |
 | `processed_at` | Processing timestamp | BQ (partition key) |
 
+**Implementation** (Step 5):
+- `storage/bigquery_writer.py` builds and writes `DecisionRow` with all fields
+- `telemetry/policy_refs.py` maps each `DecisionType` to NIST SP 800-53, ISO 27001:2022, IMO MSC.428(98) controls
+- Pipeline in `main.py` enriches `policy_refs` before BQ write
+
 ---
 
 ### A-2: LLM Call Logging
@@ -377,6 +382,11 @@ Every transition between modules is a Pydantic model boundary.
 
 **Storage**: Cloud Logging (structured JSON) + optional AgentOps.
 
+**Implementation** (Step 3):
+- `telemetry/llm_logger.py` provides `LlmCallTimer` context manager
+- SHA-256[:16] prompt hashing — no raw prompts logged (privacy)
+- Structured JSON via Python `logging` → Cloud Logging in GCP
+
 ---
 
 ### A-3: Explainability Integration
@@ -391,6 +401,12 @@ with the existing explainability kit (`baseline/explainability/`).
 - `rationale`: LLM-generated explanation
 - `policy_refs`: ISO 27001, NIST SP 800-53, IMO MSC.428(98) control mappings
 - `acr_valid`: audit completeness rate validation result
+
+**Implementation** (Step 5):
+- `telemetry/trace_emitter.py` builds CloudEvent ActionTraces using `baseline/explainability/cloudevents.py`
+- Every trace passes `validate_action_trace()` (ACR = 1.0)
+- Emission to `METRICS_INGEST_URL` via `baseline/explainability/emit.py` (best-effort)
+- 50 tests verify schema compliance, ACR, and all decision types
 
 ---
 
