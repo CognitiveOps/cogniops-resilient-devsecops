@@ -1790,7 +1790,7 @@ Development is governed through VS Code Copilot customization files that enforce
 | **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
 | **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
 | **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
-| **5b** | Deploy & Wire Runtime Agent | ⬜ | IaC (Terraform), CI/CD workflow, OPA service, ADK runner wiring, smoke test |
+| **5b** | Deploy & Wire Runtime Agent | ⬜ | IaC (Terraform), CI/CD workflow, live OPA bundle polling, externalized config store (GCS), ADK runner wiring, smoke test |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
 | **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
 
@@ -1807,11 +1807,25 @@ Invoke: `/step5b-deploy-wire`
 
 | Layer | Deliverable | Details |
 |-------|------------|--------|
-| **IaC** | `infra/runtime.tf` extensions | Missing env vars (`COGNIOPS_MODE`, `OPA_URL`, `METRICS_INGEST_URL`, `COMMIT_SHA`), Secret Manager resources, OPA Cloud Run service, image tag variable |
-| **CI/CD** | `.github/workflows/runtime_agent_deploy.yml` | test → build → push to AR → deploy Cloud Run → smoke test (triggers on `runtime-agent/**`) |
-| **CaC** | OPA policy bundling | `security/policies/` → OPA service (GCS mount or embedded) |
+| **IaC** | `infra/runtime.tf` extensions | GCS config bucket, missing env vars, Secret Manager resources, OPA Cloud Run service with bundle polling, image tag variable |
+| **CI/CD** | `.github/workflows/runtime_agent_deploy.yml` | test → bundle-policies (OPA build + GCS upload) → build → deploy → smoke test |
+| **CaC** | Live policy & config management | `cogniops_runtime.rego` (runtime guardrails), `config/control-mappings.yaml` (NIST/ISO refs), OPA bundle polling from GCS (30-120s), config store with TTL cache (5min) |
 | **Code** | ADK runner wiring in `main.py` | Replace Phase 0 stubs with `InMemoryRunner` + `cogniops_agent`, fallback to NO_OP on failure |
+| **Code** | `telemetry/config_store.py` | GCS-backed control mapping store with TTL cache, graceful fallback to built-in defaults |
 | **Validation** | `scripts/smoke_test_runtime.sh` | Publish test event → verify BQ row + ActionTrace |
+
+### Live Config Architecture (zero-redeploy updates)
+
+```
+security/policies/  ──→  CI: opa build  ──→  GCS bucket  ──→  OPA polls (30-120s)
+config/*.yaml       ──→  CI: upload     ──→  GCS bucket  ──→  Agent polls (5min TTL)
+```
+
+| Config Type | Source | Destination | Refresh |
+|---|---|---|---|
+| OPA policies (Rego) | `security/policies/` | `gs://…/bundles/runtime/bundle.tar.gz` | OPA auto-poll 30-120s |
+| NIST/ISO/IMO control refs | `config/control-mappings.yaml` | `gs://…/control-mappings/v1.yaml` | Agent TTL cache 5min |
+| Decision thresholds | `config/thresholds.yaml` (future) | `gs://…/thresholds/v1.yaml` | Agent TTL cache 5min |
 
 ### Infrastructure (already in Terraform)
 
