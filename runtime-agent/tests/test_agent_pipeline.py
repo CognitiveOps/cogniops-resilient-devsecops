@@ -15,7 +15,7 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -148,18 +148,39 @@ class TestMemoryTool:
 
 
 class TestGuardCallback:
-    """Verify guard callback always allows in Step 1."""
+    """Verify guard callback behaviour."""
 
-    def test_guard_allows_execution(self):
+    def test_guard_allows_observation_tool(self):
+        """Observation tools always pass through the guard."""
         mock_tool = MagicMock()
-        mock_tool.name = "no_action"
+        mock_tool.name = "perceive_anomaly"
         mock_context = MagicMock()
+        mock_context.state = {}
 
         result = guard_callback(
             tool=mock_tool,
-            args={"rationale": "test"},
+            args={},
             tool_context=mock_context,
         )
+        assert result is None  # None = allow
+
+    def test_guard_allows_execution_tool_when_opa_passes(self):
+        """Execution tool with OPA allow → None."""
+        mock_tool = MagicMock()
+        mock_tool.name = "no_action"
+        mock_context = MagicMock()
+        mock_context.state = {}
+
+        with patch(
+            "agent.callbacks.guard_callback._async_guard",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = guard_callback(
+                tool=mock_tool,
+                args={"rationale": "test"},
+                tool_context=mock_context,
+            )
         assert result is None  # None = allow
 
 

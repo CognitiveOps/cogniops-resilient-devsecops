@@ -1688,18 +1688,24 @@ CogniOps uses a **Hybrid Cognitive-SOAR** architecture with two AI agents built 
 |-------|--------|:---:|---|
 | **Perception** | `agent/tools/perception_tool.py` | ✅ | Z-score anomaly detection against BQ baselines |
 | **Planning** | `agent/cogniops_agent.py` (LlmAgent) | ❌ LLM | Gemini selects bounded action via tool calling |
-| **Guard** | `agent/callbacks/guard_callback.py` | ✅ | OPA policy check + PQC integrity verification |
-| **Execution** | `agent/tools/execution_tools.py` | ✅ | Mode-gated actions (shadow/advisory/enforce) |
+| **Guard** | `agent/callbacks/guard_callback.py` | ✅ | OPA policy check (fail-closed) + PQC integrity verification (S4/SS2) |
+| **Execution** | `agent/tools/execution_tools.py` | ✅ | Mode-gated actions via GitHub API (shadow/advisory/enforce) |
 
 **Bounded Action Surface** — the LLM may ONLY select:
 
-| Action | Description |
-|--------|---|
-| `NO_OP` | Safe default — log only (always safe) |
-| `BLOCK` | Block a deployment from proceeding |
-| `ROLLBACK` | Trigger rollback to last known-good state |
-| `QUARANTINE` | Isolate suspect artifact |
-| `ESCALATE` | Create human-in-the-loop issue |
+| Action | Shadow | Advisory | Enforce |
+|--------|--------|----------|----------|
+| `NO_OP` | Log only | Log only | Log only |
+| `BLOCK` | Log only | Log + GitHub Issue notification | Log + issue + block enforced |
+| `ROLLBACK` | Log only | Log + GitHub Issue notification | Log + dispatch `s3_edge_rollback.yml` |
+| `QUARANTINE` | Log only | Log + GitHub Issue notification | Log + quarantine issue created |
+| `ESCALATE` | Log only | Log + GitHub HITL Issue | Log + HITL issue + executed |
+
+**Guard Pipeline**: OPA policy check → PQC integrity check (S4/SS2) → allow or block
+- OPA unreachable → **deny** (fail-closed)
+- PQC verification fails → **deny** (fail-closed)
+- Unknown tools → **blocked** (safety)
+- Observation tools (perceive, memory) → **always pass**
 
 **Mode Progression**: `shadow` (log only) → `advisory` (log + notify) → `enforce` (log + execute)
 
@@ -1715,6 +1721,8 @@ Analyzes accumulated metrics and produces **structural improvement proposals** (
 | LLM | Gemini 2.0 Flash (via ADK) | Native GCP, function calling, low latency |
 | LLM Scope | Planning module ONLY | Minimize hallucination surface, all other modules deterministic |
 | Fail-Safe | NO_OP on any failure | Zero operational risk from AI errors |
+| Guard Policy | OPA REST + PQC verify | Fail-closed: OPA down → deny; PQC fail → deny |
+| Execution | GitHub API (httpx) | workflow_dispatch, issue creation, fail-open on API errors |
 | Schemas | Pydantic v2 | LLM output validated before any action |
 | Memory | ADK Session.state + BQ views | No new tables needed |
 
@@ -1780,7 +1788,7 @@ Development is governed through VS Code Copilot customization files that enforce
 | **1** | ADK Bootstrap | ✅ | LlmAgent, tools, callbacks, InMemoryRunner (38 tests) |
 | **2** | Real Anomaly Detection | ✅ | Z-score + threshold scoring, BQ baselines, graceful degradation (72 tests) |
 | **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
-| **4** | Guard + Execution | ⬜ | OPA callback, PQC check, mode-gated actions |
+| **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
 | **5** | Telemetry + Explainability | ⬜ | LLM logger, ActionTraces, ISO/NIST mapping |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
 | **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
@@ -1788,7 +1796,7 @@ Development is governed through VS Code Copilot customization files that enforce
 ---
 
 ## 🧠 Next Steps 
-- Begin **Step 4: Guard + Execution** via `/step4-guard-execution`
+- Begin **Step 5: Telemetry + Explainability** via `/step5-telemetry`
 
 ---
 

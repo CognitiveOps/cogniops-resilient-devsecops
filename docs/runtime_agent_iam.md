@@ -1,5 +1,5 @@
 # Runtime Agent IAM Specification
-Phase 0 – CogniOps
+Phase 0 + Step 4 – CogniOps
 
 ---
 
@@ -10,7 +10,21 @@ Required roles:
 - roles/logging.logWriter
 - roles/monitoring.metricWriter
 - roles/bigquery.dataEditor (scoped to `agent_metrics` dataset)
-- roles/secretmanager.secretAccessor (if AgentOps key stored there)
+- roles/secretmanager.secretAccessor (for GITHUB_TOKEN + AgentOps key)
+
+---
+
+## External API Access (Step 4)
+
+The runtime agent's execution tools call the **GitHub API** for:
+- `workflow_dispatch` (ROLLBACK in enforce mode)
+- Issue creation (ESCALATE, advisory notifications, QUARANTINE)
+
+Authentication: `GITHUB_TOKEN` env var, stored in **GCP Secret Manager**
+and injected into Cloud Run via Terraform secret volume mount.
+
+No additional GCP IAM roles are needed — GitHub API auth is token-based,
+not GCP IAM-based.
 
 ---
 

@@ -110,11 +110,13 @@ an uncontrolled action or crashes.
 5. Mode changes require human review and explicit deployment
 
 **Enforcement**:
-- Every execution tool checks `AGENT_MODE` before acting
-- Shadow mode: log intent → return success without executing
-- Advisory mode: log + create GitHub Issue notification
-- Enforce mode: log + execute + verify
-- Cloud Run env var `AGENT_MODE` set via Terraform (not runtime-configurable)
+- Every execution tool checks `COGNIOPS_MODE` (env var, default `shadow`) before acting
+- Shadow mode: log intent → return `executed: False` (no GitHub API calls)
+- Advisory mode: log + create GitHub Issue notification via `github_client.py` → `executed: False`
+- Enforce mode: log + execute real action (workflow_dispatch or issue creation) → `executed: True`
+- GitHub API failures in advisory/enforce are **fail-open**: log error, return `executed: False`
+- `COGNIOPS_MODE` set via Cloud Run env var (Terraform-managed, not runtime-configurable)
+- ESCALATE creates HITL issues in both advisory and enforce modes
 
 **Verification**: Unit test for each tool in each mode. Integration test: shadow
 mode event → verify BQ row shows `decision_executed=False`.
@@ -220,10 +222,16 @@ wrong region, uses unauthorized service account, etc.).
 **Guardrail**: OPA policies evaluate every execution action before it proceeds.
 
 **Enforcement**:
-- `guard_callback` calls OPA with the action context
-- OPA policies defined in `security/policies/` (version-controlled)
-- Deny reasons are logged and included in BQ decision row
+- `guard_callback` (ADK `before_tool_callback`) calls OPA via `opa_client.py`
+- OPA REST API: `POST {OPA_URL}/v1/data/cogniops/runtime/deny` with action context
+- Input document includes: action, scenario, severity, risk_score, event_type, mode, args
+- Deny reasons are logged and returned as guard block result
 - Guard blocks execution if any OPA `deny` rule fires
+- **Fail-closed**: OPA unreachable or non-200 response → deny (zero risk from OPA outages)
+- Timeout: 5s (configurable via `OPA_TIMEOUT_SEC`)
+- OPA policies defined in `security/policies/` (version-controlled)
+- Observation tools (`perceive_anomaly`, `query_recent_decisions`) bypass the guard
+- Unknown tools are always blocked
 
 ---
 
@@ -235,9 +243,12 @@ agent acts on compromised data.
 **Guardrail**: PQC signature verification (Dilithium2, FIPS 204) for artifact integrity.
 
 **Enforcement**:
-- `baseline/security/pqc/verify.py` validates signatures using liboqs
-- Guard callback includes PQC check when artifact context is present
-- Failed PQC verification → block execution, log reason, return NO_OP
+- `guard_callback` includes PQC check for S4/SS2 scenarios when artifact context is present
+- Requires `artifact_manifest`, `artifact_signature`, `artifact_public_key` in session state
+- Uses `baseline/security/pqc/verify.py` (`verify_manifest()`) with configurable backend/algorithm
+- Configuration: `PQC_BACKEND` (default `oqs`), `PQC_ALGORITHM` (default `Dilithium2`), `PQC_REPLAY_CUTOFF_SEC`
+- **Fail-closed**: PQC verification failure or backend error → block execution, log reason
+- Non-S4/SS2 scenarios skip PQC check (no artifact context required)
 
 ---
 

@@ -201,9 +201,7 @@ class TestHighSeverityDecision:
             session_id="test_policy_block",
             new_message=types.Content(
                 role="user",
-                parts=[
-                    types.Part(text="Policy violation detected in SS1 deployment")
-                ],
+                parts=[types.Part(text="Policy violation detected in SS1 deployment")],
             ),
         ):
             events.append(event)
@@ -230,9 +228,7 @@ class TestHighSeverityDecision:
             session_id="test_quarantine",
             new_message=types.Content(
                 role="user",
-                parts=[
-                    types.Part(text="SS2 integrity failure: PQC signature invalid")
-                ],
+                parts=[types.Part(text="SS2 integrity failure: PQC signature invalid")],
             ),
         ):
             events.append(event)
@@ -289,9 +285,7 @@ class TestLowSeverityDecision:
             session_id="test_mod_sev",
             new_message=types.Content(
                 role="user",
-                parts=[
-                    types.Part(text="S3 moderate degradation: severity=0.45")
-                ],
+                parts=[types.Part(text="S3 moderate degradation: severity=0.45")],
             ),
         ):
             events.append(event)
