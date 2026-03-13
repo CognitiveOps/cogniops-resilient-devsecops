@@ -184,40 +184,43 @@ planning_agent = Agent(
 
 | Tool | ADK Role | Deterministic | Description |
 |------|----------|---------------|-------------|
-| `detect_anomaly` | Perception | ✅ Yes | Z-score + threshold check against BQ baselines |
+| `perceive_anomaly` | Perception | ✅ Yes | Z-score + threshold check against BQ baselines |
 | `query_recent_decisions` | Memory | ✅ Yes | Last N decisions from `runtime_decisions` table |
-| `no_action` | Execution | ✅ Yes | Safe default — log NO_OP |
-| `trigger_rollback` | Execution | ✅ Yes | GitHub workflow_dispatch (mode-gated) |
-| `block_deployment` | Execution | ✅ Yes | Pub/Sub block event (mode-gated) |
-| `quarantine_artifact` | Execution | ✅ Yes | AR quarantine label (mode-gated) |
-| `create_hitl_issue` | Execution | ✅ Yes | GitHub Issues API (mode-gated) |
+| `no_action` | Execution | ✅ Yes | Safe default — log NO_OP (all modes) |
+| `rollback_deployment` | Execution | ✅ Yes | GitHub workflow_dispatch for `s3_edge_rollback.yml` (mode-gated) |
+| `block_deployment` | Execution | ✅ Yes | Block deployment + GitHub Issue (mode-gated) |
+| `quarantine_artifact` | Execution | ✅ Yes | Quarantine issue via GitHub API (mode-gated) |
+| `escalate_to_human` | Execution | ✅ Yes | HITL issue via GitHub Issues API (mode-gated) |
 
-### 4.4 Guard Callback (Target)
+### 4.4 Guard Callback (Implemented)
 
 ```python
-def guard_check(callback_context, tool_name, tool_args, tool_metadata):
+def guard_callback(*, tool, args, tool_context) -> Optional[dict]:
     """
     before_tool_callback — runs BEFORE every tool execution.
     Deterministic. No LLM.
+
+    - Observation tools (perceive_anomaly, query_recent_decisions) → always pass
+    - Unknown tools → always blocked (safety)
+    - Execution tools → OPA check + PQC check (S4/SS2)
     """
-    # 1. OPA policy evaluation
-    opa_result = evaluate_opa_policy(tool_name, tool_args)
+    # 1. OPA policy evaluation (fail-closed: OPA down → deny)
+    opa_result = await opa_eval(build_opa_input(action, args, session_state))
     if not opa_result.allowed:
-        return block_with_reason(opa_result.deny_reasons)
+        return {"action": "NO_OP", "guard_blocked": True, "guard_reason": "opa_violation"}
 
-    # 2. PQC integrity check (if applicable)
-    if requires_pqc_verification(tool_args):
-        pqc_result = verify_pqc_signature(tool_args)
-        if not pqc_result.valid:
-            return block_with_reason("PQC signature verification failed")
-
-    # 3. Mode check — shadow mode blocks all destructive tools
-    if get_current_mode() == "shadow" and tool_name != "no_action":
-        log_shadow_intent(tool_name, tool_args)
-        return redirect_to_no_action()
+    # 2. PQC integrity check (S4/SS2 only, if artifact context present)
+    if scenario in ("S4", "SS2") and has_artifact_context(session_state):
+        verified, reason = verify_manifest(backend, algorithm, manifest, sig, pub_key)
+        if not verified:
+            return {"action": "NO_OP", "guard_blocked": True, "guard_reason": "pqc_failure"}
 
     return None  # Allow execution
 ```
+
+**Guard Semantics:**
+- Guard is **fail-closed**: OPA unreachable or PQC error → deny
+- Execution tools are **fail-open**: GitHub API failure → log + NO_OP
 
 ### 4.5 Session State for Episodic Memory
 

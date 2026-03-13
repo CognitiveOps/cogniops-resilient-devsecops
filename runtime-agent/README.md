@@ -1,13 +1,14 @@
-# Runtime Agent – Phase 0 + ADK Bootstrap (Shadow Mode)
+# Runtime Agent – Phase 0 + ADK Bootstrap + Guard & Execution (Shadow Mode)
 
 Cloud Run micro-service that receives runtime events via Pub/Sub,
 runs a four-stage decision pipeline, and logs every decision to BigQuery.
 
 Includes the **ADK cognitive agent** (`agent/` module) with Gemini-based
-planning via ADK tool calling (LLM confined to Planning module only).
+planning via ADK tool calling (LLM confined to Planning module only),
+**OPA + PQC guard** (fail-closed), and **mode-gated execution** (shadow/advisory/enforce).
 
-> **Current constraint:** all decisions are `NO_OP`, nothing is executed,
-> and `mode` is always `shadow`.
+> **Current constraint:** all decisions default to `shadow` mode —
+> decisions are logged but not executed.
 
 ---
 
@@ -29,10 +30,12 @@ runtime-agent/
 │   │   ├── perception_tool.py  # ADK FunctionTool — z-score + threshold anomaly detection
 │   │   ├── anomaly_detection.py # Z-score & threshold scoring engine (Step 2)
 │   │   ├── baseline_reader.py  # BQ 7-day rolling baseline queries (Step 2)
-│   │   ├── execution_tools.py  # Bounded actions: NO_OP, BLOCK, ROLLBACK, QUARANTINE, ESCALATE
-│   │   └── memory_tools.py     # Episodic memory: query recent decisions from BQ
+│   ├── execution_tools.py  # Mode-gated bounded actions: NO_OP, BLOCK, ROLLBACK, QUARANTINE, ESCALATE
+│   ├── github_client.py    # GitHub API: workflow_dispatch, issue creation (httpx async)
+│   └── memory_tools.py     # Episodic memory: query recent decisions from BQ
 │   ├── callbacks/
-│   │   └── guard_callback.py   # before_tool_callback (OPA guard — stub in Step 1)
+│   │   ├── guard_callback.py   # before_tool_callback (OPA + PQC guard, fail-closed)
+│   │   └── opa_client.py       # OPA REST API client (timeout 5s, fail-closed)
 │   └── prompts/
 │       ├── system.txt          # System prompt with decision criteria matrix
 │       ├── few_shot_s1.txt     # Pipeline failure: high CFR → ROLLBACK
@@ -55,10 +58,13 @@ runtime-agent/
 │   ├── agentops_client.py      # trace_pipeline(event_id)  context manager
 │   └── llm_logger.py           # LLM call logging (prompt hash, latency, tokens)
 │
-└── tests/                      # pytest unit tests (98 tests)
+└── tests/                      # pytest unit tests (145 tests)
     ├── conftest.py
     ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
     ├── test_planning_llm.py    # Step 3: LLM planning, few-shots, episodic context, fallback, logger
+    ├── test_guard_opa.py       # Step 4: OPA guard, PQC check, observation/execution gating
+    ├── test_execution_modes.py # Step 4: shadow/advisory/enforce mode gating per tool
+    ├── test_github_client.py   # Step 4: GitHub API mock tests (dispatch, issues)
     ├── test_perception.py      # Phase 0 perception stub tests
     ├── test_perception_real.py # Step 2: z-score, threshold, combined scoring, graceful degradation
     ├── test_playbook.py
