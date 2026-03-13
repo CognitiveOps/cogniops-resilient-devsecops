@@ -3,8 +3,8 @@
 Cloud Run micro-service that receives runtime events via Pub/Sub,
 runs a four-stage decision pipeline, and logs every decision to BigQuery.
 
-Includes the **ADK cognitive agent** (`agent/` module) which provides the
-LlmAgent structure for future Gemini-based planning (Step 3+).
+Includes the **ADK cognitive agent** (`agent/` module) with Gemini-based
+planning via ADK tool calling (LLM confined to Planning module only).
 
 > **Current constraint:** all decisions are `NO_OP`, nothing is executed,
 > and `mode` is always `shadow`.
@@ -34,7 +34,11 @@ runtime-agent/
 │   ├── callbacks/
 │   │   └── guard_callback.py   # before_tool_callback (OPA guard — stub in Step 1)
 │   └── prompts/
-│       └── system.txt          # Bounded-action system prompt
+│       ├── system.txt          # System prompt with decision criteria matrix
+│       ├── few_shot_s1.txt     # Pipeline failure: high CFR → ROLLBACK
+│       ├── few_shot_s3.txt     # Resilience: high MTTD → ESCALATE / ROLLBACK
+│       ├── few_shot_s5.txt     # Explainability: low ACR → ESCALATE
+│       └── few_shot_ss2.txt    # Adaptive threat: integrity → QUARANTINE
 │
 ├── perception/
 │   └── handler.py              # perceive(event) → AnomalyOutput (Phase 0 stub)
@@ -48,11 +52,13 @@ runtime-agent/
 ├── storage/
 │   └── bigquery_writer.py      # write_decision(row) → bool  (best-effort)
 ├── telemetry/
-│   └── agentops_client.py      # trace_pipeline(event_id)  context manager
+│   ├── agentops_client.py      # trace_pipeline(event_id)  context manager
+│   └── llm_logger.py           # LLM call logging (prompt hash, latency, tokens)
 │
-└── tests/                      # pytest unit tests (72 tests)
+└── tests/                      # pytest unit tests (98 tests)
     ├── conftest.py
     ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
+    ├── test_planning_llm.py    # Step 3: LLM planning, few-shots, episodic context, fallback, logger
     ├── test_perception.py      # Phase 0 perception stub tests
     ├── test_perception_real.py # Step 2: z-score, threshold, combined scoring, graceful degradation
     ├── test_playbook.py

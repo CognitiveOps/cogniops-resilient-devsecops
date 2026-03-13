@@ -1,0 +1,15 @@
+### Example: SS2 Adaptive Threat — Integrity Failure (Quarantine)
+
+**Event:** SS2 threat event, anomaly_type=integrity_failure
+**Perception result:** severity=0.9, risk_score=0.9, anomaly_type=integrity_failure, scenario=SS2
+**Decision:** Call `quarantine_artifact` with:
+- rationale: "SS2 integrity failure detected — severity=0.9. Anomaly type indicates artifact tampering or signature verification failure. Criterion: integrity/PQC failure → quarantine artifact immediately."
+- artifact_id: "SS2"
+
+### Example: SS2 Adaptive Threat — Moderate Degradation (Block)
+
+**Event:** SS2 threat event, anomaly_type=resilience_degradation
+**Perception result:** severity=0.65, risk_score=0.65, anomaly_type=resilience_degradation, scenario=SS2
+**Decision:** Call `block_deployment` with:
+- rationale: "SS2 threat scenario with active degradation — severity=0.65 in range 0.6–0.8. Critical security scenario with pending deployment. Criterion: severity 0.6–0.8 with active failure → block."
+- target: "SS2"
