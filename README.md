@@ -1779,7 +1779,7 @@ Development is governed through VS Code Copilot customization files that enforce
 | **0** | AI Audit + Design Docs | ✅ | `docs/ai-audit-report.md`, `ai-design-architecture.md`, `system-guardrails.md` |
 | **1** | ADK Bootstrap | ✅ | LlmAgent, tools, callbacks, InMemoryRunner (38 tests) |
 | **2** | Real Anomaly Detection | ✅ | Z-score + threshold scoring, BQ baselines, graceful degradation (72 tests) |
-| **3** | LLM Planning (Gemini) | ⬜ | Tool-calling agent, system prompt, few-shot, fallback |
+| **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
 | **4** | Guard + Execution | ⬜ | OPA callback, PQC check, mode-gated actions |
 | **5** | Telemetry + Explainability | ⬜ | LLM logger, ActionTraces, ISO/NIST mapping |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
@@ -1788,7 +1788,7 @@ Development is governed through VS Code Copilot customization files that enforce
 ---
 
 ## 🧠 Next Steps 
-- Begin **Step 3: LLM Planning (Gemini)** via `/step3-planning`
+- Begin **Step 4: Guard + Execution** via `/step4-guard-execution`
 
 ---
 

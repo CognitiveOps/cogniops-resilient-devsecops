@@ -1,0 +1,15 @@
+### Example: S3 Resilience — Moderate MTTD (Escalate)
+
+**Event:** S3 resilience test, metrics: {"mttd_sec": 95, "mttr_sec": 100}
+**Perception result:** severity=0.55, risk_score=0.55, anomaly_type=resilience_degradation, scenario=S3
+**Decision:** Call `escalate_to_human` with:
+- rationale: "S3 resilience degradation — severity=0.55 in ambiguous range (0.3–0.6). MTTD=95s exceeds warning (60s) but below critical (120s). Criterion: severity 0.3–0.6 → escalate for human review."
+- summary: "S3 MTTD=95s above warning threshold — review detection performance"
+
+### Example: S3 Resilience — Critical MTTR (Rollback)
+
+**Event:** S3 resilience test, metrics: {"mttd_sec": 130, "mttr_sec": 350}
+**Perception result:** severity=0.85, risk_score=0.85, anomaly_type=resilience_degradation, scenario=S3
+**Decision:** Call `rollback_deployment` with:
+- rationale: "S3 critical resilience failure — severity=0.85 > 0.8. MTTR=350s exceeds critical threshold (300s), MTTD=130s exceeds critical (120s). Both recovery and detection severely degraded. Criterion: severity > 0.8 → rollback."
+- target: "S3"

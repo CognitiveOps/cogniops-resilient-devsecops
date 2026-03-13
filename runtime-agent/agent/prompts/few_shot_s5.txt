@@ -1,0 +1,7 @@
+### Example: S5 Explainability — Low ACR (Escalate)
+
+**Event:** S5 explainability check, metrics: {"acr": 0.65}
+**Perception result:** severity=0.45, risk_score=0.27, anomaly_type=policy_violation, scenario=S5
+**Decision:** Call `escalate_to_human` with:
+- rationale: "S5 audit completeness issue — severity=0.45 in range 0.3–0.6. ACR=0.65 indicates incomplete audit records. Criterion: moderate severity with ambiguous signals → escalate for human review of audit trail."
+- summary: "S5 ACR=0.65 — audit records incomplete, review required"

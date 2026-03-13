@@ -1,0 +1,14 @@
+### Example: S1 Pipeline Failure — Critical CFR
+
+**Event:** S1 pipeline run with duration 280s, metrics: {"ttd_sec": 280, "cfr": 0.30}
+**Perception result:** severity=0.85, risk_score=0.68, anomaly_type=pipeline_failure, scenario=S1
+**Decision:** Call `rollback_deployment` with:
+- rationale: "S1 critical pipeline failure — severity=0.85 exceeds 0.8 threshold. CFR=0.30 above critical limit (0.25), TTD=280s above warning (180s). Criterion: severity > 0.8 → rollback."
+- target: "S1"
+
+### Example: S1 Pipeline — Normal Metrics
+
+**Event:** S1 pipeline run with duration 100s, metrics: {"ttd_sec": 100, "cfr": 0.05}
+**Perception result:** severity=0.0, risk_score=0.0, anomaly_type=pipeline_failure, scenario=S1
+**Decision:** Call `no_action` with:
+- rationale: "S1 pipeline metrics within normal range — severity=0.0 < 0.3. TTD=100s below warning (180s), CFR=0.05 below warning (0.10). No intervention needed."

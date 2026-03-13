@@ -390,37 +390,40 @@ All LLM prompts are version-controlled files, not embedded strings.
 
 ```
 runtime-agent/agent/prompts/
-├── system.txt                # Core system prompt (role, constraints, output format)
-├── few_shot_s1.txt           # Pipeline failure examples
-├── few_shot_s3.txt           # Resilience degradation examples
-├── few_shot_ss2.txt          # Adaptive threat examples
-└── context_template.txt      # Dynamic context injection template
+├── system.txt                # Core system prompt (role, constraints, decision criteria)
+├── few_shot_s1.txt           # Pipeline failure: high CFR → ROLLBACK, normal → NO_OP
+├── few_shot_s3.txt           # Resilience: moderate MTTD → ESCALATE, critical MTTR → ROLLBACK
+├── few_shot_s5.txt           # Explainability: low ACR → ESCALATE
+├── few_shot_ss2.txt          # Adaptive threat: integrity → QUARANTINE, degradation → BLOCK
+└── (loaded by _build_instruction() in cogniops_agent.py)
 
 design-agent/agent/prompts/
-└── design_system.txt         # Design-time reasoning prompt
+└── design_system.txt         # Design-time reasoning prompt (Step 6)
 ```
 
-### 7.2 System Prompt Structure (Runtime)
+### 7.2 System Prompt Structure (Runtime — Implemented)
 
-```
-[ROLE]
-You are CogniOps, an autonomous DevSecOps agent monitoring {scenario_count}
-production scenarios. You analyze anomalies and select bounded mitigation actions.
+The system prompt (`system.txt`) contains:
 
-[CONSTRAINTS]
-- You may ONLY call the tools provided. No other actions exist.
-- If uncertain, call no_action (NO_OP). This is always safe.
-- Never generate text output. Only call tools.
-- Consider the recent_decisions context before acting to avoid repeated actions.
+1. **Role definition**: CogniOps Runtime Planning Agent, only LLM component in pipeline
+2. **Input format**: Structured anomaly data from Perception (scenario, severity, risk_score)
+3. **Decision criteria matrix** (priority order):
+   - PQC / integrity failure → `QUARANTINE`
+   - Policy violation → `BLOCK`
+   - severity > 0.8 → `ROLLBACK`
+   - severity 0.6–0.8 + active failure → `BLOCK` or `ROLLBACK`
+   - severity 0.3–0.6 → `ESCALATE`
+   - severity < 0.3 → `NO_OP`
+4. **Process**: perceive_anomaly → query_recent_decisions (optional) → one action tool
+5. **Rationale requirements**: must cite severity, criterion, scenario
+6. **Constraints**: tool-only output, no free text, no multiple actions
 
-[CONTEXT]
-Current mode: {mode}
-Recent decisions: {recent_decisions_summary}
-Baseline metrics: {baseline_summary}
-Event: {current_event}
+Few-shot examples are loaded from `few_shot_*.txt` files (sorted alphabetically)
+and appended to the system prompt under a `## Few-Shot Examples` section.
 
-[EXAMPLES]
-{few_shot_examples}
+Assembly is handled by `_build_instruction()` in `cogniops_agent.py`:
+```python
+instruction = _load_prompt("system.txt") + "\n\n## Few-Shot Examples\n\n" + _load_few_shots()
 ```
 
 ### 7.3 LLM Call Flow
