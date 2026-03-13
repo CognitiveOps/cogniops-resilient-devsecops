@@ -1795,7 +1795,51 @@ Development is governed through VS Code Copilot customization files that enforce
 
 ---
 
-## 🧠 Next Steps 
+## 🚀 Deployment & Wiring Checklist (pre–Step 6)
+
+Before starting the Design-Time Agent, the Runtime Agent must be deployed
+and validated end-to-end in shadow mode.
+
+### Infrastructure Deploy
+
+| Task | Command / Action | Verify |
+|------|-----------------|--------|
+| Build Docker image | `docker build -t runtime-agent:v0.5.0 runtime-agent/` | Image builds without errors |
+| Push to Artifact Registry | `docker push <REGION>-docker.pkg.dev/<PROJECT>/cogniops/runtime-agent:v0.5.0` | Image visible in Console |
+| Deploy to Cloud Run | `gcloud run deploy runtime-agent --image=... --set-env-vars=...` | `GET /healthz` returns `{"status":"ok"}` |
+| Verify ADK agent loads | `curl <CLOUD_RUN_URL>/agent/info` | `{"status":"loaded","agent_name":"cogniops_planning"}` |
+
+### Service Wiring
+
+| Task | Details | Verify |
+|------|---------|--------|
+| Pub/Sub topic | Create `runtime-events` topic (if not exists) | `gcloud pubsub topics describe runtime-events` |
+| Push subscription | Create push subscription → `POST <CLOUD_RUN_URL>/events/runtime` | Subscription visible in Console |
+| OPA endpoint | Deploy OPA server/sidecar with `security/policies/` | Set `OPA_URL` env var, `GET <OPA_URL>/health` |
+| BQ table | Confirm `agent_metrics.runtime_decisions` schema matches `DecisionRow` | `bq show agent_metrics.runtime_decisions` |
+| Secrets | `GITHUB_TOKEN`, `AGENTOPS_API_KEY` in Secret Manager, mounted as env vars | `gcloud secrets versions access latest --secret=...` |
+
+### End-to-End Validation (Shadow Mode)
+
+| Task | Details | Expected |
+|------|---------|----------|
+| Publish test event | `scripts/test_publish_runtime_event.sh` | Pipeline completes, 200 response |
+| Verify BQ row | `scripts/verify_runtime_decision.sh` | Row with `mode=shadow`, `decision_executed=false` |
+| Verify ActionTrace | Check Cloud Logging for `ActionTrace valid` log | `trace_valid=true` in response |
+| Verify LLM logging | Check Cloud Logging for `LLM call:` entries | Prompt hash, latency, model version present |
+
+### Wire ADK Runner (optional before Step 6)
+
+> **Note:** `main.py` currently uses Phase 0 stubs (`perceive()` → `select_playbook()`
+> → `check_policy()` → `execute()`). The ADK agent exists but is only loaded at
+> `GET /agent/info`. Wiring the ADK `InMemoryRunner` into the `POST /events/runtime`
+> endpoint replaces the stubs with real LLM-driven planning. This should be done
+> in shadow mode first.
+
+---
+
+## 🧠 Next Steps
+- Complete **Deployment & Wiring Checklist** (above)
 - Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
 
 ---
