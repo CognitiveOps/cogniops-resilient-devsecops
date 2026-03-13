@@ -57,7 +57,12 @@ class TestPolicyRefsMapping:
 
     @pytest.mark.parametrize(
         "decision",
-        [DecisionType.BLOCK, DecisionType.ROLLBACK, DecisionType.QUARANTINE, DecisionType.ESCALATE],
+        [
+            DecisionType.BLOCK,
+            DecisionType.ROLLBACK,
+            DecisionType.QUARANTINE,
+            DecisionType.ESCALATE,
+        ],
     )
     def test_action_types_have_three_refs(self, decision: DecisionType) -> None:
         """Each action type maps to exactly 3 control refs (NIST + ISO + IMO)."""

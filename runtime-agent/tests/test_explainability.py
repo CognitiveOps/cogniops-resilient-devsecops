@@ -187,8 +187,9 @@ class TestEmitActionTrace:
     def test_with_ingest_url_calls_emit(self) -> None:
         """When METRICS_INGEST_URL is set, emission is attempted."""
         trace = _make_trace()
-        with patch("telemetry.trace_emitter.METRICS_INGEST_URL", "http://localhost:9999/ingest"), \
-             patch("baseline.explainability.emit.emit_cloudevent") as mock_emit:
+        with patch(
+            "telemetry.trace_emitter.METRICS_INGEST_URL", "http://localhost:9999/ingest"
+        ), patch("baseline.explainability.emit.emit_cloudevent") as mock_emit:
             result = emit_action_trace(trace)
             assert result is True
             mock_emit.assert_called_once()

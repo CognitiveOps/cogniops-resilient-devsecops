@@ -232,8 +232,7 @@ async def agent_info():
         from agent.cogniops_agent import cogniops_agent
 
         tool_names = [
-            t.__name__ if callable(t) else str(t)
-            for t in cogniops_agent.tools
+            t.__name__ if callable(t) else str(t) for t in cogniops_agent.tools
         ]
         return {
             "agent_name": cogniops_agent.name,
