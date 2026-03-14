@@ -1,0 +1,161 @@
+name: Runtime Agent — Test, Build, Bundle & Deploy
+
+on:
+  push:
+    branches: [runtime_agent_dev, main]
+    paths:
+      - "runtime-agent/**"
+      - "security/policies/**"
+      - "config/**"
+      - ".github/workflows/runtime_agent_deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  REPO_LOCATION: ${{ vars.GCP_REPO_LOCATION || 'europe' }}
+  AR_REPO: "apps"
+  SERVICE: "runtime-agent"
+  CONFIG_BUCKET: "${{ vars.GCP_PROJECT_ID }}-cogniops-config"
+
+concurrency:
+  group: runtime-agent-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Run tests ──────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r runtime-agent/requirements.txt
+      - name: Run tests
+        run: cd runtime-agent && python -m pytest tests/ -v
+
+  # ── Job 2: Build & validate OPA bundle, upload config to GCS ──────
+  bundle-policies:
+    needs: test
+    if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP (OIDC/WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install OPA CLI
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+          chmod +x opa && sudo mv opa /usr/local/bin/opa
+
+      - name: Validate Rego policies
+        run: opa check security/policies/
+
+      - name: Build OPA bundle & upload to GCS
+        run: |
+          opa build -b security/policies/ -o bundle.tar.gz
+          gsutil cp bundle.tar.gz "gs://${CONFIG_BUCKET}/bundles/runtime/bundle.tar.gz"
+
+      - name: Upload control mappings
+        run: |
+          gsutil cp config/control-mappings.yaml "gs://${CONFIG_BUCKET}/control-mappings/v1.yaml"
+
+  # ── Job 3: Build & push Docker image ──────────────────────────────
+  build-push:
+    needs: test
+    if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP (OIDC/WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REPO_LOCATION}-docker.pkg.dev" --quiet
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${GITHUB_SHA}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push Docker image
+        run: |
+          docker build -t "${{ steps.meta.outputs.image }}" runtime-agent/
+          docker push "${{ steps.meta.outputs.image }}"
+
+  # ── Job 4: Deploy to Cloud Run ────────────────────────────────────
+  deploy:
+    needs: [build-push, bundle-policies]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Auth to GCP (OIDC/WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy runtime-agent
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: runtime-agent
+          region: ${{ env.REGION }}
+          image: ${{ needs.build-push.outputs.image }}
+          env_vars: |
+            COMMIT_SHA=${{ github.sha }}
+
+  # ── Job 5: Smoke test ─────────────────────────────────────────────
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to GCP (OIDC/WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Health & agent-info checks
+        run: |
+          URL=$(gcloud run services describe runtime-agent --region="${REGION}" --format='value(status.url)')
+          TOKEN=$(gcloud auth print-identity-token --audiences="$URL")
+          echo "Runtime agent URL: $URL"
+
+          echo "── Health check ──"
+          curl -sf -H "Authorization: Bearer $TOKEN" "$URL/healthz"
+
+          echo ""
+          echo "── Agent info ──"
+          curl -sf -H "Authorization: Bearer $TOKEN" "$URL/agent/info"

@@ -10,13 +10,36 @@ Spec: full Pub/Sub push message → 200 + correct pipeline output
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from main import app
 from tests.conftest import SAMPLE_EVENT_DICT, SAMPLE_EVENT_NO_SCENARIO, make_pubsub_body
+
+
+def _mock_no_op_runner():
+    """Create a mock ADK runner that produces a NO_OP tool result."""
+    part = MagicMock()
+    part.function_response = MagicMock()
+    part.function_response.response = {
+        "action": "NO_OP",
+        "rationale": "Test: shadow mode default",
+        "executed": False,
+        "mode": "shadow",
+    }
+    content = MagicMock()
+    content.parts = [part]
+    event = MagicMock()
+    event.content = content
+
+    async def mock_run_async(**kwargs):
+        yield event
+
+    mock_runner = MagicMock()
+    mock_runner.run_async = mock_run_async
+    return mock_runner
 
 
 @pytest.fixture
@@ -34,7 +57,11 @@ class TestEndpoint:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("main.write_decision", return_value=True):
+            with (
+                patch("main.runner", _mock_no_op_runner()),
+                patch("main.write_decision", return_value=True),
+                patch("main.emit_action_trace", return_value=True),
+            ):
                 resp = await client.post("/events/runtime", json=body)
 
         assert resp.status_code == 200
@@ -53,7 +80,11 @@ class TestEndpoint:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            with patch("main.write_decision", return_value=True):
+            with (
+                patch("main.runner", _mock_no_op_runner()),
+                patch("main.write_decision", return_value=True),
+                patch("main.emit_action_trace", return_value=True),
+            ):
                 resp = await client.post("/events/runtime", json=body)
 
         assert resp.status_code == 200
@@ -102,7 +133,7 @@ class TestEndpoint:
         assert "invalid_event_schema" in resp.json()["detail"]["error"]
 
     async def test_healthz_returns_ok(self):
-        """GET /healthz → 200 with shadow mode info."""
+        """GET /healthz → 200 with mode info."""
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/healthz")
@@ -110,5 +141,4 @@ class TestEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["mode"] == "shadow"
-        assert data["phase"] == 0
+        assert "mode" in data

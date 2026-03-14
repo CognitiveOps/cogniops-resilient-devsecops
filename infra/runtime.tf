@@ -193,6 +193,108 @@ resource "google_bigquery_table" "runtime_decisions" {
 
 
 ###########################
+# GCS: cogniops-config (live-updatable config store)
+###########################
+resource "google_storage_bucket" "cogniops_config" {
+  name          = "${var.project_id}-cogniops-config"
+  location      = var.bucket_location
+  force_destroy = false
+
+  versioning { enabled = true }
+
+  uniform_bucket_level_access = true
+}
+
+# runtime-agent-sa needs objectViewer to poll config from GCS
+resource "google_storage_bucket_iam_member" "runtime_agent_config_reader" {
+  bucket = google_storage_bucket.cogniops_config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.runtime_agent.email}"
+}
+
+# gha-app SA needs objectCreator to upload bundles/config from CI
+resource "google_storage_bucket_iam_member" "gha_app_config_writer" {
+  bucket = google_storage_bucket.cogniops_config.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+
+###########################
+# Secret Manager: runtime-agent secrets
+###########################
+resource "google_secret_manager_secret" "runtime_github_token" {
+  secret_id = "runtime-agent-github-token"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret" "runtime_agentops_key" {
+  secret_id = "runtime-agent-agentops-key"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+
+###########################
+# OPA Server (Cloud Run) — bundle polling from GCS
+###########################
+resource "google_service_account" "opa" {
+  account_id   = "opa-server-sa"
+  display_name = "OPA Server (Cloud Run)"
+}
+
+# OPA SA needs objectViewer to poll bundles from GCS
+resource "google_storage_bucket_iam_member" "opa_config_reader" {
+  bucket = google_storage_bucket.cogniops_config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.opa.email}"
+}
+
+resource "google_cloud_run_v2_service" "opa" {
+  name     = "opa-server"
+  location = var.region
+
+  template {
+    service_account = google_service_account.opa.email
+
+    containers {
+      image = "openpolicyagent/opa:latest-static"
+      args = [
+        "run", "--server", "--addr=:8181",
+        "--set=decision_logs.console=true",
+      ]
+      ports { container_port = 8181 }
+      resources {
+        limits = { cpu = "0.5", memory = "256Mi" }
+      }
+    }
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+  }
+
+  ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  depends_on = [google_project_service.services]
+}
+
+# runtime-agent-sa can invoke OPA service
+resource "google_cloud_run_v2_service_iam_member" "runtime_agent_opa_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.opa.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.runtime_agent.email}"
+}
+
+
+###########################
 # Cloud Run v2: runtime-agent
 ###########################
 resource "google_cloud_run_v2_service" "runtime_agent" {
@@ -208,10 +310,7 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
     }
 
     containers {
-      # Placeholder image – replaced by CI/CD once runtime-agent Docker image is built.
-      # After Commit 2, update to:
-      #   ${var.repo_location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker.repository_id}/runtime-agent:latest
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
+      image = var.runtime_agent_image
 
       ports {
         container_port = 8080
@@ -248,6 +347,48 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
       env {
         name  = "LOG_LEVEL"
         value = "INFO"
+      }
+      env {
+        name  = "COGNIOPS_MODE"
+        value = "shadow"
+      }
+      env {
+        name  = "COGNIOPS_MODEL"
+        value = "gemini-2.0-flash"
+      }
+      env {
+        name  = "METRICS_INGEST_URL"
+        value = ""  # Set after ingest function is deployed
+      }
+      env {
+        name  = "COMMIT_SHA"
+        value = "managed-by-ci"  # Overridden at deploy time
+      }
+      env {
+        name  = "OPA_URL"
+        value = google_cloud_run_v2_service.opa.uri
+      }
+      env {
+        name  = "CONFIG_BUCKET"
+        value = google_storage_bucket.cogniops_config.name
+      }
+      env {
+        name = "GITHUB_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.runtime_github_token.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AGENTOPS_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.runtime_agentops_key.secret_id
+            version = "latest"
+          }
+        }
       }
     }
   }
@@ -287,4 +428,14 @@ output "runtime_events_topic" {
 output "runtime_events_dlq_topic" {
   description = "Pub/Sub DLQ topic name for failed runtime events."
   value       = google_pubsub_topic.runtime_events_dlq.name
+}
+
+output "opa_server_url" {
+  description = "URL of the OPA Cloud Run service."
+  value       = google_cloud_run_v2_service.opa.uri
+}
+
+output "cogniops_config_bucket" {
+  description = "GCS bucket name for OPA bundles and config YAML."
+  value       = google_storage_bucket.cogniops_config.name
 }

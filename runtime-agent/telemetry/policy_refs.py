@@ -41,8 +41,14 @@ _CONTROL_MAP: dict[DecisionType, list[str]] = {
 
 
 def get_policy_refs(decision: DecisionType) -> list[str]:
-    """Return control references for the given decision type.
+    """Return control references — live from GCS, fallback to built-in."""
+    try:
+        from telemetry.config_store import config_store
 
-    Returns an empty list for NO_OP.
-    """
+        mappings = config_store.get_control_mappings()
+        refs = mappings.get(decision.value, [])
+        if refs:
+            return list(refs)
+    except Exception:
+        pass  # Fall through to built-in
     return list(_CONTROL_MAP.get(decision, []))
