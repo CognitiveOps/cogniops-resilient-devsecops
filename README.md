@@ -1663,23 +1663,24 @@ Every processed event produces a decision row with:
 
 ## 🤖 AI Agent Architecture
 
-CogniOps uses a **Hybrid Cognitive-SOAR** architecture with two AI agents built on [Google ADK](https://google.github.io/adk-docs/) (Agent Development Kit) + Vertex AI Gemini.
+CogniOps uses a **Hybrid Cognitive-SOAR** architecture with three AI agents built on [Google ADK](https://google.github.io/adk-docs/) (Agent Development Kit) + Vertex AI Gemini.
 
 ### Two-Layer System
 
 ```
-┌──────────────────────────────────────────────────────┐
-│              COGNITIVE CONTROL PLANE                   │
-│                                                        │
-│  Runtime Agent          Design-Time Agent              │
-│  (operational)          (structural)                   │
-│  Event → Perceive →     Metrics → Context →            │
-│  Plan → Guard → Act     Plan → Validate → Propose      │
-│                                                        │
-├────────────────────────────────────────────────────────┤
-│              DETERMINISTIC SUBSTRATE                    │
-│  S1–S5, SS1–SS2 │ BQ │ OPA │ PQC │ Explainability     │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                    COGNITIVE CONTROL PLANE                          │
+│                                                                     │
+│  Runtime Agent        Security Agent        Design-Time Agent       │
+│  (operational)        (compliance)          (structural)            │
+│  Event → Perceive →   Feed → Diff →         Metrics → Context →    │
+│  Plan → Guard → Act   Plan → Validate →     Plan → Validate →      │
+│                       Propose (GCS+Issue)   Propose (GCS)           │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                    DETERMINISTIC SUBSTRATE                          │
+│  S1–S5, SS1–SS2 │ BQ │ OPA │ PQC │ Explainability │ NIST Feeds    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Runtime Agent Pipeline
@@ -1709,6 +1710,23 @@ CogniOps uses a **Hybrid Cognitive-SOAR** architecture with two AI agents built 
 
 **Mode Progression**: `shadow` (log only) → `advisory` (log + notify) → `enforce` (log + execute)
 
+### Security Compliance Agent Pipeline (propose-only)
+
+| Stage | Module | Deterministic | Description |
+|-------|--------|:---:|---|
+| **Ingestion** | `agent/tools/nist_feed.py` | ✅ | NIST NVD API v2 + SP 800-53 CPRT feed fetch (fail-safe: errors → empty) |
+| **Diff** | `agent/tools/diff_engine.py` | ✅ | Compare feed entries against current `control-mappings.yaml` |
+| **Enrich** | `agent/tools/diff_engine.py` | ✅ | Stage 2: full control text only for changed entries (minimize API calls) |
+| **Planning** | `agent/compliance_agent.py` (LlmAgent) | ❌ LLM | Gemini assesses impact + generates YAML patch + Rego suggestions |
+| **Validation** | `agent/tools/validator.py` | ✅ | Superset-only rule, confidence ≥ 0.3, `requires_human_review=True` enforced |
+| **Output** | `main.py` | ✅ | GCS proposal JSON + GitHub Issue for human review |
+
+**Propose-only invariant** — the Security Agent:
+- Never modifies `control-mappings.yaml` or OPA policies directly
+- Every `ComplianceProposal` has `requires_human_review: Literal[True]`
+- Runs weekly via Cloud Scheduler (internal-only Cloud Run, no public endpoint)
+- All API failures → empty results (fail-safe), LLM failure → no proposal emitted
+
 ### Design-Time Agent
 
 Analyzes accumulated metrics and produces **structural improvement proposals** (JSON documents stored in GCS). Never executes operational actions. Separate service account.
@@ -1725,6 +1743,7 @@ Analyzes accumulated metrics and produces **structural improvement proposals** (
 | Execution | GitHub API (httpx) | workflow_dispatch, issue creation, fail-open on API errors |
 | Schemas | Pydantic v2 | LLM output validated before any action |
 | Memory | ADK Session.state + BQ views | No new tables needed |
+| Propose-Only (Security Agent) | GCS JSON + GitHub Issue | `requires_human_review=True` enforced, never writes YAML/Rego directly |
 
 For complete architecture details, see [AI Design Architecture](docs/ai-design-architecture.md).  
 For safety constraints, see [System Guardrails](docs/system-guardrails.md).  
@@ -1842,8 +1861,50 @@ config/*.yaml       ──→  CI: upload     ──→  GCS bucket  ──→  
 
 ---
 
+## 🛡️ Step 6b: Security Compliance Agent
+
+Automated NIST compliance monitoring — detects regulatory control updates and
+proposes changes to `control-mappings.yaml` and OPA policies. **Propose-only: never executes changes.**
+
+### Pipeline
+
+```
+Cloud Scheduler (weekly) → Feed Ingestion → Diff Engine → Enrich (full text)
+  → Compliance Planner (LlmAgent) → Validator → GCS proposal + GitHub Issue
+```
+
+### Deliverables
+
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **Code** | `security-agent/agent/tools/nist_feed.py` | NIST NVD API v2 + SP 800-53 CPRT ingestion, 2-stage fetch (diff first, full text only for relevant), fail-safe on API errors |
+| **Code** | `security-agent/agent/tools/diff_engine.py` | Deterministic comparison: current YAML vs feed data, enrichment with full control text from CPRT |
+| **Code** | `security-agent/agent/tools/proposal_builder.py` | Assembles `ComplianceProposal` from LLM output + diff report |
+| **Code** | `security-agent/agent/tools/validator.py` | YAML schema, superset-only rule, confidence threshold, `requires_human_review=True` enforcement |
+| **Code** | `security-agent/agent/compliance_agent.py` | ADK `LlmAgent` — only LLM component in the pipeline |
+| **Code** | `security-agent/main.py` | FastAPI: `POST /run` (full pipeline), `GET /healthz`, `GET /agent/info` |
+| **Prompt** | `security-agent/agent/prompts/compliance_system.txt` | Scenario-metric matrix, control mapping context, output rules |
+| **Models** | `security-agent/models/schemas.py` | 12 Pydantic v2 schemas: `FeedEntry`, `DiffReport`, `EnrichedEntry`, `ComplianceProposal`, `ValidationResult`, etc. |
+| **IaC** | `infra/compliance.tf` | `compliance-agent-sa`, Cloud Run (internal-only), Cloud Scheduler (weekly Mon 06:00 UTC), NIST API key secret |
+| **CI/CD** | `.github/workflows/compliance_agent_deploy.yml` | test → build-push → deploy → smoke-test (4-job pipeline) |
+| **Tests** | 68 tests across 6 test files | schemas (15), feed ingestion (13), diff engine (14), proposal builder (10), validator (11), E2E pipeline (9) |
+
+### Design Rules
+
+| Rule | Detail |
+|------|--------|
+| Propose-only | JSON proposals in GCS + GitHub Issues — never modifies files |
+| LLM only in Planning | All other modules (feed, diff, validator) are 100% deterministic |
+| 2-stage fetch | Stage 1: fast diff → Stage 2: full text fetch only for changed controls |
+| Fail-safe | NIST down → skip cycle; LLM failure → fallback proposal (confidence 0.3) |
+| Always human review | `requires_human_review: Literal[True]` — Pydantic rejects False |
+| Separate SA | `compliance-agent-sa` with least-privilege IAM |
+
+---
+
 ## Next Steps
 - Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
+- Begin **Step 7: 2-Axis Evaluation** (evaluates all three agents together)
 
 ---
 

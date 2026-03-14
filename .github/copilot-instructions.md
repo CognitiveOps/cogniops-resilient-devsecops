@@ -71,6 +71,7 @@ Metrics → Context Builder → Intent Processor → Planning (LlmAgent)
 baseline/            — Deterministic substrate (IMMUTABLE for AI changes)
 runtime-agent/       — Phase 1+ Cognitive Runtime System (ADK-based)
 design-agent/        — Phase 2 Design-Time Agent (ADK-based)
+security-agent/      — Step 6b Security Compliance Agent (ADK-based, propose-only)
 evaluation/          — Phase 4 2-Axis evaluation framework
 infra/               — Terraform IaC (additive only for new phases)
 functions/           — Cloud Functions (ingest endpoints)
