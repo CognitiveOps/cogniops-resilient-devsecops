@@ -1790,7 +1790,7 @@ Development is governed through VS Code Copilot customization files that enforce
 | **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
 | **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
 | **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
-| **5b** | Deploy & Wire Runtime Agent | ⬜ | IaC (Terraform), CI/CD workflow, live OPA bundle polling, externalized config store (GCS), ADK runner wiring, smoke test |
+| **5b** | Deploy & Wire Runtime Agent | ✅ | IaC (Terraform), CI/CD workflow, live OPA bundle polling, externalized config store (GCS), ADK runner wiring, smoke test (231 tests) |
 | **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
 | **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
 
@@ -1835,14 +1835,14 @@ config/*.yaml       ──→  CI: upload     ──→  GCS bucket  ──→  
 | Service account + IAM | ✅ provisioned | logging, BQ, secrets, AR reader |
 | Pub/Sub topic + push sub | ✅ provisioned | `runtime-events-v1` → `/events/runtime` |
 | BQ `runtime_decisions` | ✅ provisioned | Schema matches `DecisionRow` |
-| Secret Manager resources | ⬜ Step 5b | `github-token`, `agentops-key` |
-| OPA service | ⬜ Step 5b | Lightweight Cloud Run |
-| Missing env vars | ⬜ Step 5b | `COGNIOPS_MODE`, `OPA_URL`, etc. |
+| Secret Manager resources | ✅ Step 5b | `github-token`, `agentops-key` |
+| OPA service | ✅ Step 5b | Lightweight Cloud Run with bundle polling |
+| Missing env vars | ✅ Step 5b | `COGNIOPS_MODE`, `OPA_URL`, `CONFIG_BUCKET`, etc. |
+| GCS config bucket | ✅ Step 5b | `cogniops-config` — OPA bundles + control mappings |
 
 ---
 
-## 🧠 Next Steps
-- Run **Step 5b: Deploy & Wire** via `/step5b-deploy-wire` (IaC + CI/CD + ADK runner)
+## Next Steps
 - Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
 
 ---

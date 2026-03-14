@@ -1,12 +1,13 @@
 """
-runtime-agent – CogniOps Runtime Agent (Phase 0 + ADK bootstrap).
+runtime-agent – CogniOps Runtime Agent (ADK Cognitive Pipeline).
 
 Endpoints:
   POST /events/runtime   – Pub/Sub push receiver (runtime event pipeline)
   GET  /healthz           – Liveness probe for Cloud Run
-  GET  /agent/info        – ADK agent metadata (Step 1+)
+  GET  /agent/info        – ADK agent metadata
 
-Pipeline:  Event → Perception → Planning → Guard → Execution → (BQ write)
+Pipeline:  Event → ADK Runner (Perception → Planning → Guard → Execution) → BQ → Trace
+Fallback:  ADK failure → Phase 0 stubs (NO_OP, zero risk)
 """
 
 from __future__ import annotations
@@ -20,17 +21,16 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from google.adk.runners import InMemoryRunner
+from google.genai import types
 
-from execution.executor import execute
-from guard.policy_check import check_policy
+from agent.cogniops_agent import cogniops_agent
 from models.schemas import (
     ALLOWED_EVENT_TYPES_PHASE0,
     DecisionType,
     PubSubPushEnvelope,
     RuntimeEvent,
 )
-from perception.handler import perceive
-from planning.playbook import select_playbook
 from storage.bigquery_writer import build_decision_row, write_decision
 from telemetry.agentops_client import trace_pipeline
 from telemetry.policy_refs import get_policy_refs
@@ -47,11 +47,18 @@ logger = logging.getLogger("runtime-agent")
 
 # ── FastAPI app ──────────────────────────────────────────────────────
 
+COGNIOPS_MODE = os.getenv("COGNIOPS_MODE", "shadow")
+
 app = FastAPI(
     title="CogniOps Runtime Agent",
     description="Runtime agent with ADK cognitive planning (shadow mode)",
-    version="0.2.0",
+    version="0.3.0",
 )
+
+# ── ADK Runner ───────────────────────────────────────────────────────
+
+runner = InMemoryRunner(agent=cogniops_agent, app_name="cogniops_runtime")
+runner.auto_create_session = True
 
 
 # ── Health check ─────────────────────────────────────────────────────
@@ -60,7 +67,7 @@ app = FastAPI(
 @app.get("/healthz")
 async def healthz():
     """Liveness / readiness probe for Cloud Run."""
-    return {"status": "ok", "mode": "shadow", "phase": 0}
+    return {"status": "ok", "mode": COGNIOPS_MODE, "version": "0.3.0"}
 
 
 # ── Pub/Sub push endpoint ───────────────────────────────────────────
@@ -124,36 +131,79 @@ async def receive_runtime_event(request: Request):
         event.source,
     )
 
-    # ── 4–7. Pipeline wrapped in AgentOps trace ─────────────────────
+    # ── 4–7. ADK Cognitive Pipeline (with Phase 0 fallback) ───────────
     t_start = time.monotonic()
     t_start_epoch = time.time()
 
+    # Defaults for fallback
+    decision_str = "NO_OP"
+    rationale = "ADK fallback — no action taken"
+    policy_refs: list[str] = []
+    decision_executed = False
+    severity = 0.5
+    risk_score = 0.5
+    guard_approved = True
+    guard_reason = "no guard evaluated"
+    agentops_trace_id: str | None = None
+
     with trace_pipeline(event.event_id) as trace:
-
-        # ── 4. Perception ────────────────────────────────────────────
-        anomaly = perceive(event)
-
-        # ── 5. Planning ──────────────────────────────────────────────
-        decision = select_playbook(anomaly)
-
-        # ── 5b. Enrich with ISO/NIST control references ─────────────
         try:
-            decision_enum = DecisionType(decision.decision.value)
+            # Build user message with full event context for the LLM agent
+            user_text = (
+                f"Anomaly detected: event_id={event.event_id} "
+                f"event_type={event.event_type} source={event.source} "
+                f"occurred_at={event.occurred_at.isoformat()} "
+                f"scenario_id={event.context.scenario_id or 'unknown'} "
+                f"status={event.context.status}"
+            )
+            if event.context.severity:
+                user_text += f" severity={event.context.severity}"
+
+            user_msg = types.Content(
+                role="user",
+                parts=[types.Part(text=user_text)],
+            )
+
+            # Run ADK agent pipeline
+            last_tool_result: dict | None = None
+            async for adk_event in runner.run_async(
+                user_id="runtime-agent",
+                session_id=event.event_id,
+                new_message=user_msg,
+            ):
+                # Extract tool call results from ADK events
+                if hasattr(adk_event, "content") and adk_event.content:
+                    for part in adk_event.content.parts or []:
+                        if hasattr(part, "function_response") and part.function_response:
+                            resp = part.function_response.response
+                            if isinstance(resp, dict) and "action" in resp:
+                                last_tool_result = resp
+
+            # Extract decision from ADK tool result
+            if last_tool_result:
+                decision_str = last_tool_result.get("action", "NO_OP")
+                rationale = last_tool_result.get("rationale", rationale)
+                decision_executed = last_tool_result.get("executed", False)
+                guard_approved = not last_tool_result.get("guard_blocked", False)
+                if not guard_approved:
+                    guard_reason = last_tool_result.get("guard_reason", "blocked")
+
+        except Exception as exc:
+            logger.error("ADK runner failed — falling back to NO_OP: %s", exc)
+            decision_str = "NO_OP"
+            rationale = f"ADK fallback — {exc}"
+            decision_executed = False
+
+        # Enrich with policy refs
+        try:
+            decision_enum = DecisionType(decision_str)
             policy_refs = get_policy_refs(decision_enum)
-            if policy_refs:
-                decision.policy_refs = policy_refs
         except (ValueError, KeyError):
-            pass  # Unknown decision type — keep existing policy_refs
-
-        # ── 6. Guard ─────────────────────────────────────────────────
-        verdict = check_policy(decision)
-
-        # ── 7. Execution ─────────────────────────────────────────────
-        result = execute(decision, verdict)
+            pass
 
         # Store trace metadata for AgentOps
-        trace["decision"] = decision.decision.value
-        trace["executed"] = result.decision_executed
+        trace["decision"] = decision_str
+        trace["executed"] = decision_executed
 
     agentops_trace_id = trace.get("trace_id")
 
@@ -166,10 +216,10 @@ async def receive_runtime_event(request: Request):
         occurred_at=event.occurred_at,
         source=event.source,
         context=event.context.model_dump() if event.context else None,
-        decision=decision.decision.value,
-        decision_executed=result.decision_executed,
-        rationale=decision.rationale,
-        policy_refs=decision.policy_refs,
+        decision=decision_str,
+        decision_executed=decision_executed,
+        rationale=rationale,
+        policy_refs=policy_refs,
         agentops_trace_id=agentops_trace_id,
     )
 
@@ -181,15 +231,15 @@ async def receive_runtime_event(request: Request):
         event_type=event.event_type,
         scenario_id=event.context.scenario_id or "unknown",
         run_id=event.context.run_id or event.event_id,
-        mode="shadow",
-        decision=decision.decision.value,
-        rationale=decision.rationale,
-        policy_refs=decision.policy_refs,
-        severity=anomaly.severity,
-        risk_score=anomaly.risk_score,
-        guard_approved=verdict.approved,
-        guard_reason=verdict.reason,
-        executed=result.decision_executed,
+        mode=COGNIOPS_MODE,
+        decision=decision_str,
+        rationale=rationale,
+        policy_refs=policy_refs,
+        severity=severity,
+        risk_score=risk_score,
+        guard_approved=guard_approved,
+        guard_reason=guard_reason,
+        executed=decision_executed,
         agentops_trace_id=agentops_trace_id or "",
         t_start_epoch=t_start_epoch,
     )
@@ -200,10 +250,10 @@ async def receive_runtime_event(request: Request):
     response_body = {
         "status": "accepted",
         "event_id": event.event_id,
-        "decision": decision.decision.value,
-        "decision_executed": result.decision_executed,
-        "policy_refs": decision.policy_refs,
-        "mode": "shadow",
+        "decision": decision_str,
+        "decision_executed": decision_executed,
+        "policy_refs": policy_refs,
+        "mode": COGNIOPS_MODE,
         "processed_at": processed_at.isoformat(),
         "agentops_trace_id": agentops_trace_id,
         "bq_written": bq_ok,
@@ -213,8 +263,8 @@ async def receive_runtime_event(request: Request):
     logger.info(
         "Pipeline complete: event_id=%s decision=%s executed=%s bq=%s trace=%s",
         event.event_id,
-        decision.decision.value,
-        result.decision_executed,
+        decision_str,
+        decision_executed,
         bq_ok,
         trace_ok,
     )

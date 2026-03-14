@@ -58,10 +58,11 @@ runtime-agent/
 ├── telemetry/
 │   ├── agentops_client.py      # trace_pipeline(event_id)  context manager
 │   ├── llm_logger.py           # LLM call logging (prompt hash, latency, tokens)
+│   ├── config_store.py          # GCS config fetch + TTL cache (Step 5b)
 │   ├── policy_refs.py          # ISO/NIST/IMO control mapping per DecisionType (Step 5)
 │   └── trace_emitter.py        # ActionTrace CloudEvent builder + emitter (Step 5)
 │
-└── tests/                      # pytest unit tests (195 tests)
+└── tests/                      # pytest unit tests (231 tests)
     ├── conftest.py
     ├── test_agent_pipeline.py  # ADK agent structure, tools, guard, InMemoryRunner pipeline
     ├── test_planning_llm.py    # Step 3: LLM planning, few-shots, episodic context, fallback, logger
@@ -70,6 +71,9 @@ runtime-agent/
     ├── test_github_client.py   # Step 4: GitHub API mock tests (dispatch, issues)
     ├── test_explainability.py  # Step 5: ActionTrace validation, ACR compliance, emission
     ├── test_policy_refs.py     # Step 5: ISO/NIST/IMO control mapping per decision type
+    ├── test_adk_runner.py      # Step 5b: ADK runner wiring, fallback, decision extraction
+    ├── test_config_store.py    # Step 5b: GCS config store, TTL cache, fallback behavior
+    ├── test_runtime_rego.py    # Step 5b: OPA Rego policy evaluation (requires OPA CLI)
     ├── test_perception.py      # Phase 0 perception stub tests
     ├── test_perception_real.py # Step 2: z-score, threshold, combined scoring, graceful degradation
     ├── test_playbook.py
@@ -87,18 +91,15 @@ runtime-agent/
 ```
 Pub/Sub push  →  POST /events/runtime
                        │
-                 ┌─────▼──────┐
-                 │ Perception  │  extract anomaly from event
-                 └─────┬──────┘
-                 ┌─────▼──────┐
-                 │  Planning   │  select playbook (always NO_OP in Phase 0)
-                 └─────┬──────┘
-                 ┌─────▼──────┐
-                 │   Guard     │  policy gate    (always approved in Phase 0)
-                 └─────┬──────┘
-                 ┌─────▼──────┐
-                 │ Execution   │  apply action   (always skipped in Phase 0)
-                 └─────┬──────┘
+               ┌───────▼────────┐
+               │  ADK Runner     │   InMemoryRunner + cogniops_agent
+               │  (LlmAgent)     │   Gemini 2.0 Flash
+               │                 │
+               │  perceive_anomaly → LLM planning → guard callback → tool
+               └───────┬────────┘
+                       │  tool result = {action, rationale, executed}
+                       │
+                  Fallback: if ADK fails → NO_OP (zero risk)
                        │
               ┌────────┴─────────┐
               ▼                  ▼
@@ -109,6 +110,17 @@ Pub/Sub push  →  POST /events/runtime
        ActionTrace CE
    (explainability kit)
 ```
+
+### Live-Updatable Security Config (Step 5b)
+
+```
+Security team pushes → CI validates + uploads to GCS → OPA/Agent polls → fresh config
+```
+
+| Component | Mechanism | Update Latency |
+|---|---|---|
+| OPA policies | Bundle polling from GCS | 30-120s |
+| Control mappings | GCS YAML + TTL cache | 5 min |
 
 ---
 
@@ -187,7 +199,7 @@ to the metrics ingest endpoint (when `METRICS_INGEST_URL` is configured).
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/events/runtime` | Pub/Sub push receiver — decodes envelope, runs pipeline, writes to BQ |
-| `GET`  | `/healthz` | Liveness / readiness probe (`{"status":"ok","mode":"shadow","phase":0}`) |
+| `GET`  | `/healthz` | Liveness / readiness probe (`{"status":"ok","mode":"shadow","version":"0.3.0"}`) |
 | `GET`  | `/agent/info` | ADK agent metadata — tools, model, guard status |
 
 ### Response Codes
@@ -236,6 +248,9 @@ Unknown types are logged as warnings but still processed.
 | `AGENTOPS_API_KEY` | — | — | AgentOps API key (from Secret Manager) |
 | `COGNIOPS_MODEL` | — | `gemini-2.0-flash` | ADK agent LLM model (Step 3+) |
 | `COGNIOPS_MODE`  | — | `shadow` | Execution mode: `shadow`, `advisory`, `enforce` |
+| `OPA_URL` | — | `http://localhost:8181` | OPA server URL for policy evaluation |
+| `CONFIG_BUCKET` | — | — | GCS bucket for live config (control mappings, thresholds) |
+| `CONFIG_REFRESH_SEC` | — | `300` | TTL for config store cache (seconds) |
 | `METRICS_INGEST_URL` | — | — | Endpoint for ActionTrace CloudEvent emission |
 | `COMMIT_SHA` | — | `unknown` | Git commit SHA for provenance field |
 | `LOG_LEVEL` | — | `INFO` | Python logging level |
@@ -280,11 +295,12 @@ cd runtime-agent
 python -m pytest tests/ -v
 ```
 
-All 195 tests run offline (no GCP credentials or Gemini API required).
+All 231 tests run offline (no GCP credentials or Gemini API required).
 ADK pipeline tests use `InMemoryRunner` with mocked model callbacks.
 Step 2 perception tests mock `query_baseline` — no BQ required.
+Step 5b Rego tests use OPA CLI (`opa eval`) — skipped if OPA not installed.
 The BigQuery writer is not invoked during tests — the endpoint tests
-mock the full pipeline via ASGI transport.
+mock the ADK runner and BQ writer via ASGI transport.
 
 ---
 
@@ -302,16 +318,16 @@ docker run -p 8080:8080 \
 
 ---
 
-## Phase 0 Invariants
+## Shadow Mode Invariants
 
-Every decision row written to BigQuery satisfies:
+In `shadow` mode, every decision row written to BigQuery satisfies:
 
 | Field | Value | Reason |
 |-------|-------|--------|
-| `decision` | `NO_OP` | No real actions in shadow mode |
-| `decision_executed` | `false` | Execution module never acts |
-| `mode` | `shadow` | Hard-coded for Phase 0 |
+| `decision_executed` | `false` | OPA blocks all non-NO_OP actions in shadow mode |
+| `mode` | `shadow` | Set via `COGNIOPS_MODE` env var |
 
+The OPA policy `cogniops.runtime` enforces shadow mode restrictions.
 These invariants are verified by `scripts/verify_runtime_decision.sh`.
 
 ---

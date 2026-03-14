@@ -1,0 +1,16 @@
+services:
+  gcs:
+    url: https://storage.googleapis.com/BUCKET_NAME
+    credentials:
+      gcp_metadata: {}
+
+bundles:
+  runtime:
+    service: gcs
+    resource: bundles/runtime/bundle.tar.gz
+    polling:
+      min_delay_seconds: 30
+      max_delay_seconds: 120
+
+decision_logs:
+  console: true

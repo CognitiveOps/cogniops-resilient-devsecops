@@ -49,6 +49,13 @@ variable "bootstrap_sa_email" {
   type        = string
 }
 
+# Runtime agent container image
+variable "runtime_agent_image" {
+  description = "Full container image URI for the runtime-agent (set by CI/CD)"
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
 # Scenario toggles
 variable "cloud_run_public" {
   type        = bool
