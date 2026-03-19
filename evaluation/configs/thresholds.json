@@ -1,0 +1,64 @@
+{
+    "description": "Statistical significance and practical relevance thresholds",
+    "statistical": {
+        "alpha": 0.05,
+        "test": "Mann-Whitney U (two-sided)",
+        "min_samples_per_variant": 10,
+        "effect_size": {
+            "small": 0.2,
+            "medium": 0.5,
+            "large": 0.8,
+            "note": "Cohen's d thresholds"
+        }
+    },
+    "practical": {
+        "TTD": {
+            "meaningful_delta_pct": 10,
+            "unit": "seconds"
+        },
+        "CFR": {
+            "meaningful_delta_pct": 5,
+            "unit": "percent"
+        },
+        "DF": {
+            "meaningful_delta_pct": 10,
+            "unit": "deploys/day"
+        },
+        "TDL": {
+            "meaningful_delta_pct": 10,
+            "unit": "seconds"
+        },
+        "DSR": {
+            "meaningful_delta_pct": 5,
+            "unit": "percent"
+        },
+        "MTTD": {
+            "meaningful_delta_pct": 15,
+            "unit": "seconds"
+        },
+        "MTTR": {
+            "meaningful_delta_pct": 15,
+            "unit": "seconds"
+        },
+        "TTV": {
+            "meaningful_delta_pct": 10,
+            "unit": "milliseconds"
+        },
+        "VSR": {
+            "meaningful_delta_pct": 5,
+            "unit": "percent"
+        },
+        "FDR": {
+            "meaningful_delta_pct": 5,
+            "unit": "percent"
+        },
+        "AL": {
+            "meaningful_delta_pct": 15,
+            "unit": "seconds"
+        },
+        "ACR": {
+            "meaningful_delta_pct": 5,
+            "unit": "percent"
+        }
+    }
+}

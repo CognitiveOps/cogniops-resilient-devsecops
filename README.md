@@ -37,6 +37,7 @@ cogniops-resilient-devsecops/
 ├── functions/ingest_runs/ # Cloud Function Gen2 for scenario metrics ingest
 ├── security/              # OPA policies (SS1)
 ├── runtime-agent/         # Phase 0 runtime agent (Cloud Run, shadow mode)
+├── evaluation/            # Phase 4 2-Axis evaluation framework (Step 7)
 ├── scripts/               # Integration test scripts
 ├── docs/                  # Architecture specs, AI design, guardrails
 └── README.md
@@ -1727,9 +1728,23 @@ CogniOps uses a **Hybrid Cognitive-SOAR** architecture with three AI agents buil
 - Runs weekly via Cloud Scheduler (internal-only Cloud Run, no public endpoint)
 - All API failures → empty results (fail-safe), LLM failure → no proposal emitted
 
-### Design-Time Agent
+### Design-Time Agent Pipeline (propose-only)
 
-Analyzes accumulated metrics and produces **structural improvement proposals** (JSON documents stored in GCS). Never executes operational actions. Separate service account.
+| Stage | Module | Deterministic | Description |
+|-------|--------|:---:|---|
+| **Context** | `agent/tools/context_builder.py` | ✅ | Query BQ metrics (30-day trends, percentiles), runtime decisions, GCS thresholds |
+| **Planning** | `agent/design_agent.py` (LlmAgent) | ❌ LLM | Gemini analyzes context and generates structured improvement proposals |
+| **Output** | `agent/tools/proposal_generator.py` | ✅ | Assemble `DesignProposal` with changes, impact estimates, policy refs |
+| **Validation** | `agent/tools/validator.py` | ✅ | Schema check, change type validity, path traversal guard, YAML lint, confidence bounds |
+| **Storage** | `main.py` | ✅ | GCS proposal JSON + GitHub Issue for human review |
+
+**Propose-only invariant** — the Design-Time Agent:
+- Never executes mitigation actions (no rollback, block, quarantine)
+- Never modifies live infrastructure, creates branches, or PRs
+- Every `DesignProposal` has `requires_human_review: Literal[True]`
+- Runs weekly via Cloud Scheduler (internal-only Cloud Run)
+- Separate SA (`design-agent-sa`) with BQ read-only + GCS write
+- BQ access is `dataViewer` (not `dataEditor`) — cannot modify metrics
 
 ### Key Design Decisions
 
@@ -1810,8 +1825,8 @@ Development is governed through VS Code Copilot customization files that enforce
 | **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
 | **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
 | **5b** | Deploy & Wire Runtime Agent | ✅ | IaC (Terraform), CI/CD workflow, live OPA bundle polling, externalized config store (GCS), ADK runner wiring, smoke test (231 tests) |
-| **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
-| **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
+| **6** | Design-Time Agent | ✅ | Context builder (BQ metrics + trends), proposal generator, validator (YAML lint + schema), ADK LlmAgent, FastAPI, IaC (97 tests) |
+| **7** | 2-Axis Evaluation | ✅ | Experiment matrix, BQ collectors, Mann-Whitney U + Cohen's d comparison, visualization (bar/heatmap/quadrant), CLI orchestrator (59 tests) |
 
 ---
 
@@ -1902,9 +1917,88 @@ Cloud Scheduler (weekly) → Feed Ingestion → Diff Engine → Enrich (full tex
 
 ---
 
-## Next Steps
-- Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
-- Begin **Step 7: 2-Axis Evaluation** (evaluates all three agents together)
+## 🏗️ Step 6: Design-Time Agent
+
+Structural synthesis — analyzes BQ metrics and proposes architectural
+improvements. **Propose-only: never executes changes, never modifies infrastructure.**
+
+Invoke: `/step6-design-agent`
+
+### Pipeline
+
+```
+Cloud Scheduler (weekly, Mon 07:00) → Context Builder (BQ metrics + GCS config)
+  → Design Planner (LlmAgent) → Proposal Generator → Validator → GCS + GitHub Issue
+```
+
+### Deliverables
+
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **Code** | `design-agent/agent/tools/context_builder.py` | BQ metric trends (30-day window, percentiles, trends), runtime decisions summary, GCS threshold reader |
+| **Code** | `design-agent/agent/tools/proposal_generator.py` | Assemble `DesignProposal` with changes, expected impact, policy refs; unique IDs (`design-{date}-{uuid8}`) |
+| **Code** | `design-agent/agent/tools/validator.py` | Schema validation, change type check, path traversal guard, YAML lint, confidence bounds, `requires_human_review=True` |
+| **Code** | `design-agent/agent/design_agent.py` | ADK `LlmAgent` (Gemini 2.0 Flash), system prompt + 2 few-shot examples |
+| **Code** | `design-agent/main.py` | FastAPI (POST /run, GET /healthz, GET /agent/info), GCS storage, GitHub Issue creation |
+| **IaC** | `infra/design.tf` | SA (`design-agent-sa`), Cloud Run (internal-only), Cloud Scheduler (weekly Mon 07:00), BQ dataViewer + jobUser, GCS read/write |
+| **Tests** | 97 tests across 4 test files | schemas (20), context builder (19), proposal generator (15), validator (24), pipeline (19) |
+
+### Design Rules
+
+| Rule | Detail |
+|------|--------|
+| Propose-only | JSON proposals in GCS + GitHub Issues — never modifies code/infra |
+| LLM only in Planning | Context builder, proposal generator, validator are 100% deterministic |
+| BQ read-only | `dataViewer` role — agent cannot modify metrics data |
+| Separate SA | `design-agent-sa` with least-privilege IAM (no overlap with runtime/compliance) |
+| Always human review | `requires_human_review: Literal[True]` — Pydantic rejects False |
+| Fail-safe | BQ/GCS unreachable → empty context; LLM failure → no proposal emitted |
+
+---
+
+## 📊 Step 7: 2-Axis Evaluation Framework
+
+Publishable evaluation core — measures autonomous agent impact across two
+orthogonal axes of intelligence (design-time × runtime).
+
+Invoke: `/step7-evaluation`
+
+### 2-Axis Model
+
+|  | Runtime OFF | Runtime ON |
+|---|---|---|
+| **Design OFF** | `baseline` | `runtime_only` |
+| **Design ON** | `design_only` | `full` |
+
+### Statistical Methods
+
+- **Mann-Whitney U test** (non-parametric, two-sided) — α = 0.05
+- **Cohen's d** effect size — small (0.2), medium (0.5), large (0.8)
+- **Bootstrap 95% CI** for mean difference (10,000 resamples)
+- Minimum 10 samples per variant for statistical validity
+
+### Deliverables
+
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **Config** | `evaluation/configs/experiment_matrix.json` | 7 scenarios × 4 variants, metric definitions, focus tiers |
+| **Config** | `evaluation/configs/thresholds.json` | α=0.05, Cohen's d thresholds, per-metric practical relevance |
+| **Queries** | `evaluation/queries/*.sql` (7 files) | Parameterized BQ queries for TTD, CFR, MTTD, MTTR, DSR, AL, ACR |
+| **Code** | `evaluation/scripts/collector.py` | BQ metric extraction (18 scenario×metric configs, rate aggregation) |
+| **Code** | `evaluation/scripts/compare_variants.py` | Statistical engine (Mann-Whitney U, Cohen's d, bootstrap CI, export) |
+| **Code** | `evaluation/scripts/visualize.py` | Thesis-quality charts (bar, heatmap, 2-axis quadrant) |
+| **Code** | `evaluation/scripts/run_experiment.py` | CLI orchestrator (collect → compare → visualize → summarize) |
+| **Tests** | 59 tests across 5 test files | configs (10), collector (16), compare (17), visualize (7), orchestrator (5) |
+
+### Usage
+
+```bash
+# Full evaluation
+python -m evaluation.scripts.run_experiment --all --project $GCP_PROJECT_ID -v
+
+# Specific scenarios with time window
+python -m evaluation.scripts.run_experiment --scenarios s1 s3 --start 2025-01-01 --end 2025-06-30
+```
 
 ---
 
