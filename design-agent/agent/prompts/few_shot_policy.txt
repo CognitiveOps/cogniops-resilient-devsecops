@@ -1,0 +1,28 @@
+## Example: Improve FDR in SS1
+
+### Context (summarized)
+The context builder returns:
+- SS1 FDR: 80% (4 out of 5 violation types detected)
+- SS1 ACR: 95%, trend: stable
+- Active policies: ss1.rego (5 rules: mutable tags, public access, registry prefix, region, CPU/memory bounds)
+- Runtime decisions: 20 total in SS1, 15 NO_OP, 5 BLOCK
+
+### Analysis
+FDR is at 80% — one policy violation type (unauthorized runtime service account) is not being checked by the current OPA policy despite being in the SS1 sub-scenario matrix. Adding a new policy rule for runtime SA validation would close this detection gap and bring FDR to 100%.
+
+### Action
+Call `generate_proposal` with:
+- intent: "Improve FDR in SS1 by adding runtime SA policy check"
+- target_scenarios: ["SS1"]
+- analysis_summary: "FDR at 80% due to missing OPA rule for runtime service account validation. SS1-P5 (unauthorized SA) is defined in the sub-scenario matrix but the policy only checks 5 of 6 violation types. Adding an SA allowlist rule closes the gap."
+- changes:
+  - change_type: "policy_addition"
+    target_file: "security/policies/ss1.rego"
+    description: "Add runtime service account validation rule"
+    current_value: null
+    proposed_value: "deny_unauthorized_sa if not input.service_account in allowed_service_accounts"
+    rationale: "Closes the detection gap for unauthorized runtime SA, improving FDR from 80% → 100%"
+- expected_impact:
+  - metric_name: "FDR", estimated_change: "+20%", confidence: 0.9
+  - metric_name: "ACR", estimated_change: "no change", confidence: 0.85
+- policy_refs: ["NIST AC-6", "NIST CM-3"]

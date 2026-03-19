@@ -1,0 +1,131 @@
+name: Design-Time Agent — Test, Build & Deploy
+
+on:
+    push:
+        branches: [runtime_agent_dev, main]
+        paths:
+            - "design-agent/**"
+            - "config/**"
+            - ".github/workflows/design_agent_deploy.yml"
+    workflow_dispatch:
+
+permissions:
+    id-token: write
+    contents: read
+
+env:
+    PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    REGION: ${{ vars.GCP_REGION }}
+    REPO_LOCATION: ${{ vars.GCP_REPO_LOCATION || 'europe' }}
+    AR_REPO: "apps"
+    SERVICE: "design-agent"
+
+concurrency:
+    group: design-agent-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    # ── Job 1: Run tests ──────────────────────────────────────────────
+    test:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+            - name: Install dependencies
+              run: pip install -r design-agent/requirements.txt
+            - name: Run tests
+              run: cd design-agent && python -m pytest tests/ -v
+
+    # ── Job 2: Build & Push container image ────────────────────────────
+    build-push:
+        needs: test
+        if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        outputs:
+            image: ${{ steps.meta.outputs.image }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - id: auth
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+                  service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+                  token_format: access_token
+
+            - uses: docker/login-action@v3
+              with:
+                  registry: "${{ env.REPO_LOCATION }}-docker.pkg.dev"
+                  username: oauth2accesstoken
+                  password: ${{ steps.auth.outputs.access_token }}
+
+            - id: meta
+              run: |
+                  IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${GITHUB_SHA::8}"
+                  echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+            - uses: docker/build-push-action@v6
+              with:
+                  context: design-agent
+                  push: true
+                  tags: ${{ steps.meta.outputs.image }}
+
+    # ── Job 3: Deploy to Cloud Run ─────────────────────────────────────
+    deploy:
+        needs: build-push
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - id: auth
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+                  service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+            - uses: google-github-actions/deploy-cloudrun@v2
+              with:
+                  service: ${{ env.SERVICE }}
+                  region: ${{ env.REGION }}
+                  image: ${{ needs.build-push.outputs.image }}
+                  env_vars: |
+                      COMMIT_SHA=${{ github.sha }}
+
+    # ── Job 4: Smoke test ──────────────────────────────────────────────
+    smoke-test:
+        needs: deploy
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - id: auth
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+                  service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+            - name: Get service URL
+              id: url
+              run: |
+                  URL=$(gcloud run services describe ${{ env.SERVICE }} \
+                    --region ${{ env.REGION }} \
+                    --format 'value(status.url)')
+                  echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+            - name: Health check
+              run: |
+                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
+                  STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+                    -H "Authorization: Bearer $TOKEN" \
+                    "${{ steps.url.outputs.url }}/healthz")
+                  echo "Health check: $STATUS"
+                  [ "$STATUS" = "200" ]
+
+            - name: Agent info check
+              run: |
+                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
+                  curl -s -H "Authorization: Bearer $TOKEN" \
+                    "${{ steps.url.outputs.url }}/agent/info" | jq .

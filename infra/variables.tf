@@ -63,6 +63,13 @@ variable "compliance_agent_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+# Design-time agent container image
+variable "design_agent_image" {
+  description = "Full container image URI for the design-agent (set by CI/CD)"
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
 # Scenario toggles
 variable "cloud_run_public" {
   type        = bool

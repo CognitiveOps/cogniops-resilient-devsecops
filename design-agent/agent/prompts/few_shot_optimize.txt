@@ -1,0 +1,34 @@
+## Example: Reduce MTTR in S3
+
+### Context (summarized)
+The context builder returns:
+- S3 MTTR mean: 45.2s, p95: 78.1s, trend: degrading
+- S3 MTTD mean: 8.3s, p95: 12.1s, trend: stable
+- Runtime decisions: 85 total, 12 ROLLBACK, 8 ESCALATE
+- Current thresholds: anomaly_z_threshold=2.5, s3_polling_interval=5s
+
+### Analysis
+MTTR is degrading (p95 at 78s, up from ~55s two weeks ago). The main bottleneck appears to be the edge OTA rollback activation time — the 5s polling interval combined with a high anomaly threshold means detection is fast but recovery initiation has latency. Reducing the polling interval during recovery and pre-staging LKG manifests could cut MTTR by 20-30%.
+
+### Action
+Call `generate_proposal` with:
+- intent: "Reduce MTTR in S3 by optimizing recovery activation"
+- target_scenarios: ["S3", "SS2"]
+- analysis_summary: "MTTR trending upward (p95: 78.1s vs 55s prior period). Recovery activation is the bottleneck — 5s polling interval adds latency during rollback. Pre-staging LKG manifests and reducing recovery poll interval would accelerate recovery."
+- changes:
+  - change_type: "threshold_adjustment"
+    target_file: "s3_edge_rollback.yml"
+    description: "Reduce health poll interval during recovery phase"
+    current_value: "5"
+    proposed_value: "2"
+    rationale: "Faster health confirmation shortens the tail of MTTR distribution"
+  - change_type: "workflow_improvement"
+    target_file: "s3_edge_rollback.yml"
+    description: "Pre-cache LKG manifest in workflow to eliminate GCS fetch during rollback"
+    current_value: "fetch on demand"
+    proposed_value: "pre-fetch: true"
+    rationale: "Eliminates ~3-5s GCS round-trip during recovery critical path"
+- expected_impact:
+  - metric_name: "MTTR", estimated_change: "-25%", confidence: 0.6
+  - metric_name: "MTTD", estimated_change: "no change", confidence: 0.8
+- policy_refs: ["NIST CP-10", "ISO 27001 A.17.1.2"]
