@@ -18,6 +18,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   # Reusable workflow
   workflow_call:
     inputs:
@@ -25,6 +35,11 @@ on:
         description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
         required: false
         default: ""
+        type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
         type: string
 
 permissions:
@@ -77,6 +92,7 @@ jobs:
       GCP_SA_APP_EMAIL: ${{ vars.GCP_SA_APP_EMAIL }}
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
       # Tunable fault model parameters (override here or via secrets/vars)
       S3_NET_FAIL_P: "0.1"
       S3_NET_BURST_PROB: "0.05"
@@ -407,7 +423,8 @@ jobs:
               "fault_type": "${FAULT_NAME}",
               "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
               "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
+              "detection_rate_min": "${DETECTION_RATE_MIN}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -436,7 +453,8 @@ jobs:
               "fault_type": "${FAULT_NAME}",
               "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
               "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
+              "detection_rate_min": "${DETECTION_RATE_MIN}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

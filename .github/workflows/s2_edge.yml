@@ -18,12 +18,27 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
         description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
         required: false
         default: ""
+        type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
         type: string
 
 permissions:
@@ -49,6 +64,7 @@ jobs:
       # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -197,7 +213,8 @@ jobs:
             },
             "labels": {
               "service": "edge_cv_app",
-              "edge_device": "gh-runner"
+              "edge_device": "gh-runner",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -220,7 +237,8 @@ jobs:
             },
             "labels": {
               "service": "edge_cv_app",
-              "edge_device": "gh-runner"
+              "edge_device": "gh-runner",
+              "variant": "${VARIANT}"
             }
           }
           EOF

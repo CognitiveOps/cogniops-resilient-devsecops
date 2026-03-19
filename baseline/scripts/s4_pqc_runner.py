@@ -352,6 +352,7 @@ def main() -> int:
                 "backend": backend.name,
                 "algorithm": backend.algorithm,
                 "alg": backend.algorithm,
+                "variant": os.environ.get("VARIANT", "baseline"),
             },
         }
         send_ingest(args.ingest_url, args.auth_token, payload)

@@ -23,6 +23,16 @@ on:
           - net_unstable
           - disk_full
           - wrong_arch
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
 
 permissions:
   contents: read
@@ -49,6 +59,7 @@ jobs:
       SCENARIO_ID: s3
       MODE: baseline
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
@@ -391,6 +402,7 @@ jobs:
                   "latency_budget_sec": os.environ.get("LATENCY_BUDGET_SEC",""),
                   "fps_min": os.environ.get("FPS_MIN",""),
                   "detection_rate_min": os.environ.get("DETECTION_RATE_MIN",""),
+                  "variant": os.environ.get("VARIANT", "baseline"),
               },
           }
           open("/tmp/s3_detect.json","w",encoding="utf-8").write(json.dumps(payload, ensure_ascii=False))
@@ -441,6 +453,7 @@ jobs:
                   "latency_budget_sec": os.environ.get("LATENCY_BUDGET_SEC",""),
                   "fps_min": os.environ.get("FPS_MIN",""),
                   "detection_rate_min": os.environ.get("DETECTION_RATE_MIN",""),
+                  "variant": os.environ.get("VARIANT", "baseline"),
               },
           }
           open("/tmp/s3_recover.json","w",encoding="utf-8").write(json.dumps(payload, ensure_ascii=False))

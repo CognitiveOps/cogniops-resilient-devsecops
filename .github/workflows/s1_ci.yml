@@ -13,6 +13,17 @@ on:
 
   # Optional: manual runs
   workflow_dispatch:
+    inputs:
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -40,6 +51,7 @@ jobs:
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       MODE: baseline
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     defaults:
       run:
@@ -132,7 +144,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -166,7 +179,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -221,7 +235,8 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${{ github.ref_name }}",
-              "image": "${IMAGE}"
+              "image": "${IMAGE}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -268,7 +283,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             },
             "metrics": {
               "service_url": "${URL:-}"
@@ -315,7 +331,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -355,7 +372,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

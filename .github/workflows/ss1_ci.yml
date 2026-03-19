@@ -21,6 +21,16 @@ on:
         required: false
         default: "true"
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -32,6 +42,11 @@ on:
         description: "Include P5 (audit-omit) subscenario"
         required: false
         default: "true"
+        type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
         type: string
 
 env:
@@ -71,6 +86,7 @@ jobs:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     defaults:
       run:
@@ -205,7 +221,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -245,7 +262,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -360,7 +378,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -401,7 +420,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -436,7 +456,8 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "${REASON}"
+              "reason": "${REASON}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -496,7 +517,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -534,7 +556,8 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "${REASON}"
+              "reason": "${REASON}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -604,7 +627,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -656,7 +680,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

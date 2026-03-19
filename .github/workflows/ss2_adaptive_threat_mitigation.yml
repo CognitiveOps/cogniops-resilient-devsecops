@@ -27,6 +27,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -43,6 +53,11 @@ on:
         description: "Delay before auto-approval is stamped (seconds)"
         required: false
         default: ""
+        type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
         type: string
 
 permissions:
@@ -87,6 +102,7 @@ jobs:
       SCENARIO_ID: ss2
       MODE: baseline
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}

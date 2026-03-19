@@ -10,6 +10,7 @@ This uses the project-wide stage-event payload schema described in README:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -40,6 +41,9 @@ def emit_stage_event(
         return
 
     duration = max(0.0, float(t_end_epoch) - float(t_start_epoch))
+    merged_labels = dict(labels or {})
+    if "variant" not in merged_labels:
+        merged_labels["variant"] = os.environ.get("VARIANT", "baseline")
     payload: Dict[str, Any] = {
         "run_id": run_id,
         "scenario_id": scenario_id,
@@ -50,7 +54,7 @@ def emit_stage_event(
         "t_start": _iso_from_epoch(t_start_epoch),
         "t_end": _iso_from_epoch(t_end_epoch),
         "duration_sec": round(duration, 6),
-        "labels": labels or {},
+        "labels": merged_labels,
         "metrics": metrics or {},
     }
 
