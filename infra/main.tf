@@ -275,6 +275,7 @@ resource "google_project_iam_member" "infra_roles" {
     "roles/iam.serviceAccountAdmin",
     "roles/iam.workloadIdentityPoolAdmin",
     "roles/serviceusage.serviceUsageAdmin",
+    "roles/secretmanager.admin",
     "roles/viewer",
     "roles/storage.admin",
   ])
