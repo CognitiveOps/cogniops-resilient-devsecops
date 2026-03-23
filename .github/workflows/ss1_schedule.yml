@@ -1,9 +1,9 @@
 name: SS1 Scheduled Policy Samples
 
 on:
-  schedule:
-    # Daily at 01:50 UTC
-    - cron: "50 1 * * *"
+  # schedule disabled — billing paused
+  # schedule:
+  #   - cron: "50 1 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [ss1_schedule]

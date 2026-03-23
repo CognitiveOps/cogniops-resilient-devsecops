@@ -1,9 +1,9 @@
 name: SS2 Scheduled Adaptive Mitigation Samples
 
 on:
-  schedule:
-    # Daily at 03:25 UTC
-    - cron: "25 3 * * *"
+  # schedule disabled — billing paused
+  # schedule:
+  #   - cron: "25 3 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [ss2_schedule]

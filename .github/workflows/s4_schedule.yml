@@ -1,9 +1,9 @@
 name: S4 Scheduled PQC Samples
 
 on:
-  schedule:
-    # Daily at 02:40 UTC
-    - cron: "40 2 * * *"
+  # schedule disabled — billing paused
+  # schedule:
+  #   - cron: "40 2 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [s4_schedule]

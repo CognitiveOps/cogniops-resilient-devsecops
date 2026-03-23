@@ -1,9 +1,9 @@
 name: S5 Scheduled HITL Samples
 
 on:
-  schedule:
-    # Daily at 03:00 UTC
-    - cron: "0 3 * * *"
+  # schedule disabled — billing paused
+  # schedule:
+  #   - cron: "0 3 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [s5_schedule]

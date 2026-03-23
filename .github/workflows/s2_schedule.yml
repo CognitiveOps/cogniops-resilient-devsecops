@@ -1,9 +1,9 @@
 name: S2 Scheduled OTA Samples
 
 on:
-  schedule:
-    # Daily at 02:20 UTC
-    - cron: "20 2 * * *"
+  # schedule disabled — billing paused
+  # schedule:
+  #   - cron: "20 2 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [s2_schedule]
