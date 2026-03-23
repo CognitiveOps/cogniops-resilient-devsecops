@@ -228,7 +228,10 @@ resource "google_secret_manager_secret" "runtime_github_token" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.secretmanager]
+  depends_on = [
+    google_project_service.secretmanager,
+    google_project_iam_member.infra_roles,
+  ]
 }
 
 resource "google_secret_manager_secret" "runtime_agentops_key" {
@@ -236,7 +239,10 @@ resource "google_secret_manager_secret" "runtime_agentops_key" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.secretmanager]
+  depends_on = [
+    google_project_service.secretmanager,
+    google_project_iam_member.infra_roles,
+  ]
 }
 
 
@@ -277,7 +283,7 @@ resource "google_cloud_run_v2_service" "opa" {
       ]
       ports { container_port = 8181 }
       resources {
-        limits = { cpu = "0.5", memory = "256Mi" }
+        limits = { cpu = "1", memory = "256Mi" }
       }
     }
 

@@ -81,7 +81,10 @@ resource "google_secret_manager_secret" "nist_api_key" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.secretmanager]
+  depends_on = [
+    google_project_service.secretmanager,
+    google_project_iam_member.infra_roles,
+  ]
 }
 
 
