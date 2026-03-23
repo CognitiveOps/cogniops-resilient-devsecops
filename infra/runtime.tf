@@ -255,6 +255,13 @@ resource "google_storage_bucket_iam_member" "opa_config_reader" {
   member = "serviceAccount:${google_service_account.opa.email}"
 }
 
+# Allow gha-infra SA to act as opa-server-sa (Terraform deployments)
+resource "google_service_account_iam_member" "infra_can_actas_opa" {
+  service_account_id = google_service_account.opa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.gha_infra.email}"
+}
+
 resource "google_cloud_run_v2_service" "opa" {
   name     = "opa-server"
   location = var.region
