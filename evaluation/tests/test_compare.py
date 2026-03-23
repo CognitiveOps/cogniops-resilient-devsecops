@@ -158,7 +158,7 @@ class TestComparePair:
         improved_samples: np.ndarray,
     ) -> None:
         result = compare_pair(
-            scenario_id="s3",
+            scenario_id="s3_cloud",
             metric_name="MTTD",
             baseline_samples=baseline_samples,
             treatment_samples=improved_samples,
@@ -166,7 +166,7 @@ class TestComparePair:
             direction="lower_is_better",
         )
         assert result is not None
-        assert result.scenario_id == "s3"
+        assert result.scenario_id == "s3_cloud"
         assert result.metric_name == "MTTD"
         assert result.baseline_variant == "baseline"
         assert result.treatment_variant == "runtime_only"
@@ -232,7 +232,7 @@ class TestCompareAllVariants:
         s3_design = [
             r
             for r in results
-            if r.scenario_id == "s3"
+            if r.scenario_id == "s3_cloud"
             and r.metric_name == "MTTD"
             and r.treatment_variant == "design_only"
         ]

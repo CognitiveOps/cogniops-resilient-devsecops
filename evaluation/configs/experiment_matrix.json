@@ -81,8 +81,35 @@
                 }
             }
         },
-        "s3": {
-            "name": "Rollback & Resilience",
+        "s3_cloud": {
+            "name": "Rollback & Resilience (Cloud Run)",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "MTTD",
+                "MTTR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "MTTR",
+            "stages": {
+                "MTTD": {
+                    "stage": "s3_detect",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                },
+                "MTTR": {
+                    "stage": "s3_recover",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                }
+            }
+        },
+        "s3_edge": {
+            "name": "Rollback & Resilience (Edge OTA)",
             "variants": [
                 "baseline",
                 "design_only",
@@ -235,7 +262,8 @@
     "focus_tiers": {
         "full_dual_model": [
             "s1",
-            "s3",
+            "s3_cloud",
+            "s3_edge",
             "s5"
         ],
         "design_focus": [

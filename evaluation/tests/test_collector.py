@@ -25,9 +25,13 @@ class TestMetricExtractionConfig:
         assert ("s2", "TDL") in METRIC_EXTRACTION
         assert ("s2", "DSR") in METRIC_EXTRACTION
 
-    def test_s3_metrics_present(self) -> None:
-        assert ("s3", "MTTD") in METRIC_EXTRACTION
-        assert ("s3", "MTTR") in METRIC_EXTRACTION
+    def test_s3_cloud_metrics_present(self) -> None:
+        assert ("s3_cloud", "MTTD") in METRIC_EXTRACTION
+        assert ("s3_cloud", "MTTR") in METRIC_EXTRACTION
+
+    def test_s3_edge_metrics_present(self) -> None:
+        assert ("s3_edge", "MTTD") in METRIC_EXTRACTION
+        assert ("s3_edge", "MTTR") in METRIC_EXTRACTION
 
     def test_s4_metrics_present(self) -> None:
         assert ("s4", "TTV") in METRIC_EXTRACTION
@@ -94,10 +98,25 @@ class TestBuildSampleQuery:
 
     def test_variant_coalesce(self) -> None:
         sql = _build_sample_query(
-            "s3", "MTTD", "test-project", "2024-01-01", "2024-12-31"
+            "s3_cloud", "MTTD", "test-project", "2024-01-01", "2024-12-31"
         )
         assert sql is not None
         assert "COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline')" in sql
+
+    def test_s3_cloud_uses_detect_stage(self) -> None:
+        sql = _build_sample_query(
+            "s3_cloud", "MTTD", "test-project", "2024-01-01", "2024-12-31"
+        )
+        assert sql is not None
+        assert "s3_detect" in sql
+        assert "s3_detect_edge" not in sql
+
+    def test_s3_edge_uses_detect_edge_stage(self) -> None:
+        sql = _build_sample_query(
+            "s3_edge", "MTTD", "test-project", "2024-01-01", "2024-12-31"
+        )
+        assert sql is not None
+        assert "s3_detect_edge" in sql
 
 
 class TestComputeRateMetric:

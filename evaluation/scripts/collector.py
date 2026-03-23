@@ -51,13 +51,24 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
         "stage": "s2_activate",
         "aggregation": "success_rate",
     },
-    # S3
-    ("s3", "MTTD"): {
+    # S3 Cloud (Cloud Run substrate — 218 rows)
+    ("s3_cloud", "MTTD"): {
+        "stage": "s3_detect",
+        "value_expr": "duration_sec",
+        "status_filter": "success",
+    },
+    ("s3_cloud", "MTTR"): {
+        "stage": "s3_recover",
+        "value_expr": "duration_sec",
+        "status_filter": "success",
+    },
+    # S3 Edge (Edge OTA substrate — 18 rows)
+    ("s3_edge", "MTTD"): {
         "stage": "s3_detect_edge",
         "value_expr": "duration_sec",
         "status_filter": "success",
     },
-    ("s3", "MTTR"): {
+    ("s3_edge", "MTTR"): {
         "stage": "s3_recover_edge",
         "value_expr": "duration_sec",
         "status_filter": "success",

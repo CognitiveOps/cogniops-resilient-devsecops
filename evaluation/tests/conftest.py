@@ -57,7 +57,7 @@ def metrics_df(rng: np.random.Generator) -> pd.DataFrame:
                     "metric_value": val,
                 }
             )
-    # s3/MTTD: baseline μ=5, design μ=5, runtime μ=3, full μ=3
+    # s3_cloud/MTTD: baseline μ=5, design μ=5, runtime μ=3, full μ=3
     for variant, mu in [
         ("baseline", 5),
         ("design_only", 5),
@@ -67,7 +67,7 @@ def metrics_df(rng: np.random.Generator) -> pd.DataFrame:
         for val in rng.normal(loc=mu, scale=0.8, size=20):
             rows.append(
                 {
-                    "scenario_id": "s3",
+                    "scenario_id": "s3_cloud",
                     "metric_name": "MTTD",
                     "variant": variant,
                     "metric_value": val,

@@ -15,7 +15,7 @@ class TestExperimentMatrix:
 
     def test_contains_all_scenarios(self) -> None:
         matrix = load_experiment_matrix()
-        expected = {"s1", "s2", "s3", "s4", "s5", "ss1", "ss2"}
+        expected = {"s1", "s2", "s3_cloud", "s3_edge", "s4", "s5", "ss1", "ss2"}
         assert set(matrix["scenarios"].keys()) == expected
 
     def test_all_variants_defined(self) -> None:
