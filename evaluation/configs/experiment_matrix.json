@@ -40,17 +40,17 @@
             "primary_metric": "TTD",
             "stages": {
                 "TTD": {
-                    "stage": "s1_health",
+                    "stage": "s1_final",
                     "field": "duration_sec",
                     "lower_is_better": true
                 },
                 "CFR": {
-                    "stage": "s1_health",
+                    "stage": "s1_final",
                     "aggregation": "failure_rate",
                     "lower_is_better": true
                 },
                 "DF": {
-                    "stage": "s1_health",
+                    "stage": "s1_final",
                     "aggregation": "frequency_per_day",
                     "higher_is_better": true
                 }
@@ -134,8 +134,8 @@
                     "higher_is_better": true
                 },
                 "FDR": {
-                    "stage": "s4_final",
-                    "json_key": "fdr",
+                    "stages": ["s4_p1_tamper", "s4_p2_wrong_key", "s4_p3_replay"],
+                    "aggregation": "rejection_rate",
                     "higher_is_better": true
                 }
             }
@@ -189,7 +189,7 @@
                 },
                 "FDR": {
                     "stage": "ss1_policy",
-                    "json_key": "fdr",
+                    "aggregation": "detection_rate",
                     "higher_is_better": true
                 },
                 "ACR": {

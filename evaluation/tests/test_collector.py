@@ -62,7 +62,7 @@ class TestBuildSampleQuery:
         )
         assert sql is not None
         assert "test-project.agent_metrics.runs" in sql
-        assert "s1_health" in sql
+        assert "s1_final" in sql
         assert "duration_sec" in sql
         assert "variant" in sql
         assert "'2024-01-01'" in sql
@@ -74,6 +74,7 @@ class TestBuildSampleQuery:
         )
         assert sql is not None
         assert "status" in sql
+        assert "s1_final" in sql
         # CFR is a rate metric — should NOT filter by status
         assert "AND status = 'success'" not in sql
 
@@ -137,3 +138,51 @@ class TestComputeRateMetric:
         df = pd.DataFrame(columns=["variant", "status", "t_end"])
         result = compute_rate_metric(df, "failure_rate")
         assert result.empty
+
+    def test_rejection_rate(self) -> None:
+        """S4/FDR: success = correct rejection of invalid input."""
+        df = pd.DataFrame(
+            {
+                "variant": ["baseline"] * 9,
+                "status": ["success"] * 9,
+                "t_end": pd.date_range("2024-01-01", periods=9, freq="h"),
+            }
+        )
+        result = compute_rate_metric(df, "rejection_rate")
+        assert len(result) == 1
+        assert abs(result.iloc[0]["metric_value"] - 1.0) < 0.001
+
+    def test_detection_rate(self) -> None:
+        """SS1/FDR: deny = correctly detected policy violation."""
+        df = pd.DataFrame(
+            {
+                "variant": ["baseline"] * 10,
+                "status": ["deny"] * 7 + ["pass"] * 3,
+                "t_end": pd.date_range("2024-01-01", periods=10, freq="h"),
+            }
+        )
+        result = compute_rate_metric(df, "detection_rate")
+        assert len(result) == 1
+        assert abs(result.iloc[0]["metric_value"] - 0.7) < 0.001
+
+
+class TestMultiStageQuery:
+    """Test multi-stage query generation (e.g. S4/FDR)."""
+
+    def test_s4_fdr_uses_in_clause(self) -> None:
+        sql = _build_sample_query(
+            "s4", "FDR", "test-project", "2024-01-01", "2024-12-31"
+        )
+        assert sql is not None
+        assert "IN (" in sql
+        assert "s4_p1_tamper" in sql
+        assert "s4_p2_wrong_key" in sql
+        assert "s4_p3_replay" in sql
+
+    def test_ss1_fdr_uses_single_stage(self) -> None:
+        sql = _build_sample_query(
+            "ss1", "FDR", "test-project", "2024-01-01", "2024-12-31"
+        )
+        assert sql is not None
+        assert "ss1_policy" in sql
+        assert "status" in sql

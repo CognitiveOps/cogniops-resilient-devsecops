@@ -38,7 +38,8 @@ class TestExperimentMatrix:
         for sid, cfg in matrix["scenarios"].items():
             assert "stages" in cfg, f"{sid} missing 'stages'"
             for metric_name, stage_cfg in cfg["stages"].items():
-                assert "stage" in stage_cfg, f"{sid}/{metric_name} missing 'stage'"
+                has_stage = "stage" in stage_cfg or "stages" in stage_cfg
+                assert has_stage, f"{sid}/{metric_name} missing 'stage' or 'stages'"
                 has_direction = (
                     "lower_is_better" in stage_cfg or "higher_is_better" in stage_cfg
                 )

@@ -27,18 +27,18 @@ QUERIES_DIR = Path(__file__).resolve().parent.parent / "queries"
 
 # Maps (scenario_id, metric_name) → how to extract per-sample values.
 METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
-    # S1
+    # S1 — uses s1_final (96 rows) instead of s1_health (5 rows)
     ("s1", "TTD"): {
-        "stage": "s1_health",
+        "stage": "s1_final",
         "value_expr": "duration_sec",
         "status_filter": "success",
     },
     ("s1", "CFR"): {
-        "stage": "s1_health",
+        "stage": "s1_final",
         "aggregation": "failure_rate",
     },
     ("s1", "DF"): {
-        "stage": "s1_health",
+        "stage": "s1_final",
         "aggregation": "frequency_per_day",
     },
     # S2
@@ -73,9 +73,9 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
         "aggregation": "success_rate",
     },
     ("s4", "FDR"): {
-        "stage": "s4_final",
-        "value_expr": "CAST(JSON_VALUE(metrics, '$.fdr') AS FLOAT64)",
-        "status_filter": "success",
+        "stages": ["s4_p1_tamper", "s4_p2_wrong_key", "s4_p3_replay"],
+        "stage": "s4_p1_tamper",
+        "aggregation": "rejection_rate",
     },
     # S5
     ("s5", "AL"): {
@@ -95,8 +95,7 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("ss1", "FDR"): {
         "stage": "ss1_policy",
-        "value_expr": "CAST(JSON_VALUE(metrics, '$.fdr') AS FLOAT64)",
-        "status_filter": "success",
+        "aggregation": "detection_rate",
     },
     ("ss1", "ACR"): {
         "stage": "ss1_final",
@@ -139,7 +138,14 @@ def _build_sample_query(
     stage = config["stage"]
 
     if "aggregation" in config:
-        # Rate metrics need the raw status column, not per-sample values
+        # Rate metrics need the raw status column, not per-sample values.
+        # Multi-stage aggregations (e.g. S4/FDR) use IN(...) clause.
+        stages = config.get("stages", [stage])
+        if len(stages) == 1:
+            stage_clause = f"stage = '{stages[0]}'"
+        else:
+            quoted = ", ".join(f"'{s}'" for s in stages)
+            stage_clause = f"stage IN ({quoted})"
         return f"""
 SELECT
   COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline') AS variant,
@@ -148,7 +154,7 @@ SELECT
   t_end
 FROM `{project}.agent_metrics.runs`
 WHERE scenario_id = '{scenario_id}'
-  AND stage = '{stage}'
+  AND {stage_clause}
   AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')
 ORDER BY variant, t_end
 """
@@ -206,7 +212,16 @@ def query_metric_samples(
 
 
 def compute_rate_metric(df: pd.DataFrame, aggregation: str) -> pd.DataFrame:
-    """Compute rate-based metrics (CFR, DSR) from raw status rows.
+    """Compute rate-based metrics from raw status rows.
+
+    Supported aggregations:
+      - failure_rate:    failures / total  (S1/CFR, SS1/CFR)
+      - success_rate:    successes / total (S2/DSR, S4/VSR)
+      - frequency_per_day: successful runs per calendar day (S1/DF)
+      - rejection_rate:  correct rejections / total  (S4/FDR — status=success
+                         means the invalid input was correctly rejected)
+      - detection_rate:  detections / total  (SS1/FDR — status=deny means
+                         the policy correctly detected a violation)
 
     Returns DataFrame with: variant, metric_value (the rate).
     """
@@ -233,6 +248,22 @@ def compute_rate_metric(df: pd.DataFrame, aggregation: str) -> pd.DataFrame:
         )
         days = (grouped["max_t"] - grouped["min_t"]).dt.total_seconds() / 86400
         grouped["metric_value"] = grouped["total"] / days.clip(lower=1)
+    elif aggregation == "rejection_rate":
+        # S4/FDR: invalid PQC scenarios (p1/p2/p3) — status=success means
+        # the verifier correctly rejected the invalid input.
+        grouped = df.groupby("variant").agg(
+            total=("status", "count"),
+            correct=("status", lambda x: (x == "success").sum()),
+        )
+        grouped["metric_value"] = grouped["correct"] / grouped["total"]
+    elif aggregation == "detection_rate":
+        # SS1/FDR: policy gate — status=deny means the policy correctly
+        # detected a violation. FDR = deny / total.
+        grouped = df.groupby("variant").agg(
+            total=("status", "count"),
+            detected=("status", lambda x: (x == "deny").sum()),
+        )
+        grouped["metric_value"] = grouped["detected"] / grouped["total"]
     else:
         return pd.DataFrame(columns=["variant", "metric_value"])
 
