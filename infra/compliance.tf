@@ -217,6 +217,12 @@ resource "google_project_iam_member" "infra_cloudscheduler_admin" {
   depends_on = [google_project_service.cloudscheduler]
 }
 
+# IAM propagation is eventually consistent — wait before using the new permission
+resource "time_sleep" "wait_for_scheduler_iam" {
+  depends_on      = [google_project_iam_member.infra_cloudscheduler_admin]
+  create_duration = "60s"
+}
+
 resource "google_cloud_scheduler_job" "compliance_check" {
   name        = "compliance-agent-weekly"
   description = "Trigger Security Compliance Agent weekly check"
@@ -234,7 +240,7 @@ resource "google_cloud_scheduler_job" "compliance_check" {
 
   depends_on = [
     google_project_service.cloudscheduler,
-    google_project_iam_member.infra_cloudscheduler_admin,
+    time_sleep.wait_for_scheduler_iam,
     google_cloud_run_v2_service.compliance_agent,
   ]
 }
