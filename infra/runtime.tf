@@ -301,7 +301,7 @@ resource "google_cloud_run_v2_service" "opa" {
       ]
       ports { container_port = 8181 }
       resources {
-        limits = { cpu = "1", memory = "256Mi" }
+        limits = { cpu = "1", memory = "512Mi" }
       }
     }
 

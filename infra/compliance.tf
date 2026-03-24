@@ -164,15 +164,6 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
         value = "managed-by-ci"
       }
       env {
-        name = "GITHUB_TOKEN"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.runtime_github_token.secret_id
-            version = "latest"
-          }
-        }
-      }
-      env {
         name = "NIST_API_KEY"
         value_source {
           secret_key_ref {
