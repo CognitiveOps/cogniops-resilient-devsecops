@@ -41,6 +41,8 @@ resource "google_project_iam_member" "runtime_agent_log_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # IAM: roles/monitoring.metricWriter
@@ -48,6 +50,8 @@ resource "google_project_iam_member" "runtime_agent_metric_writer" {
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
   member  = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # IAM: roles/bigquery.dataEditor scoped to agent_metrics dataset only
@@ -55,6 +59,8 @@ resource "google_bigquery_dataset_iam_member" "runtime_agent_bq_writer" {
   dataset_id = google_bigquery_dataset.metrics.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # IAM: roles/secretmanager.secretAccessor (for AgentOps API key in Secret Manager)
@@ -71,6 +77,8 @@ resource "google_project_iam_member" "runtime_agent_ar_reader" {
   project = var.project_id
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # Allow gha-infra SA to act as runtime-agent-sa (Terraform deployments)
@@ -78,6 +86,8 @@ resource "google_service_account_iam_member" "infra_can_actas_runtime_agent" {
   service_account_id = google_service_account.runtime_agent.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # Allow gha-app SA to act as runtime-agent-sa (CI/CD deployments)
@@ -85,6 +95,8 @@ resource "google_service_account_iam_member" "app_can_actas_runtime_agent" {
   service_account_id = google_service_account.runtime_agent.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_app.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 
@@ -230,7 +242,8 @@ resource "google_secret_manager_secret" "runtime_github_token" {
   }
   depends_on = [
     google_project_service.secretmanager,
-    google_project_iam_member.infra_roles,
+    google_project_iam_member.runtime_agent_secret_accessor,
+    google_service_account_iam_member.infra_can_actas_runtime_agent,
   ]
 }
 
@@ -241,7 +254,8 @@ resource "google_secret_manager_secret" "runtime_agentops_key" {
   }
   depends_on = [
     google_project_service.secretmanager,
-    google_project_iam_member.infra_roles,
+    google_project_iam_member.runtime_agent_secret_accessor,
+    google_service_account_iam_member.infra_can_actas_runtime_agent,
   ]
 }
 
@@ -259,6 +273,8 @@ resource "google_storage_bucket_iam_member" "opa_config_reader" {
   bucket = google_storage_bucket.cogniops_config.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.opa.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # Allow gha-infra SA to act as opa-server-sa (Terraform deployments)
@@ -266,6 +282,8 @@ resource "google_service_account_iam_member" "infra_can_actas_opa" {
   service_account_id = google_service_account.opa.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 resource "google_cloud_run_v2_service" "opa" {
@@ -294,7 +312,11 @@ resource "google_cloud_run_v2_service" "opa" {
   }
 
   ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  depends_on = [google_project_service.services]
+  depends_on = [
+    google_project_service.services,
+    google_service_account_iam_member.infra_can_actas_opa,
+    google_storage_bucket_iam_member.opa_config_reader,
+  ]
 }
 
 # runtime-agent-sa can invoke OPA service
@@ -407,7 +429,19 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
   }
 
   ingress    = "INGRESS_TRAFFIC_ALL"
-  depends_on = [google_project_service.services, google_project_service.pubsub]
+  depends_on = [
+    google_project_service.services,
+    google_project_service.pubsub,
+    google_secret_manager_secret.runtime_github_token,
+    google_secret_manager_secret.runtime_agentops_key,
+    google_service_account_iam_member.infra_can_actas_runtime_agent,
+    google_service_account_iam_member.app_can_actas_runtime_agent,
+    google_project_iam_member.runtime_agent_log_writer,
+    google_project_iam_member.runtime_agent_metric_writer,
+    google_bigquery_dataset_iam_member.runtime_agent_bq_writer,
+    google_project_iam_member.runtime_agent_secret_accessor,
+    google_project_iam_member.runtime_agent_ar_reader,
+  ]
 }
 
 # runtime-agent-sa gets roles/run.invoker on runtime-agent (self-invoke for Pub/Sub push)
