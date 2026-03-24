@@ -247,6 +247,15 @@ resource "google_secret_manager_secret" "runtime_github_token" {
   ]
 }
 
+resource "google_secret_manager_secret_version" "runtime_github_token_initial" {
+  secret      = google_secret_manager_secret.runtime_github_token.id
+  secret_data = "REPLACE_ME"  # Placeholder — update via GCP Console or gcloud
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
 resource "google_secret_manager_secret" "runtime_agentops_key" {
   secret_id = "runtime-agent-agentops-key"
   replication {
@@ -257,6 +266,15 @@ resource "google_secret_manager_secret" "runtime_agentops_key" {
     google_project_iam_member.runtime_agent_secret_accessor,
     google_service_account_iam_member.infra_can_actas_runtime_agent,
   ]
+}
+
+resource "google_secret_manager_secret_version" "runtime_agentops_key_initial" {
+  secret      = google_secret_manager_secret.runtime_agentops_key.id
+  secret_data = "REPLACE_ME"  # Placeholder — update via GCP Console or gcloud
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 

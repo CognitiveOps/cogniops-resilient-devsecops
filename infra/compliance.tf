@@ -96,6 +96,15 @@ resource "google_secret_manager_secret" "nist_api_key" {
   ]
 }
 
+resource "google_secret_manager_secret_version" "nist_api_key_initial" {
+  secret      = google_secret_manager_secret.nist_api_key.id
+  secret_data = "REPLACE_ME"  # Placeholder — update via GCP Console or gcloud
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
 
 ###########################
 # Cloud Run v2: security-compliance-agent
