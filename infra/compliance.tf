@@ -208,6 +208,15 @@ resource "google_project_service" "cloudscheduler" {
   disable_on_destroy = false
 }
 
+# gha-infra SA needs cloudscheduler.admin to create/manage scheduler jobs
+resource "google_project_iam_member" "infra_cloudscheduler_admin" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.admin"
+  member  = "serviceAccount:${google_service_account.gha_infra.email}"
+
+  depends_on = [google_project_service.cloudscheduler]
+}
+
 resource "google_cloud_scheduler_job" "compliance_check" {
   name        = "compliance-agent-weekly"
   description = "Trigger Security Compliance Agent weekly check"
@@ -225,6 +234,7 @@ resource "google_cloud_scheduler_job" "compliance_check" {
 
   depends_on = [
     google_project_service.cloudscheduler,
+    google_project_iam_member.infra_cloudscheduler_admin,
     google_cloud_run_v2_service.compliance_agent,
   ]
 }
