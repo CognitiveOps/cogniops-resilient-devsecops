@@ -26,6 +26,8 @@ resource "google_project_iam_member" "compliance_agent_log_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.compliance_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # IAM: roles/storage.objectViewer on config bucket (read control-mappings, OPA policies)
@@ -56,6 +58,8 @@ resource "google_project_iam_member" "compliance_agent_ar_reader" {
   project = var.project_id
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${google_service_account.compliance_agent.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # Allow gha-infra SA to act as compliance-agent-sa (Terraform deployments)
@@ -63,6 +67,8 @@ resource "google_service_account_iam_member" "infra_can_actas_compliance_agent" 
   service_account_id = google_service_account.compliance_agent.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_infra.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 # Allow gha-app SA to act as compliance-agent-sa (CI/CD deployments)
@@ -70,6 +76,8 @@ resource "google_service_account_iam_member" "app_can_actas_compliance_agent" {
   service_account_id = google_service_account.compliance_agent.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.gha_app.email}"
+
+  depends_on = [google_project_service.services]
 }
 
 
@@ -83,7 +91,8 @@ resource "google_secret_manager_secret" "nist_api_key" {
   }
   depends_on = [
     google_project_service.secretmanager,
-    google_project_iam_member.infra_roles,
+    google_project_iam_member.compliance_agent_secret_accessor,
+    google_service_account_iam_member.infra_can_actas_compliance_agent,
   ]
 }
 
@@ -176,7 +185,17 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
   }
 
   ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
-  depends_on = [google_project_service.services]
+  depends_on = [
+    google_project_service.services,
+    google_secret_manager_secret.nist_api_key,
+    google_service_account_iam_member.infra_can_actas_compliance_agent,
+    google_service_account_iam_member.app_can_actas_compliance_agent,
+    google_project_iam_member.compliance_agent_log_writer,
+    google_project_iam_member.compliance_agent_secret_accessor,
+    google_project_iam_member.compliance_agent_ar_reader,
+    google_storage_bucket_iam_member.compliance_agent_config_reader,
+    google_storage_bucket_iam_member.compliance_agent_config_writer,
+  ]
 }
 
 
