@@ -2,16 +2,14 @@
 name: S1 CI/CD Baseline
 
 on:
-  # Baseline sampling complete — removed workflow_run trigger on infra_apply
-  # to prevent Phase 0+ infra changes from cascading into baseline runs.
-  # Use workflow_dispatch or schedulers for any future baseline runs.
+  # Baseline sampling complete — push triggers disabled.
+  # Use workflow_dispatch for manual runs only.
 
-  # Run automatically on app code changes
-  push:
-    branches: [main]
-    paths:
-      - "baseline/services/app/**"
-      - ".github/workflows/s1_ci.yml"
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "baseline/services/app/**"
+  #     - ".github/workflows/s1_ci.yml"
 
   # Optional: manual runs
   workflow_dispatch:
