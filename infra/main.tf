@@ -16,6 +16,7 @@ terraform {
   required_providers {
     google      = { source = "hashicorp/google",      version = "~> 5.37" }
     archive     = { source = "hashicorp/archive",     version = "~> 2.4" }
+    time        = { source = "hashicorp/time",         version = "~> 0.11" }
   }
 }
 
@@ -275,6 +276,7 @@ resource "google_project_iam_member" "infra_roles" {
     "roles/iam.serviceAccountAdmin",
     "roles/iam.workloadIdentityPoolAdmin",
     "roles/serviceusage.serviceUsageAdmin",
+    "roles/secretmanager.admin",
     "roles/viewer",
     "roles/storage.admin",
   ])

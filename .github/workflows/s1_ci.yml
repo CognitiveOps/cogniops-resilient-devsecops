@@ -2,16 +2,14 @@
 name: S1 CI/CD Baseline
 
 on:
-  # Run S1 automatically after infra workflow completes
-  workflow_run:
-    workflows: ["admin - Terraform Apply (GCP infra)"]
-    types: [completed]
+  # Baseline sampling complete — push triggers disabled.
+  # Use workflow_dispatch for manual runs only.
 
-  # Run automatically on app code changes (if infra is already up)
-  push:
-    paths:
-      - "baseline/services/app/**"
-      - ".github/workflows/s1_ci.yml"
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "baseline/services/app/**"
+  #     - ".github/workflows/s1_ci.yml"
 
   # Optional: manual runs
   workflow_dispatch:
@@ -35,8 +33,8 @@ concurrency:
 
 jobs:
   build-test-push-deploy:
-    # Only run if WIF is configured and, in workflow_run, if infra apply succeeded
-    if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    # Only run if WIF is configured
+    if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

@@ -1,11 +1,13 @@
 name: S5 Explainability (HITL / AL / ACR)
 
 on:
-  push:
-    paths:
-      - ".github/workflows/s5_explainability.yml"
-      - "baseline/explainability/**"
-      - "baseline/scripts/s5_explainability_runner.py"
+  # Baseline sampling complete — push triggers disabled.
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - ".github/workflows/s5_explainability.yml"
+  #     - "baseline/explainability/**"
+  #     - "baseline/scripts/s5_explainability_runner.py"
   workflow_dispatch:
     inputs:
       run_suffix:

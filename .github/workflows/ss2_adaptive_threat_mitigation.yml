@@ -1,13 +1,15 @@
 name: SS2 Adaptive Threat Mitigation (over S2)
 
 on:
-  push:
-    paths:
-      - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
-      - "baseline/scripts/ss2_detect.py"
-      - "baseline/services/edge_cv_app/**"
-      - "baseline/explainability/**"
-      - ".github/workflows/_hitl_explain_and_approve_soft.yml"
+  # Baseline sampling complete — push triggers disabled.
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
+  #     - "baseline/scripts/ss2_detect.py"
+  #     - "baseline/services/edge_cv_app/**"
+  #     - "baseline/explainability/**"
+  #     - ".github/workflows/_hitl_explain_and_approve_soft.yml"
   workflow_dispatch:
     inputs:
       run_suffix:

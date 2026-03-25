@@ -19,22 +19,29 @@ The goal is to demonstrate how an autonomous cognitive agent can manage **secure
 
 ```
 cogniops-resilient-devsecops/
-├── .github/workflows/ # GitHub Actions pipelines (S1–S5, SS1–SS2)
-├── artifact_registry/ # Artifact Registry cleanup policy config (policy.json)
+├── .github/
+│ ├── workflows/           # GitHub Actions pipelines (S1–S5, SS1–SS2)
+│ ├── copilot-instructions.md  # AI Engineering governance (workspace-wide)
+│ ├── instructions/        # Per-module Copilot guardrails (auto-loaded)
+│ ├── prompts/             # Step-by-step implementation prompts
+│ └── agents/              # Specialist Copilot agents (LLM, evaluator, security)
+├── artifact_registry/     # Artifact Registry cleanup policy config (policy.json)
 ├── baseline/
-│ ├── services/ # demo microservices (FastAPI, test workloads)
-│ ├── scripts/ # metrics writers, rollback logic, helpers
-│ ├── security/ # PQC signing/verification utilities
-│ ├── explainability/ # S5/SS2 explainability + HITL kit
-│ └── metrics/ # generated artifacts (not committed)
+│ ├── services/            # demo microservices (FastAPI, test workloads)
+│ ├── scripts/             # metrics writers, rollback logic, helpers
+│ ├── security/            # PQC signing/verification utilities
+│ ├── explainability/      # S5/SS2 explainability + HITL kit
+│ └── metrics/             # generated artifacts (not committed)
 │
-├── infra/ # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
+├── infra/                 # Terraform IaC for GCP (Artifact Registry, Cloud Run, BigQuery, WIF)
 ├── functions/ingest_runs/ # Cloud Function Gen2 for scenario metrics ingest
-├── security/ # OPA policies (SS1)
+├── security/              # OPA policies (SS1)
+├── runtime-agent/         # Phase 0 runtime agent (Cloud Run, shadow mode)
+├── scripts/               # Integration test scripts
+├── docs/                  # Architecture specs, AI design, guardrails
 └── README.md
 
 ```
-Planned for Months 3–5 (not committed yet): `agent/`, `docs/`.
 ---
 
 ## 🧹 Artifact Registry Cleanup Policy (Admin)
@@ -1606,6 +1613,40 @@ Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation
 
 ---
 
+## 🤖 Phase 0 – Runtime-Ready Infrastructure
+
+Phase 0 introduces the **additive** infrastructure needed to support the future Runtime Agent (Phase 1), while preserving the deterministic baseline (S1–S5, SS1–SS2). No baseline components are modified.
+
+### What Phase 0 Adds
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Terraform resources** | `infra/runtime.tf` | Pub/Sub topics, Cloud Run service, BQ table, IAM bindings |
+| **Runtime Agent** | `runtime-agent/` | FastAPI service — Perception → Planning → Guard → Execution pipeline |
+| **Integration scripts** | `scripts/test_publish_runtime_event.sh`, `scripts/verify_runtime_decision.sh` | Manual smoke-test tooling |
+| **Specifications** | `docs/` | Spec, event contract, IAM doc, implementation notes |
+
+### Phase 0 Invariants
+
+Every processed event produces a decision row with:
+
+- `decision = NO_OP` — no real actions taken
+- `decision_executed = false` — execution module never acts
+- `mode = shadow` — hard-coded for Phase 0
+
+### Quick Links
+
+- [Phase 0 Specification](docs/phase0-runtime-ready-spec.md)
+- [Runtime Event Contract](docs/runtime-event-contract.md)
+- [IAM Specification](docs/runtime_agent_iam.md)
+- [Implementation Notes](docs/phase0-implementation-notes.md)
+- [Runtime Agent README](runtime-agent/README.md)
+- [AI Audit Report](docs/ai-audit-report.md)
+- [AI Design Architecture](docs/ai-design-architecture.md)
+- [System Guardrails](docs/system-guardrails.md)
+
+---
+
 ## 📈 Timeline
 
 | Month | Focus | Deliverable |
@@ -1618,8 +1659,252 @@ Diagram: single-page S2 → S3 → SS2 evaluation flow (ideal for the evaluation
 
 ---
 
-## 🧠 Next Steps 
-- **Agent Core:** Autonomous reasoning + XAI integration  
+---
+
+## 🤖 AI Agent Architecture
+
+CogniOps uses a **Hybrid Cognitive-SOAR** architecture with three AI agents built on [Google ADK](https://google.github.io/adk-docs/) (Agent Development Kit) + Vertex AI Gemini.
+
+### Two-Layer System
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    COGNITIVE CONTROL PLANE                          │
+│                                                                     │
+│  Runtime Agent        Security Agent        Design-Time Agent       │
+│  (operational)        (compliance)          (structural)            │
+│  Event → Perceive →   Feed → Diff →         Metrics → Context →    │
+│  Plan → Guard → Act   Plan → Validate →     Plan → Validate →      │
+│                       Propose (GCS+Issue)   Propose (GCS)           │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                    DETERMINISTIC SUBSTRATE                          │
+│  S1–S5, SS1–SS2 │ BQ │ OPA │ PQC │ Explainability │ NIST Feeds    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Runtime Agent Pipeline
+
+| Stage | Module | Deterministic | Description |
+|-------|--------|:---:|---|
+| **Perception** | `agent/tools/perception_tool.py` | ✅ | Z-score anomaly detection against BQ baselines |
+| **Planning** | `agent/cogniops_agent.py` (LlmAgent) | ❌ LLM | Gemini selects bounded action via tool calling |
+| **Guard** | `agent/callbacks/guard_callback.py` | ✅ | OPA policy check (fail-closed) + PQC integrity verification (S4/SS2) |
+| **Execution** | `agent/tools/execution_tools.py` | ✅ | Mode-gated actions via GitHub API (shadow/advisory/enforce) |
+
+**Bounded Action Surface** — the LLM may ONLY select:
+
+| Action | Shadow | Advisory | Enforce |
+|--------|--------|----------|----------|
+| `NO_OP` | Log only | Log only | Log only |
+| `BLOCK` | Log only | Log + GitHub Issue notification | Log + issue + block enforced |
+| `ROLLBACK` | Log only | Log + GitHub Issue notification | Log + dispatch `s3_edge_rollback.yml` |
+| `QUARANTINE` | Log only | Log + GitHub Issue notification | Log + quarantine issue created |
+| `ESCALATE` | Log only | Log + GitHub HITL Issue | Log + HITL issue + executed |
+
+**Guard Pipeline**: OPA policy check → PQC integrity check (S4/SS2) → allow or block
+- OPA unreachable → **deny** (fail-closed)
+- PQC verification fails → **deny** (fail-closed)
+- Unknown tools → **blocked** (safety)
+- Observation tools (perceive, memory) → **always pass**
+
+**Mode Progression**: `shadow` (log only) → `advisory` (log + notify) → `enforce` (log + execute)
+
+### Security Compliance Agent Pipeline (propose-only)
+
+| Stage | Module | Deterministic | Description |
+|-------|--------|:---:|---|
+| **Ingestion** | `agent/tools/nist_feed.py` | ✅ | NIST NVD API v2 + SP 800-53 CPRT feed fetch (fail-safe: errors → empty) |
+| **Diff** | `agent/tools/diff_engine.py` | ✅ | Compare feed entries against current `control-mappings.yaml` |
+| **Enrich** | `agent/tools/diff_engine.py` | ✅ | Stage 2: full control text only for changed entries (minimize API calls) |
+| **Planning** | `agent/compliance_agent.py` (LlmAgent) | ❌ LLM | Gemini assesses impact + generates YAML patch + Rego suggestions |
+| **Validation** | `agent/tools/validator.py` | ✅ | Superset-only rule, confidence ≥ 0.3, `requires_human_review=True` enforced |
+| **Output** | `main.py` | ✅ | GCS proposal JSON + GitHub Issue for human review |
+
+**Propose-only invariant** — the Security Agent:
+- Never modifies `control-mappings.yaml` or OPA policies directly
+- Every `ComplianceProposal` has `requires_human_review: Literal[True]`
+- Runs weekly via Cloud Scheduler (internal-only Cloud Run, no public endpoint)
+- All API failures → empty results (fail-safe), LLM failure → no proposal emitted
+
+### Design-Time Agent
+
+Analyzes accumulated metrics and produces **structural improvement proposals** (JSON documents stored in GCS). Never executes operational actions. Separate service account.
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Agent Framework | Google ADK | Built-in Agent, Tools, Callbacks, InMemoryRunner, Eval |
+| LLM | Gemini 2.0 Flash (via ADK) | Native GCP, function calling, low latency |
+| LLM Scope | Planning module ONLY | Minimize hallucination surface, all other modules deterministic |
+| Fail-Safe | NO_OP on any failure | Zero operational risk from AI errors |
+| Guard Policy | OPA REST + PQC verify | Fail-closed: OPA down → deny; PQC fail → deny |
+| Execution | GitHub API (httpx) | workflow_dispatch, issue creation, fail-open on API errors |
+| Schemas | Pydantic v2 | LLM output validated before any action |
+| Memory | ADK Session.state + BQ views | No new tables needed |
+| Propose-Only (Security Agent) | GCS JSON + GitHub Issue | `requires_human_review=True` enforced, never writes YAML/Rego directly |
+
+For complete architecture details, see [AI Design Architecture](docs/ai-design-architecture.md).  
+For safety constraints, see [System Guardrails](docs/system-guardrails.md).  
+For pre-implementation audit, see [AI Audit Report](docs/ai-audit-report.md).
+
+---
+
+## 🔄 Way of Working (AI-Assisted Development)
+
+Development is governed through VS Code Copilot customization files that enforce architecture, security, and design constraints at coding time.
+
+### Automatic (always active)
+
+| Context | Governance File | Effect |
+|---------|----------------|--------|
+| Any Copilot interaction | `.github/copilot-instructions.md` | Bounded actions, LLM confinement, baseline immutability |
+| Editing `runtime-agent/**` | `.github/instructions/runtime-agent.instructions.md` | ADK pipeline rules, module separation |
+| Editing `baseline/**` | `.github/instructions/baseline.instructions.md` | IMMUTABLE — no AI logic allowed |
+| Editing `infra/**` | `.github/instructions/terraform.instructions.md` | Additive-only, never edit main.tf |
+
+### On-Demand Prompts
+
+```
+/implement-cogniops Step N: description    # Master orchestrator
+/step1-adk-bootstrap                       # ADK skeleton + FastAPI integration
+/step2-perception                          # Real anomaly detection (z-score + BQ)
+/step3-planning-llm                        # Gemini integration (→ @llm-specialist)
+/step4-guard-execution                     # OPA guard + mode-gated execution
+/step5-telemetry                           # LLM logging + explainability
+/step6-design-agent                        # Design-time agent (separate service)
+/step7-evaluation                          # 2-Axis evaluation (→ @evaluator)
+```
+
+### Specialist Agents
+
+| Agent | Invoke | Expertise |
+|-------|--------|-----------|
+| `@llm-specialist` | Auto in Step 3 | ADK, Gemini, prompt engineering, tool definitions |
+| `@evaluator` | Auto in Step 7 | BQ metrics, statistical analysis, variant comparison |
+| `@security-reviewer` | Manual | OPA, PQC, IAM, secrets — read-only audit |
+
+### Per-Step Workflow
+
+```
+1. Run step prompt (e.g., /step2-perception)
+2. Copilot reads governance + existing code automatically
+3. Copilot implements code + tests following all guardrails
+4. Copilot updates README (this section) + relevant docs
+5. Developer reviews → commit → push
+```
+
+---
+
+## 📊 Implementation Progress
+
+| Step | Description | Status | Key Deliverables |
+|:--:|---|:--:|---|
+| **0** | Copilot Governance Infrastructure | ✅ | Instructions, prompts, agents in `.github/` |
+| **0** | Phase 0 Runtime Skeleton | ✅ | FastAPI + Pub/Sub + BQ + stubs (20 tests) |
+| **0** | AI Audit + Design Docs | ✅ | `docs/ai-audit-report.md`, `ai-design-architecture.md`, `system-guardrails.md` |
+| **1** | ADK Bootstrap | ✅ | LlmAgent, tools, callbacks, InMemoryRunner (38 tests) |
+| **2** | Real Anomaly Detection | ✅ | Z-score + threshold scoring, BQ baselines, graceful degradation (72 tests) |
+| **3** | LLM Planning (Gemini) | ✅ | System prompt + 4 few-shot files, decision criteria matrix, episodic memory (BQ), LLM logger, fallback to NO_OP (98 tests) |
+| **4** | Guard + Execution | ✅ | OPA guard (fail-closed), PQC integrity check (S4/SS2), mode-gated execution (shadow/advisory/enforce), GitHub API client (145 tests) |
+| **5** | Telemetry + Explainability | ✅ | ISO/NIST/IMO control mapping, ActionTrace CloudEvent emitter, ACR validation (ACR=1.0), pipeline wiring (195 tests) |
+| **5b** | Deploy & Wire Runtime Agent | ✅ | IaC (Terraform), CI/CD workflow, live OPA bundle polling, externalized config store (GCS), ADK runner wiring, smoke test (231 tests) |
+| **6** | Design-Time Agent | ⬜ | Context builder, proposal gen, validator |
+| **7** | 2-Axis Evaluation | ⬜ | Variant comparison, statistical analysis, eval dataset |
+
+---
+
+## 🚀 Step 5b: Deploy & Wire Runtime Agent (pre–Step 6)
+
+Before starting the Design-Time Agent, the Runtime Agent must be deployed
+and validated end-to-end in shadow mode. **This is fully automated via IaC + CI/CD.**
+
+Invoke: `/step5b-deploy-wire`
+
+### Deliverables
+
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **IaC** | `infra/runtime.tf` extensions | GCS config bucket, missing env vars, Secret Manager resources, OPA Cloud Run service with bundle polling, image tag variable |
+| **CI/CD** | `.github/workflows/runtime_agent_deploy.yml` | test → bundle-policies (OPA build + GCS upload) → build → deploy → smoke test |
+| **CaC** | Live policy & config management | `cogniops_runtime.rego` (runtime guardrails), `config/control-mappings.yaml` (NIST/ISO refs), OPA bundle polling from GCS (30-120s), config store with TTL cache (5min) |
+| **Code** | ADK runner wiring in `main.py` | Replace Phase 0 stubs with `InMemoryRunner` + `cogniops_agent`, fallback to NO_OP on failure |
+| **Code** | `telemetry/config_store.py` | GCS-backed control mapping store with TTL cache, graceful fallback to built-in defaults |
+| **Validation** | `scripts/smoke_test_runtime.sh` | Publish test event → verify BQ row + ActionTrace |
+
+### Live Config Architecture (zero-redeploy updates)
+
+```
+security/policies/  ──→  CI: opa build  ──→  GCS bucket  ──→  OPA polls (30-120s)
+config/*.yaml       ──→  CI: upload     ──→  GCS bucket  ──→  Agent polls (5min TTL)
+```
+
+| Config Type | Source | Destination | Refresh |
+|---|---|---|---|
+| OPA policies (Rego) | `security/policies/` | `gs://…/bundles/runtime/bundle.tar.gz` | OPA auto-poll 30-120s |
+| NIST/ISO/IMO control refs | `config/control-mappings.yaml` | `gs://…/control-mappings/v1.yaml` | Agent TTL cache 5min |
+| Decision thresholds | `config/thresholds.yaml` (future) | `gs://…/thresholds/v1.yaml` | Agent TTL cache 5min |
+
+### Infrastructure (already in Terraform)
+
+| Resource | Status | Notes |
+|----------|:------:|-------|
+| Cloud Run `runtime-agent` | ✅ provisioned | Placeholder image → replaced by CI/CD |
+| Service account + IAM | ✅ provisioned | logging, BQ, secrets, AR reader |
+| Pub/Sub topic + push sub | ✅ provisioned | `runtime-events-v1` → `/events/runtime` |
+| BQ `runtime_decisions` | ✅ provisioned | Schema matches `DecisionRow` |
+| Secret Manager resources | ✅ Step 5b | `github-token`, `agentops-key` |
+| OPA service | ✅ Step 5b | Lightweight Cloud Run with bundle polling |
+| Missing env vars | ✅ Step 5b | `COGNIOPS_MODE`, `OPA_URL`, `CONFIG_BUCKET`, etc. |
+| GCS config bucket | ✅ Step 5b | `cogniops-config` — OPA bundles + control mappings |
+
+---
+
+## 🛡️ Step 6b: Security Compliance Agent
+
+Automated NIST compliance monitoring — detects regulatory control updates and
+proposes changes to `control-mappings.yaml` and OPA policies. **Propose-only: never executes changes.**
+
+### Pipeline
+
+```
+Cloud Scheduler (weekly) → Feed Ingestion → Diff Engine → Enrich (full text)
+  → Compliance Planner (LlmAgent) → Validator → GCS proposal + GitHub Issue
+```
+
+### Deliverables
+
+| Layer | Deliverable | Details |
+|-------|------------|--------|
+| **Code** | `security-agent/agent/tools/nist_feed.py` | NIST NVD API v2 + SP 800-53 CPRT ingestion, 2-stage fetch (diff first, full text only for relevant), fail-safe on API errors |
+| **Code** | `security-agent/agent/tools/diff_engine.py` | Deterministic comparison: current YAML vs feed data, enrichment with full control text from CPRT |
+| **Code** | `security-agent/agent/tools/proposal_builder.py` | Assembles `ComplianceProposal` from LLM output + diff report |
+| **Code** | `security-agent/agent/tools/validator.py` | YAML schema, superset-only rule, confidence threshold, `requires_human_review=True` enforcement |
+| **Code** | `security-agent/agent/compliance_agent.py` | ADK `LlmAgent` — only LLM component in the pipeline |
+| **Code** | `security-agent/main.py` | FastAPI: `POST /run` (full pipeline), `GET /healthz`, `GET /agent/info` |
+| **Prompt** | `security-agent/agent/prompts/compliance_system.txt` | Scenario-metric matrix, control mapping context, output rules |
+| **Models** | `security-agent/models/schemas.py` | 12 Pydantic v2 schemas: `FeedEntry`, `DiffReport`, `EnrichedEntry`, `ComplianceProposal`, `ValidationResult`, etc. |
+| **IaC** | `infra/compliance.tf` | `compliance-agent-sa`, Cloud Run (internal-only), Cloud Scheduler (weekly Mon 06:00 UTC), NIST API key secret |
+| **CI/CD** | `.github/workflows/compliance_agent_deploy.yml` | test → build-push → deploy → smoke-test (4-job pipeline) |
+| **Tests** | 68 tests across 6 test files | schemas (15), feed ingestion (13), diff engine (14), proposal builder (10), validator (11), E2E pipeline (9) |
+
+### Design Rules
+
+| Rule | Detail |
+|------|--------|
+| Propose-only | JSON proposals in GCS + GitHub Issues — never modifies files |
+| LLM only in Planning | All other modules (feed, diff, validator) are 100% deterministic |
+| 2-stage fetch | Stage 1: fast diff → Stage 2: full text fetch only for changed controls |
+| Fail-safe | NIST down → skip cycle; LLM failure → fallback proposal (confidence 0.3) |
+| Always human review | `requires_human_review: Literal[True]` — Pydantic rejects False |
+| Separate SA | `compliance-agent-sa` with least-privilege IAM |
+
+---
+
+## Next Steps
+- Begin **Step 6: Design-Time Agent** via `/step6-design-agent`
+- Begin **Step 7: 2-Axis Evaluation** (evaluates all three agents together)
 
 ---
 

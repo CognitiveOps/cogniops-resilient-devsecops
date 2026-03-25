@@ -2,11 +2,13 @@
 name: SS1 Secure CI/CD
 
 on:
-  push:
-    paths:
-      - "baseline/services/app/**"
-      - ".github/workflows/ss1_ci.yml"
-      - "security/policies/**"
+  # Baseline sampling complete — push triggers disabled.
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "baseline/services/app/**"
+  #     - ".github/workflows/ss1_ci.yml"
+  #     - "security/policies/**"
   workflow_dispatch:
     inputs:
       run_suffix:
