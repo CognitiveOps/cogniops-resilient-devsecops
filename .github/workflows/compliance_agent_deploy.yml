@@ -2,7 +2,7 @@ name: Security Compliance Agent — Test, Build & Deploy
 
 on:
     push:
-        branches: [runtime_agent_dev, main]
+        branches: [runtime_agent_dev, design_time_agent_dev, main]
         paths:
             - "security-agent/**"
             - "config/**"
