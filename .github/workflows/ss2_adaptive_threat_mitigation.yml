@@ -2,6 +2,7 @@ name: SS2 Adaptive Threat Mitigation (over S2)
 
 on:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/ss2_adaptive_threat_mitigation.yml"
       - "baseline/scripts/ss2_detect.py"

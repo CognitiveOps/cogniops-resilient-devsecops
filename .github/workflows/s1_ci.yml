@@ -8,6 +8,7 @@ on:
 
   # Run automatically on app code changes
   push:
+    branches: [main]
     paths:
       - "baseline/services/app/**"
       - ".github/workflows/s1_ci.yml"

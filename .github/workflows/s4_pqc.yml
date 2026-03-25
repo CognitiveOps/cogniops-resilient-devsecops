@@ -2,6 +2,7 @@ name: S4 Security PQC Validation
 
 on:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/s4_pqc.yml"
       - "baseline/scripts/s4_pqc_runner.py"

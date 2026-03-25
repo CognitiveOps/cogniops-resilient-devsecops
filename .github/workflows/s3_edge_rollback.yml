@@ -2,6 +2,7 @@ name: S3 Edge Rollback Benchmark (MTTD/MTTR)
 
 on:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/s3_edge_rollback.yml"
       - ".github/workflows/_s3_edge_rollback_action.yml"
