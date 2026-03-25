@@ -1,12 +1,13 @@
 name: S3 Edge Rollback Benchmark (MTTD/MTTR)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/s3_edge_rollback.yml"
-      - ".github/workflows/_s3_edge_rollback_action.yml"
-      - "baseline/services/edge_cv_app/**"
+  # Baseline sampling complete — push triggers disabled.
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - ".github/workflows/s3_edge_rollback.yml"
+  #     - ".github/workflows/_s3_edge_rollback_action.yml"
+  #     - "baseline/services/edge_cv_app/**"
   workflow_dispatch:
     inputs:
       fault_mode:
