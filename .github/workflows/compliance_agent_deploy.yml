@@ -129,11 +129,16 @@ jobs:
             - name: Health check
               run: |
                   TOKEN="${{ steps.auth_id.outputs.id_token }}"
-                  STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
-                    -H "Authorization: Bearer $TOKEN" \
-                    "${{ steps.url.outputs.url }}/health")
-                  echo "Health check: $STATUS"
-                  [ "$STATUS" = "200" ]
+                  URL="${{ steps.url.outputs.url }}/health"
+                  for i in 1 2 3 4 5; do
+                    STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+                      -H "Authorization: Bearer $TOKEN" "$URL")
+                    echo "Attempt $i — Health check: $STATUS"
+                    [ "$STATUS" = "200" ] && exit 0
+                    sleep 10
+                  done
+                  echo "Health check failed after 5 attempts"
+                  exit 1
 
             - name: Agent info check
               run: |

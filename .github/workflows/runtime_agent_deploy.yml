@@ -170,10 +170,13 @@ jobs:
           echo "Runtime agent URL: $URL"
 
           echo "── Health check ──"
-          STATUS=$(curl -s -o /tmp/health_body.txt -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL/health")
-          cat /tmp/health_body.txt
-          echo ""
-          echo "Health status: $STATUS"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /tmp/health_body.txt -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL/health")
+            echo "Attempt $i — status: $STATUS"
+            cat /tmp/health_body.txt && echo ""
+            [ "$STATUS" = "200" ] && break
+            sleep 10
+          done
           [ "$STATUS" = "200" ]
 
           echo "── Agent info ──"
