@@ -19,13 +19,13 @@ from models.schemas import FeedEntry, FeedSource
 # ── Healthz / Info ───────────────────────────────────────────────────
 
 
-class TestHealthz:
+class TestHealth:
     @pytest.mark.asyncio
-    async def test_healthz(self):
+    async def test_health(self):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            resp = await client.get("/healthz")
+            resp = await client.get("/health")
 
         assert resp.status_code == 200
         data = resp.json()

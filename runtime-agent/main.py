@@ -3,7 +3,7 @@ runtime-agent – CogniOps Runtime Agent (ADK Cognitive Pipeline).
 
 Endpoints:
   POST /events/runtime   – Pub/Sub push receiver (runtime event pipeline)
-  GET  /healthz           – Liveness probe for Cloud Run
+  GET  /health            – Liveness probe for Cloud Run
   GET  /agent/info        – ADK agent metadata
 
 Pipeline:  Event → ADK Runner (Perception → Planning → Guard → Execution) → BQ → Trace
@@ -64,8 +64,8 @@ runner.auto_create_session = True
 # ── Health check ─────────────────────────────────────────────────────
 
 
-@app.get("/healthz")
-async def healthz():
+@app.get("/health")
+async def health():
     """Liveness / readiness probe for Cloud Run."""
     return {"status": "ok", "mode": COGNIOPS_MODE, "version": "0.3.0"}
 

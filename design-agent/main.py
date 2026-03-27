@@ -9,7 +9,7 @@ Batch/scheduled service that:
 
 Endpoints:
   POST /run          – Trigger analysis (Cloud Scheduler or manual)
-  GET  /healthz      – Liveness probe
+  GET  /health       – Liveness probe
   GET  /agent/info   – ADK agent metadata
 
 Trigger: Cloud Scheduler HTTP POST (weekly) or manual workflow_dispatch.
@@ -259,8 +259,8 @@ async def run_analysis(
     return JSONResponse(content=result, status_code=status_code)
 
 
-@app.get("/healthz")
-async def healthz() -> dict:
+@app.get("/health")
+async def health() -> dict:
     return {"status": "ok", "service": "design-agent"}
 
 

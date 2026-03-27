@@ -1897,7 +1897,7 @@ Cloud Scheduler (weekly) → Feed Ingestion → Diff Engine → Enrich (full tex
 | **Code** | `security-agent/agent/tools/proposal_builder.py` | Assembles `ComplianceProposal` from LLM output + diff report |
 | **Code** | `security-agent/agent/tools/validator.py` | YAML schema, superset-only rule, confidence threshold, `requires_human_review=True` enforcement |
 | **Code** | `security-agent/agent/compliance_agent.py` | ADK `LlmAgent` — only LLM component in the pipeline |
-| **Code** | `security-agent/main.py` | FastAPI: `POST /run` (full pipeline), `GET /healthz`, `GET /agent/info` |
+| **Code** | `security-agent/main.py` | FastAPI: `POST /run` (full pipeline), `GET /health`, `GET /agent/info` |
 | **Prompt** | `security-agent/agent/prompts/compliance_system.txt` | Scenario-metric matrix, control mapping context, output rules |
 | **Models** | `security-agent/models/schemas.py` | 12 Pydantic v2 schemas: `FeedEntry`, `DiffReport`, `EnrichedEntry`, `ComplianceProposal`, `ValidationResult`, etc. |
 | **IaC** | `infra/compliance.tf` | `compliance-agent-sa`, Cloud Run (internal-only), Cloud Scheduler (weekly Mon 06:00 UTC), NIST API key secret |
@@ -1939,7 +1939,7 @@ Cloud Scheduler (weekly, Mon 07:00) → Context Builder (BQ metrics + GCS config
 | **Code** | `design-agent/agent/tools/proposal_generator.py` | Assemble `DesignProposal` with changes, expected impact, policy refs; unique IDs (`design-{date}-{uuid8}`) |
 | **Code** | `design-agent/agent/tools/validator.py` | Schema validation, change type check, path traversal guard, YAML lint, confidence bounds, `requires_human_review=True` |
 | **Code** | `design-agent/agent/design_agent.py` | ADK `LlmAgent` (Gemini 2.0 Flash), system prompt + 2 few-shot examples |
-| **Code** | `design-agent/main.py` | FastAPI (POST /run, GET /healthz, GET /agent/info), GCS storage, GitHub Issue creation |
+| **Code** | `design-agent/main.py` | FastAPI (POST /run, GET /health, GET /agent/info), GCS storage, GitHub Issue creation |
 | **IaC** | `infra/design.tf` | SA (`design-agent-sa`), Cloud Run (internal-only), Cloud Scheduler (weekly Mon 07:00), BQ dataViewer + jobUser, GCS read/write |
 | **Tests** | 97 tests across 4 test files | schemas (20), context builder (19), proposal generator (15), validator (24), pipeline (19) |
 

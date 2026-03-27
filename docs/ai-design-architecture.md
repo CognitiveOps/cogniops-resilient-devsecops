@@ -337,7 +337,7 @@ design-agent/
 ├── models/
 │   ├── __init__.py
 │   └── schemas.py               # Pydantic v2: MetricContext, DesignProposal
-├── main.py                      # FastAPI /run + /healthz endpoints
+├── main.py                      # FastAPI /run + /health endpoints
 ├── requirements.txt
 ├── Dockerfile
 └── tests/

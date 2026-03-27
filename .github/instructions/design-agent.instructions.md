@@ -44,7 +44,7 @@ Cloud Scheduler → POST /run → Context Builder (BQ + GCS)
 - Invalid proposals → discarded, errors logged
 
 ### Entry Point (`main.py`)
-- FastAPI: POST /run (trigger analysis), GET /healthz, GET /agent/info
+- FastAPI: POST /run (trigger analysis), GET /health, GET /agent/info
 - ADK InMemoryRunner with auto_create_session
 - Writes validated proposals to GCS + creates GitHub Issue
 - LLM failure → no proposal (zero operational risk)
