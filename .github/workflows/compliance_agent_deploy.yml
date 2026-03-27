@@ -130,10 +130,17 @@ jobs:
               run: |
                   TOKEN="${{ steps.auth_id.outputs.id_token }}"
                   URL="${{ steps.url.outputs.url }}/health"
+                  echo "Token length: ${#TOKEN}"
+                  echo "URL: $URL"
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: Token is empty!"
+                    exit 1
+                  fi
                   for i in 1 2 3 4 5; do
-                    STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+                    STATUS=$(curl -s -o /tmp/hc_body.txt -w '%{http_code}' \
                       -H "Authorization: Bearer $TOKEN" "$URL")
                     echo "Attempt $i — Health check: $STATUS"
+                    cat /tmp/hc_body.txt && echo ""
                     [ "$STATUS" = "200" ] && exit 0
                     sleep 10
                   done
