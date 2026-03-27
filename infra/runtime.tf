@@ -224,10 +224,10 @@ resource "google_storage_bucket_iam_member" "runtime_agent_config_reader" {
   member = "serviceAccount:${google_service_account.runtime_agent.email}"
 }
 
-# gha-app SA needs objectCreator to upload bundles/config from CI
+# gha-app SA needs objectAdmin to upload/list bundles and config from CI
 resource "google_storage_bucket_iam_member" "gha_app_config_writer" {
   bucket = google_storage_bucket.cogniops_config.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
