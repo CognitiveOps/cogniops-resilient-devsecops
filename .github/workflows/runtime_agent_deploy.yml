@@ -105,7 +105,7 @@ jobs:
 
       - name: Build & push Docker image
         run: |
-          docker build -t "${{ steps.meta.outputs.image }}" runtime-agent/
+          docker build -f runtime-agent/Dockerfile -t "${{ steps.meta.outputs.image }}" .
           docker push "${{ steps.meta.outputs.image }}"
 
   # ── Job 4: Deploy to Cloud Run ────────────────────────────────────
