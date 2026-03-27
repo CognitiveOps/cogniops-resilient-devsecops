@@ -170,7 +170,7 @@ resource "google_cloud_run_v2_service" "design_agent" {
     }
   }
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress = "INGRESS_TRAFFIC_ALL"
   depends_on = [
     google_project_service.services,
     google_project_iam_member.design_agent_secret_accessor,

@@ -184,7 +184,7 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
     }
   }
 
-  ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress    = "INGRESS_TRAFFIC_ALL"
   depends_on = [
     google_project_service.services,
     google_secret_manager_secret.nist_api_key,
