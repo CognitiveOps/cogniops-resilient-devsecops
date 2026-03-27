@@ -150,7 +150,7 @@ jobs:
       - name: Health & agent-info checks
         run: |
           URL=$(gcloud run services describe runtime-agent --region="${REGION}" --format='value(status.url)')
-          TOKEN=$(gcloud auth print-identity-token --audiences="$URL")
+          TOKEN=$(gcloud auth print-identity-token --audiences="$URL" --impersonate-service-account="${{ vars.GCP_SA_APP_EMAIL }}")
           echo "Runtime agent URL: $URL"
 
           echo "── Health check ──"

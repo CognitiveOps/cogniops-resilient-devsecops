@@ -117,7 +117,7 @@ jobs:
 
             - name: Health check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
+                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }} --impersonate-service-account=${{ vars.GCP_SA_APP_EMAIL }})
                   STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
                     -H "Authorization: Bearer $TOKEN" \
                     "${{ steps.url.outputs.url }}/healthz")
@@ -126,6 +126,6 @@ jobs:
 
             - name: Agent info check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
+                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }} --impersonate-service-account=${{ vars.GCP_SA_APP_EMAIL }})
                   curl -s -H "Authorization: Bearer $TOKEN" \
                     "${{ steps.url.outputs.url }}/agent/info" | jq .
