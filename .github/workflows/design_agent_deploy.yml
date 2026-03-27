@@ -107,6 +107,8 @@ jobs:
                   workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
                   service_account: ${{ vars.GCP_SA_APP_EMAIL }}
 
+            - uses: google-github-actions/setup-gcloud@v2
+
             - name: Get service URL
               id: url
               run: |
@@ -115,9 +117,19 @@ jobs:
                     --format 'value(status.url)')
                   echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+            - name: Auth with ID token
+              id: auth_id
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+                  service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+                  token_format: 'id_token'
+                  id_token_audience: ${{ steps.url.outputs.url }}
+                  id_token_include_email: true
+
             - name: Health check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }} --impersonate-service-account=${{ vars.GCP_SA_APP_EMAIL }})
+                  TOKEN="${{ steps.auth_id.outputs.id_token }}"
                   STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
                     -H "Authorization: Bearer $TOKEN" \
                     "${{ steps.url.outputs.url }}/healthz")
@@ -126,6 +138,6 @@ jobs:
 
             - name: Agent info check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }} --impersonate-service-account=${{ vars.GCP_SA_APP_EMAIL }})
+                  TOKEN="${{ steps.auth_id.outputs.id_token }}"
                   curl -s -H "Authorization: Bearer $TOKEN" \
                     "${{ steps.url.outputs.url }}/agent/info" | jq .
