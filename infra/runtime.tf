@@ -471,6 +471,15 @@ resource "google_cloud_run_v2_service_iam_member" "runtime_agent_self_invoker" {
   member   = "serviceAccount:${google_service_account.runtime_agent.email}"
 }
 
+# gha-app SA needs roles/run.invoker on runtime-agent (CI smoke tests)
+resource "google_cloud_run_v2_service_iam_member" "gha_app_runtime_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.runtime_agent.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
 
 ###########################
 # Outputs
