@@ -69,6 +69,15 @@ resource "google_bigquery_dataset_iam_member" "runtime_agent_bq_writer" {
   depends_on = [google_project_service.services]
 }
 
+# IAM: roles/bigquery.jobUser (required to run BQ queries for baseline reading)
+resource "google_project_iam_member" "runtime_agent_bq_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.services]
+}
+
 # IAM: roles/secretmanager.secretAccessor (for AgentOps API key in Secret Manager)
 resource "google_project_iam_member" "runtime_agent_secret_accessor" {
   project = var.project_id

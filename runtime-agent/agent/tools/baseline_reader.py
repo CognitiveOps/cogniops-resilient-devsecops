@@ -34,7 +34,7 @@ SELECT
     {metric_aggs}
 FROM `{project}.{dataset}.runs`
 WHERE t_end > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
-  AND scenario_id = @scenario
+  AND LOWER(scenario_id) = LOWER(@scenario)
   AND status = 'success'
 GROUP BY scenario_id
 """
