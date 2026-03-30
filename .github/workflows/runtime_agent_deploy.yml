@@ -159,7 +159,7 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SA_APP_EMAIL }}
-          token_format: 'id_token'
+          token_format: "id_token"
           id_token_audience: ${{ steps.url.outputs.url }}
           id_token_include_email: true
 

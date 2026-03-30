@@ -27,6 +27,12 @@ resource "google_project_service" "secretmanager" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "aiplatform" {
+  project            = var.project_id
+  service            = "aiplatform.googleapis.com"
+  disable_on_destroy = false
+}
+
 
 ###########################
 # Service Account: runtime-agent-sa
@@ -79,6 +85,15 @@ resource "google_project_iam_member" "runtime_agent_ar_reader" {
   member  = "serviceAccount:${google_service_account.runtime_agent.email}"
 
   depends_on = [google_project_service.services]
+}
+
+# IAM: roles/aiplatform.user (Vertex AI Gemini for ADK cognitive planning)
+resource "google_project_iam_member" "runtime_agent_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.runtime_agent.email}"
+
+  depends_on = [google_project_service.aiplatform]
 }
 
 # Allow gha-infra SA to act as runtime-agent-sa (Terraform deployments)
@@ -172,6 +187,13 @@ resource "google_pubsub_topic_iam_member" "gha_app_runtime_publisher" {
   topic  = google_pubsub_topic.runtime_events.id
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:${google_service_account.gha_app.email}"
+}
+
+# cf-ingest gets roles/pubsub.publisher on runtime-events-v1 (bridge: stage-event → RuntimeEvent)
+resource "google_pubsub_topic_iam_member" "cf_ingest_runtime_publisher" {
+  topic  = google_pubsub_topic.runtime_events.id
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:${google_service_account.cf_ingest.email}"
 }
 
 
@@ -279,7 +301,7 @@ resource "google_secret_manager_secret_version" "runtime_agentops_key_initial" {
 
 
 ###########################
-# OPA Server (Cloud Run) — bundle polling from GCS
+# OPA Server (Cloud Run) — custom image with embedded Rego policies
 ###########################
 resource "google_service_account" "opa" {
   account_id   = "opa-server-sa"
@@ -312,10 +334,12 @@ resource "google_cloud_run_v2_service" "opa" {
     service_account = google_service_account.opa.email
 
     containers {
-      image = "openpolicyagent/opa:latest-static"
+      image   = var.opa_image
+      command = ["./opa"]
       args = [
         "run", "--server", "--addr=:8181",
         "--set=decision_logs.console=true",
+        "/policies/",
       ]
       ports { container_port = 8181 }
       resources {
@@ -324,17 +348,25 @@ resource "google_cloud_run_v2_service" "opa" {
     }
 
     scaling {
-      min_instance_count = 0
+      min_instance_count = 1
       max_instance_count = 2
     }
   }
 
-  ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  # IAM auth (runtime-agent-sa has run.invoker) provides access control.
+  # ingress=all because Cloud Run-to-Cloud Run with ingress=internal
+  # does not reliably work without a VPC connector.
+  ingress    = "INGRESS_TRAFFIC_ALL"
   depends_on = [
     google_project_service.services,
     google_service_account_iam_member.infra_can_actas_opa,
     google_storage_bucket_iam_member.opa_config_reader,
   ]
+
+  # CI/CD deploys the real image; Terraform must not revert to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 # runtime-agent-sa can invoke OPA service
@@ -407,7 +439,19 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
       }
       env {
         name  = "COGNIOPS_MODEL"
-        value = "gemini-2.0-flash"
+        value = "gemini-2.5-flash"
+      }
+      env {
+        name  = "GOOGLE_GENAI_USE_VERTEXAI"
+        value = "TRUE"
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "GOOGLE_CLOUD_LOCATION"
+        value = var.region
       }
       env {
         name  = "METRICS_INGEST_URL"
@@ -460,6 +504,11 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
     google_project_iam_member.runtime_agent_secret_accessor,
     google_project_iam_member.runtime_agent_ar_reader,
   ]
+
+  # CI/CD deploys the real image; Terraform must not revert to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 # runtime-agent-sa gets roles/run.invoker on runtime-agent (self-invoke for Pub/Sub push)

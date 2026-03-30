@@ -175,6 +175,11 @@ resource "google_cloud_run_v2_service" "design_agent" {
     google_project_service.services,
     google_project_iam_member.design_agent_secret_accessor,
   ]
+
+  # CI/CD deploys the real image; Terraform must not revert to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 

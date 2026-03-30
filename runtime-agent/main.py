@@ -174,7 +174,10 @@ async def receive_runtime_event(request: Request):
                 # Extract tool call results from ADK events
                 if hasattr(adk_event, "content") and adk_event.content:
                     for part in adk_event.content.parts or []:
-                        if hasattr(part, "function_response") and part.function_response:
+                        if (
+                            hasattr(part, "function_response")
+                            and part.function_response
+                        ):
                             resp = part.function_response.response
                             if isinstance(resp, dict) and "action" in resp:
                                 last_tool_result = resp

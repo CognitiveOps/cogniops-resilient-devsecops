@@ -26,7 +26,7 @@ from agent.tools.execution_tools import (
 from agent.tools.memory_tools import query_recent_decisions
 from agent.tools.perception_tool import perceive_anomaly
 
-COGNIOPS_MODEL = os.getenv("COGNIOPS_MODEL", "gemini-2.0-flash")
+COGNIOPS_MODEL = os.getenv("COGNIOPS_MODEL", "gemini-2.5-flash")
 
 _PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 

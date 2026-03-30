@@ -196,6 +196,11 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
     google_storage_bucket_iam_member.compliance_agent_config_reader,
     google_storage_bucket_iam_member.compliance_agent_config_writer,
   ]
+
+  # CI/CD deploys the real image; Terraform must not revert to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 
