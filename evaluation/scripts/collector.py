@@ -132,6 +132,14 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
 }
 
 
+# Maps logical scenario_id used in experiment_matrix → actual BQ scenario_id.
+# s3_cloud and s3_edge share scenario_id='s3' in BQ; stage suffix distinguishes them.
+_BQ_SCENARIO_ID: dict[str, str] = {
+    "s3_cloud": "s3",
+    "s3_edge": "s3",
+}
+
+
 def _build_sample_query(
     scenario_id: str,
     metric_name: str,
@@ -146,6 +154,7 @@ def _build_sample_query(
         logger.warning("No extraction config for %s/%s", scenario_id, metric_name)
         return None
 
+    bq_scenario_id = _BQ_SCENARIO_ID.get(scenario_id, scenario_id)
     stage = config["stage"]
 
     if "aggregation" in config:
@@ -164,7 +173,7 @@ SELECT
   status,
   t_end
 FROM `{project}.agent_metrics.runs`
-WHERE scenario_id = '{scenario_id}'
+WHERE scenario_id = '{bq_scenario_id}'
   AND {stage_clause}
   AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')
 ORDER BY variant, t_end
@@ -179,7 +188,7 @@ SELECT
   {value_expr} AS metric_value,
   t_end
 FROM `{project}.agent_metrics.runs`
-WHERE scenario_id = '{scenario_id}'
+WHERE scenario_id = '{bq_scenario_id}'
   AND stage = '{stage}'
   AND status = '{status_filter}'
   AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')

@@ -39,7 +39,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: s1-baseline-${{ github.ref }}
+  group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}
   cancel-in-progress: true
 
 jobs:
