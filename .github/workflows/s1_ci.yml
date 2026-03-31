@@ -24,6 +24,11 @@ on:
           - runtime_only
           - design_only
           - full
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -39,7 +44,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}
+  group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -49,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       VARIANT: ${{ inputs.variant || 'baseline' }}
 
