@@ -81,7 +81,7 @@ It is recommended when running repeated nightly benchmarks to prevent unbounded 
 | **S3**   | –                              | **MTTD**, **MTTR** | –                         | –               |
 | **S4**   | –                              | –                  | **TTV**, **VSR**, **FDR** | –               |
 | **S5**   | –                              | –                  | –                         | **AL**, **ACR** |
-| **SS1**  | **CFR**, **DF**                | –                  | **FDR**, **ACR**          | **ACR**         |
+| **SS1**  | **CFR**                        | –                  | **FDR**                   | –               |
 | **SS2**  | –                              | **MTTD**           | –                         | **AL**, **ACR** |
 
 ---
@@ -1977,6 +1977,42 @@ Invoke: `/step7-evaluation`
 - **Bootstrap 95% CI** for mean difference (10,000 resamples)
 - Minimum 10 samples per variant for statistical validity
 
+### Causal Mode (Overlap Filtering)
+
+The collector supports `--causal-mode` which enforces temporal validity:
+
+- Only compares baseline vs treatment samples that fall within **overlapping time windows**
+- Prevents accidental causal claims from temporally separated datasets
+- Requires interleaved/paired runs (see Paired Evaluation below)
+
+Without causal mode, all comparisons are **observational only** — suitable for descriptive analysis but not for causal agent-impact claims.
+
+### Paired Evaluation Workflow
+
+The `eval_paired_runs.yml` workflow produces causally valid data by running baseline and treatment back-to-back in the same time window:
+
+```
+For each pair:
+  1. Run scenario with variant=baseline  (pair_order=baseline)
+  2. Run scenario with variant=<treatment>  (pair_order=treatment)
+  → Same commit, same runner class, same time window
+  → Labels: experiment_id, pair_id, pair_order
+```
+
+Usage:
+```bash
+# Trigger via GitHub Actions UI or API
+gh workflow run eval_paired_runs.yml \
+  -f scenarios=s3,ss2 \
+  -f treatment_variant=full \
+  -f pairs_per_scenario=15
+```
+
+Reusable pair sub-workflows:
+- `_eval_pair_s1.yml` — S1 CI/CD pairs
+- `_eval_pair_s3.yml` — S3 resilience pairs
+- `_eval_pair_ss2.yml` — SS2 adaptive threat pairs
+
 ### Deliverables
 
 | Layer | Deliverable | Details |
@@ -1984,17 +2020,20 @@ Invoke: `/step7-evaluation`
 | **Config** | `evaluation/configs/experiment_matrix.json` | 7 scenarios × 4 variants, metric definitions, focus tiers |
 | **Config** | `evaluation/configs/thresholds.json` | α=0.05, Cohen's d thresholds, per-metric practical relevance |
 | **Queries** | `evaluation/queries/*.sql` (7 files) | Parameterized BQ queries for TTD, CFR, MTTD, MTTR, DSR, AL, ACR |
-| **Code** | `evaluation/scripts/collector.py` | BQ metric extraction (18 scenario×metric configs, rate aggregation) |
+| **Code** | `evaluation/scripts/collector.py` | BQ metric extraction (18 scenario×metric configs, rate aggregation, causal overlap filtering) |
 | **Code** | `evaluation/scripts/compare_variants.py` | Statistical engine (Mann-Whitney U, Cohen's d, bootstrap CI, export) |
 | **Code** | `evaluation/scripts/visualize.py` | Thesis-quality charts (bar, heatmap, 2-axis quadrant) |
 | **Code** | `evaluation/scripts/run_experiment.py` | CLI orchestrator (collect → compare → visualize → summarize) |
-| **Tests** | 59 tests across 5 test files | configs (10), collector (16), compare (17), visualize (7), orchestrator (5) |
+| **Tests** | 68 tests across 5 test files | configs (10), collector (18), compare (17), visualize (7), orchestrator (5), security eval (11) |
 
 ### Usage
 
 ```bash
-# Full evaluation
+# Observational evaluation (all historical data)
 python -m evaluation.scripts.run_experiment --all --project $GCP_PROJECT_ID -v
+
+# Causal evaluation (overlap-filtered, requires paired runs)
+python -m evaluation.scripts.run_experiment --all --causal-mode --project $GCP_PROJECT_ID -v
 
 # Specific scenarios with time window
 python -m evaluation.scripts.run_experiment --scenarios s1 s3 --start 2025-01-01 --end 2025-06-30

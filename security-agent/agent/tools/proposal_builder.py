@@ -34,8 +34,8 @@ def build_yaml_patch_from_diff(diff: DiffReport) -> YAMLPatch:
             patch_entry = YAMLPatchEntry(
                 ref=(
                     entry.feed_entry.ref_id
-                    if "SP 800-53" in entry.feed_entry.ref_id
-                    else f"NIST SP 800-53 {entry.feed_entry.ref_id}"
+                    if "NIST" in entry.feed_entry.ref_id
+                    else f"NIST {entry.feed_entry.ref_id}"
                 ),
                 title=entry.feed_entry.change_summary or entry.feed_entry.ref_id,
                 revision=entry.feed_entry.latest_revision or None,
@@ -46,8 +46,8 @@ def build_yaml_patch_from_diff(diff: DiffReport) -> YAMLPatch:
         patch_entry = YAMLPatchEntry(
             ref=(
                 entry.feed_entry.ref_id
-                if "SP 800-53" in entry.feed_entry.ref_id
-                else f"NIST SP 800-53 {entry.feed_entry.ref_id}"
+                if "NIST" in entry.feed_entry.ref_id
+                else f"NIST {entry.feed_entry.ref_id}"
             ),
             title=entry.feed_entry.change_summary or entry.feed_entry.ref_id,
             revision=entry.feed_entry.latest_revision or None,

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from evaluation.scripts.collector import (
     METRIC_EXTRACTION,
     _build_sample_query,
+    _filter_to_overlap_windows,
     compute_rate_metric,
 )
 import pandas as pd
-import numpy as np
 
 
 class TestMetricExtractionConfig:
@@ -45,7 +43,6 @@ class TestMetricExtractionConfig:
     def test_ss1_metrics_present(self) -> None:
         assert ("ss1", "CFR") in METRIC_EXTRACTION
         assert ("ss1", "FDR") in METRIC_EXTRACTION
-        assert ("ss1", "ACR") in METRIC_EXTRACTION
 
     def test_ss2_metrics_present(self) -> None:
         assert ("ss2", "MTTD") in METRIC_EXTRACTION
@@ -136,11 +133,11 @@ class TestComputeRateMetric:
             }
         )
         result = compute_rate_metric(df, "failure_rate")
-        assert len(result) == 2
-        baseline_rate = result.loc[
+        assert len(result) == 20
+        baseline_vals = result.loc[
             result["variant"] == "baseline", "metric_value"
-        ].iloc[0]
-        assert abs(baseline_rate - 0.2) < 0.001
+        ]
+        assert abs(float(baseline_vals.mean()) - 0.2) < 0.001
 
     def test_success_rate(self) -> None:
         df = pd.DataFrame(
@@ -151,7 +148,8 @@ class TestComputeRateMetric:
             }
         )
         result = compute_rate_metric(df, "success_rate")
-        assert abs(result.iloc[0]["metric_value"] - 0.7) < 0.001
+        assert len(result) == 10
+        assert abs(float(result["metric_value"].mean()) - 0.7) < 0.001
 
     def test_empty_df(self) -> None:
         df = pd.DataFrame(columns=["variant", "status", "t_end"])
@@ -168,8 +166,8 @@ class TestComputeRateMetric:
             }
         )
         result = compute_rate_metric(df, "rejection_rate")
-        assert len(result) == 1
-        assert abs(result.iloc[0]["metric_value"] - 1.0) < 0.001
+        assert len(result) == 9
+        assert abs(float(result["metric_value"].mean()) - 1.0) < 0.001
 
     def test_detection_rate(self) -> None:
         """SS1/FDR: deny = correctly detected policy violation."""
@@ -181,8 +179,51 @@ class TestComputeRateMetric:
             }
         )
         result = compute_rate_metric(df, "detection_rate")
-        assert len(result) == 1
-        assert abs(result.iloc[0]["metric_value"] - 0.7) < 0.001
+        assert len(result) == 10
+        assert abs(float(result["metric_value"].mean()) - 0.7) < 0.001
+
+
+class TestCausalOverlapFilter:
+    """Validate baseline-treatment overlap window filtering."""
+
+    def test_keeps_only_overlapping_window(self) -> None:
+        df = pd.DataFrame(
+            {
+                "variant": [
+                    "baseline",
+                    "baseline",
+                    "runtime_only",
+                    "runtime_only",
+                ],
+                "t_end": [
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-10T00:00:00Z",
+                    "2026-01-05T00:00:00Z",
+                    "2026-01-20T00:00:00Z",
+                ],
+                "metric_value": [1.0, 2.0, 1.5, 1.7],
+            }
+        )
+        out = _filter_to_overlap_windows(
+            df, treatment_variants=("runtime_only",)
+        )
+        # Overlap window is [2026-01-05, 2026-01-10],
+        # so one row per variant remains.
+        assert len(out) == 2
+        assert set(out["variant"]) == {"baseline", "runtime_only"}
+
+    def test_returns_empty_when_no_overlap(self) -> None:
+        df = pd.DataFrame(
+            {
+                "variant": ["baseline", "runtime_only"],
+                "t_end": ["2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"],
+                "metric_value": [1.0, 2.0],
+            }
+        )
+        out = _filter_to_overlap_windows(
+            df, treatment_variants=("runtime_only",)
+        )
+        assert out.empty
 
 
 class TestMultiStageQuery:

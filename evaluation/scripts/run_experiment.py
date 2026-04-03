@@ -2,7 +2,7 @@
 Run Experiment — orchestrator for the 2-Axis evaluation.
 
 Usage:
-  python -m evaluation.scripts.run_experiment --scenarios s1 s3 --variants baseline full
+    python -m evaluation.scripts.run_experiment --scenarios s1 s3
   python -m evaluation.scripts.run_experiment --all
 """
 
@@ -16,8 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-
-from evaluation.configs import load_experiment_matrix, load_thresholds
 from evaluation.scripts.collector import collect_all_metrics
 from evaluation.scripts.compare_variants import (
     compare_all_variants,
@@ -38,6 +36,7 @@ def run(
     end_ts: str = "2099-12-31",
     output_dir: Path | None = None,
     skip_charts: bool = False,
+    causal_mode: bool = False,
 ) -> dict:
     """Execute full evaluation pipeline.
 
@@ -59,6 +58,7 @@ def run(
         project=project,
         start_ts=start_ts,
         end_ts=end_ts,
+        causal_mode=causal_mode,
     )
     if metrics_df.empty:
         logger.error("No metrics collected — aborting.")
@@ -72,7 +72,9 @@ def run(
     logger.info("Running statistical comparisons...")
     results = compare_all_variants(metrics_df)
     if not results:
-        logger.warning("No comparison results — insufficient data or variants.")
+        logger.warning(
+            "No comparison results — insufficient data or variants."
+        )
         return {
             "status": "warning",
             "reason": "no_comparisons",
@@ -93,10 +95,10 @@ def run(
         )
 
     # Step 4: Summary
-    summary = _build_summary(comparison_df, timestamp)
+    summary = _build_summary(comparison_df, timestamp, causal_mode=causal_mode)
     summary_path = out / "analysis" / f"summary_{timestamp}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(summary_path, "w") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, default=str)
 
     logger.info("Evaluation complete. Summary: %s", summary_path)
@@ -106,16 +108,22 @@ def run(
         "n_metrics": len(metrics_df),
         "n_comparisons": len(results),
         "n_charts": len(chart_paths),
+        "causal_mode": causal_mode,
         "raw_csv": str(raw_csv),
         "comparison_csv": str(csv_path),
         "summary_json": str(summary_path),
     }
 
 
-def _build_summary(comparison_df: pd.DataFrame, timestamp: str) -> dict:
+def _build_summary(
+    comparison_df: pd.DataFrame,
+    timestamp: str,
+    causal_mode: bool = False,
+) -> dict:
     """Build structured summary of evaluation results."""
     summary: dict = {
         "timestamp": timestamp,
+        "causal_mode": causal_mode,
         "n_comparisons": len(comparison_df),
         "significant_improvements": 0,
         "practical_improvements": 0,
@@ -134,7 +142,9 @@ def _build_summary(comparison_df: pd.DataFrame, timestamp: str) -> dict:
             "improved": n_improved,
             "significant": n_sig,
             "practical": n_prac,
-            "mean_cohens_d": float(v_df["cohens_d"].mean()) if len(v_df) > 0 else 0,
+            "mean_cohens_d": (
+                float(v_df["cohens_d"].mean()) if len(v_df) > 0 else 0
+            ),
         }
 
     for scenario_id, s_df in comparison_df.groupby("scenario_id"):
@@ -164,7 +174,9 @@ def _build_summary(comparison_df: pd.DataFrame, timestamp: str) -> dict:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="CogniOps 2-Axis Evaluation")
-    parser.add_argument("--scenarios", nargs="+", help="Scenario IDs to evaluate")
+    parser.add_argument(
+        "--scenarios", nargs="+", help="Scenario IDs to evaluate"
+    )
     parser.add_argument("--project", help="GCP project ID")
     parser.add_argument(
         "--start", default="2020-01-01", help="Start timestamp (YYYY-MM-DD)"
@@ -176,7 +188,17 @@ def main() -> None:
     parser.add_argument(
         "--skip-charts", action="store_true", help="Skip chart generation"
     )
-    parser.add_argument("--all", action="store_true", help="Evaluate all scenarios")
+    parser.add_argument(
+        "--causal-mode",
+        action="store_true",
+        help=(
+            "Filter samples to baseline-treatment overlap windows "
+            "before comparison"
+        ),
+    )
+    parser.add_argument(
+        "--all", action="store_true", help="Evaluate all scenarios"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()
@@ -193,6 +215,7 @@ def main() -> None:
         end_ts=args.end,
         output_dir=args.output,
         skip_charts=args.skip_charts,
+        causal_mode=args.causal_mode,
     )
     print(json.dumps(result, indent=2, default=str))
     sys.exit(0 if result.get("status") != "error" else 1)

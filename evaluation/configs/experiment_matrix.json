@@ -64,7 +64,8 @@
             ],
             "metrics": [
                 "TDL",
-                "DSR"
+                "DSR",
+                "TTD_edge"
             ],
             "min_runs": 10,
             "primary_metric": "TDL",
@@ -78,6 +79,11 @@
                     "stage": "s2_activate",
                     "aggregation": "success_rate",
                     "higher_is_better": true
+                },
+                "TTD_edge": {
+                    "stage": "s2_ttd_edge",
+                    "field": "duration_sec",
+                    "lower_is_better": true
                 }
             }
         },
@@ -203,8 +209,7 @@
             ],
             "metrics": [
                 "CFR",
-                "FDR",
-                "ACR"
+                "FDR"
             ],
             "min_runs": 10,
             "primary_metric": "FDR",
@@ -217,11 +222,6 @@
                 "FDR": {
                     "stage": "ss1_policy",
                     "aggregation": "detection_rate",
-                    "higher_is_better": true
-                },
-                "ACR": {
-                    "stage": "ss1_final",
-                    "json_key": "acr",
                     "higher_is_better": true
                 }
             }

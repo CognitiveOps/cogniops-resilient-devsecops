@@ -157,6 +157,18 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
         value = "gemini-2.0-flash"
       }
       env {
+        name  = "GOOGLE_GENAI_USE_VERTEXAI"
+        value = "true"
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "GOOGLE_CLOUD_LOCATION"
+        value = var.region
+      }
+      env {
         name  = "LOOKBACK_DAYS"
         value = "7"
       }

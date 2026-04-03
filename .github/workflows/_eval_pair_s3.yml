@@ -1,0 +1,34 @@
+name: _eval_pair_s3 (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      experiment_id:
+        required: true
+        type: string
+      pair_id:
+        required: true
+        type: string
+      treatment_variant:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  baseline:
+    uses: ./.github/workflows/s3_rollback.yml
+    with:
+      run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-baseline
+      variant: baseline
+    secrets: inherit
+
+  treatment:
+    needs: baseline
+    uses: ./.github/workflows/s3_rollback.yml
+    with:
+      run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
+      variant: ${{ inputs.treatment_variant }}
+    secrets: inherit

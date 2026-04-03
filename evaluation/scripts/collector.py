@@ -7,14 +7,11 @@ All queries are parameterized (no hardcoded project IDs).
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger("evaluation.collector")
@@ -50,6 +47,11 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
     ("s2", "DSR"): {
         "stage": "s2_activate",
         "aggregation": "success_rate",
+    },
+    ("s2", "TTD_edge"): {
+        "stage": "s2_ttd_edge",
+        "value_expr": "duration_sec",
+        "status_filter": "success",
     },
     # S3 Cloud (Cloud Run substrate — 218 rows)
     ("s3_cloud", "MTTD"): {
@@ -90,7 +92,7 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
     },
     # S5
     ("s5", "AL"): {
-        "stage": "s5_approve",
+        "stage": "s5_final",
         "value_expr": "CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64)",
         "status_filter": "success",
     },
@@ -108,11 +110,6 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
         "stage": "ss1_policy",
         "aggregation": "detection_rate",
     },
-    ("ss1", "ACR"): {
-        "stage": "ss1_final",
-        "value_expr": "CAST(JSON_VALUE(metrics, '$.acr') AS FLOAT64)",
-        "status_filter": "success",
-    },
     # SS2
     ("ss2", "MTTD"): {
         "stage": "ss2_detect",
@@ -123,6 +120,10 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
         "stage": "s5_final",
         "value_expr": "CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64)",
         "status_filter": "success",
+        "extra_where": (
+            "AND CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64) "
+            "BETWEEN 5 AND 50"
+        ),
     },
     ("ss2", "ACR"): {
         "stage": "s5_final",
@@ -133,7 +134,8 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
 
 
 # Maps logical scenario_id used in experiment_matrix → actual BQ scenario_id.
-# s3_cloud and s3_edge share scenario_id='s3' in BQ; stage suffix distinguishes them.
+# s3_cloud and s3_edge share scenario_id='s3' in BQ.
+# Stage suffix distinguishes them.
 _BQ_SCENARIO_ID: dict[str, str] = {
     "s3_cloud": "s3",
     "s3_edge": "s3",
@@ -151,7 +153,9 @@ def _build_sample_query(
     key = (scenario_id, metric_name)
     config = METRIC_EXTRACTION.get(key)
     if not config:
-        logger.warning("No extraction config for %s/%s", scenario_id, metric_name)
+        logger.warning(
+            "No extraction config for %s/%s", scenario_id, metric_name
+        )
         return None
 
     bq_scenario_id = _BQ_SCENARIO_ID.get(scenario_id, scenario_id)
@@ -171,7 +175,10 @@ SELECT
   COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline') AS variant,
   run_id,
   status,
-  t_end
+    t_end,
+    JSON_VALUE(labels, '$.experiment_id') AS experiment_id,
+    JSON_VALUE(labels, '$.pair_id') AS pair_id,
+    JSON_VALUE(labels, '$.pair_order') AS pair_order
 FROM `{project}.agent_metrics.runs`
 WHERE scenario_id = '{bq_scenario_id}'
   AND {stage_clause}
@@ -181,18 +188,23 @@ ORDER BY variant, t_end
 
     value_expr = config.get("value_expr", "duration_sec")
     status_filter = config.get("status_filter", "success")
+    extra_where = config.get("extra_where", "")
     return f"""
 SELECT
   COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline') AS variant,
   run_id,
   {value_expr} AS metric_value,
-  t_end
+    t_end,
+    JSON_VALUE(labels, '$.experiment_id') AS experiment_id,
+    JSON_VALUE(labels, '$.pair_id') AS pair_id,
+    JSON_VALUE(labels, '$.pair_order') AS pair_order
 FROM `{project}.agent_metrics.runs`
 WHERE scenario_id = '{bq_scenario_id}'
   AND stage = '{stage}'
   AND status = '{status_filter}'
   AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')
   AND {value_expr} IS NOT NULL
+  {extra_where}
 ORDER BY variant, t_end
 """
 
@@ -206,14 +218,17 @@ def query_metric_samples(
 ) -> pd.DataFrame:
     """Query BQ for per-sample metric values, grouped by variant.
 
-    Returns a DataFrame with columns: variant, metric_value (or status for rates).
+    Returns a DataFrame with columns:
+    variant, metric_value (or status for rates), t_end.
     """
     proj = project or GCP_PROJECT_ID
     if not proj:
         logger.error("GCP_PROJECT_ID not set")
         return pd.DataFrame()
 
-    query = _build_sample_query(scenario_id, metric_name, proj, start_ts, end_ts)
+    query = _build_sample_query(
+        scenario_id, metric_name, proj, start_ts, end_ts
+    )
     if not query:
         return pd.DataFrame()
 
@@ -222,9 +237,11 @@ def query_metric_samples(
 
         client = bigquery.Client(project=proj)
         df = client.query(query).to_dataframe()
-        logger.info("Fetched %d rows for %s/%s", len(df), scenario_id, metric_name)
+        logger.info(
+            "Fetched %d rows for %s/%s", len(df), scenario_id, metric_name
+        )
         return df
-    except Exception:
+    except Exception:  # pragma: no cover - network/credentials failures
         logger.warning(
             "BQ query failed for %s/%s", scenario_id, metric_name, exc_info=True
         )
@@ -232,62 +249,115 @@ def query_metric_samples(
 
 
 def compute_rate_metric(df: pd.DataFrame, aggregation: str) -> pd.DataFrame:
-    """Compute rate-based metrics from raw status rows.
+    """Compute rate-based metrics as per-run binary values.
+
+    Each run produces a 0/1 metric_value so we have enough samples
+    for non-parametric statistical tests (Mann-Whitney U).
 
     Supported aggregations:
-      - failure_rate:    failures / total  (S1/CFR, SS1/CFR)
-      - success_rate:    successes / total (S2/DSR, S4/VSR)
+      - failure_rate:    1 if run failed, 0 if success  (S1/CFR, SS1/CFR)
+      - success_rate:    1 if run succeeded, 0 otherwise  (S2/DSR, S4/VSR)
       - frequency_per_day: successful runs per calendar day (S1/DF)
-      - rejection_rate:  correct rejections / total  (S4/FDR — status=success
-                         means the invalid input was correctly rejected)
-      - detection_rate:  detections / total  (SS1/FDR — status=deny means
-                         the policy correctly detected a violation)
+      - rejection_rate:  1 if correctly rejected, 0 otherwise  (S4/FDR)
+      - detection_rate:  1 if correctly detected, 0 otherwise  (SS1/FDR)
 
-    Returns DataFrame with: variant, metric_value (the rate).
+    Returns DataFrame with: variant, metric_value (per-run 0/1 or rate), t_end.
     """
     if df.empty:
-        return pd.DataFrame(columns=["variant", "metric_value"])
+        return pd.DataFrame(columns=["variant", "metric_value", "t_end"])
 
     if aggregation == "failure_rate":
-        grouped = df.groupby("variant").agg(
-            total=("status", "count"),
-            failures=("status", lambda x: (x == "failure").sum()),
-        )
-        grouped["metric_value"] = grouped["failures"] / grouped["total"]
+        result = df[["variant"]].copy()
+        result["metric_value"] = (df["status"] == "failure").astype(float)
+        result["t_end"] = df["t_end"]
     elif aggregation == "success_rate":
-        grouped = df.groupby("variant").agg(
-            total=("status", "count"),
-            successes=("status", lambda x: (x == "success").sum()),
-        )
-        grouped["metric_value"] = grouped["successes"] / grouped["total"]
+        result = df[["variant"]].copy()
+        result["metric_value"] = (df["status"] == "success").astype(float)
+        result["t_end"] = df["t_end"]
     elif aggregation == "frequency_per_day":
-        grouped = df.groupby("variant").agg(
-            total=("status", lambda x: (x == "success").sum()),
-            min_t=("t_end", "min"),
-            max_t=("t_end", "max"),
+        # Group by variant and day, count successful runs per day
+        success_df = df[df["status"] == "success"].copy()
+        if success_df.empty:
+            return pd.DataFrame(columns=["variant", "metric_value"])
+        success_df["day"] = pd.to_datetime(success_df["t_end"]).dt.date
+        daily = (
+            success_df.groupby(["variant", "day"])
+            .size()
+            .reset_index(name="metric_value")
         )
-        days = (grouped["max_t"] - grouped["min_t"]).dt.total_seconds() / 86400
-        grouped["metric_value"] = grouped["total"] / days.clip(lower=1)
+        daily["metric_value"] = daily["metric_value"].astype(float)
+        daily["t_end"] = pd.to_datetime(daily["day"])
+        result = daily[["variant", "metric_value", "t_end"]]
     elif aggregation == "rejection_rate":
-        # S4/FDR: invalid PQC scenarios (p1/p2/p3) — status=success means
-        # the verifier correctly rejected the invalid input.
-        grouped = df.groupby("variant").agg(
-            total=("status", "count"),
-            correct=("status", lambda x: (x == "success").sum()),
-        )
-        grouped["metric_value"] = grouped["correct"] / grouped["total"]
+        result = df[["variant"]].copy()
+        result["metric_value"] = (df["status"] == "success").astype(float)
+        result["t_end"] = df["t_end"]
     elif aggregation == "detection_rate":
-        # SS1/FDR: policy gate — status=deny means the policy correctly
-        # detected a violation. FDR = deny / total.
-        grouped = df.groupby("variant").agg(
-            total=("status", "count"),
-            detected=("status", lambda x: (x == "deny").sum()),
-        )
-        grouped["metric_value"] = grouped["detected"] / grouped["total"]
+        result = df[["variant"]].copy()
+        result["metric_value"] = (df["status"] == "deny").astype(float)
+        result["t_end"] = df["t_end"]
     else:
-        return pd.DataFrame(columns=["variant", "metric_value"])
+        return pd.DataFrame(columns=["variant", "metric_value", "t_end"])
 
-    return grouped[["metric_value"]].reset_index()
+    return result[["variant", "metric_value", "t_end"]].reset_index(drop=True)
+
+
+def _filter_to_overlap_windows(
+    df: pd.DataFrame,
+    treatment_variants: tuple[str, ...] = (
+        "design_only",
+        "runtime_only",
+        "full",
+    ),
+) -> pd.DataFrame:
+    """Keep only rows that fall in baseline-vs-treatment overlap windows.
+
+    For each treatment variant, we compute the timestamp overlap window
+    against baseline:
+      [max(min_baseline, min_treatment), min(max_baseline, max_treatment)]
+    and retain baseline+treatment rows inside that window.
+    """
+    if df.empty or "variant" not in df.columns or "t_end" not in df.columns:
+        return df
+
+    work = df.copy()
+    work["t_end"] = pd.to_datetime(work["t_end"], utc=True, errors="coerce")
+    work = work.dropna(subset=["t_end"])
+    if work.empty:
+        return work
+
+    baseline = work[work["variant"] == "baseline"]
+    if baseline.empty:
+        return pd.DataFrame(columns=work.columns)
+
+    selected_frames: list[pd.DataFrame] = []
+    for tv in treatment_variants:
+        treat = work[work["variant"] == tv]
+        if treat.empty:
+            continue
+
+        overlap_start = max(baseline["t_end"].min(), treat["t_end"].min())
+        overlap_end = min(baseline["t_end"].max(), treat["t_end"].max())
+        if overlap_start > overlap_end:
+            continue
+
+        b_sel = baseline[
+            (baseline["t_end"] >= overlap_start)
+            & (baseline["t_end"] <= overlap_end)
+        ]
+        t_sel = treat[
+            (treat["t_end"] >= overlap_start)
+            & (treat["t_end"] <= overlap_end)
+        ]
+        if b_sel.empty or t_sel.empty:
+            continue
+
+        selected_frames.extend([b_sel, t_sel])
+
+    if not selected_frames:
+        return pd.DataFrame(columns=work.columns)
+
+    return pd.concat(selected_frames, ignore_index=True)
 
 
 def collect_all_metrics(
@@ -295,10 +365,11 @@ def collect_all_metrics(
     project: str | None = None,
     start_ts: str = "2020-01-01",
     end_ts: str = "2099-12-31",
+    causal_mode: bool = False,
 ) -> pd.DataFrame:
-    """Collect all metrics for all scenarios, returning a long-format DataFrame.
+    """Collect all metrics for all scenarios in long format.
 
-    Columns: scenario_id, metric_name, variant, metric_value
+    Columns: scenario_id, metric_name, variant, metric_value, t_end
     """
     from evaluation.configs import load_experiment_matrix
 
@@ -322,6 +393,16 @@ def collect_all_metrics(
             if df.empty:
                 continue
 
+            if causal_mode:
+                df = _filter_to_overlap_windows(df)
+                if df.empty:
+                    logger.info(
+                        "No overlap window samples for %s/%s (causal mode)",
+                        scenario_id,
+                        metric_name,
+                    )
+                    continue
+
             key = (scenario_id, metric_name)
             config = METRIC_EXTRACTION.get(key, {})
 
@@ -334,6 +415,7 @@ def collect_all_metrics(
                             "metric_name": metric_name,
                             "variant": row["variant"],
                             "metric_value": row["metric_value"],
+                            "t_end": row.get("t_end"),
                         }
                     )
             else:
@@ -344,6 +426,7 @@ def collect_all_metrics(
                             "metric_name": metric_name,
                             "variant": row["variant"],
                             "metric_value": row["metric_value"],
+                            "t_end": row.get("t_end"),
                         }
                     )
 

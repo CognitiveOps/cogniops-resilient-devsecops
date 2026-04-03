@@ -22,6 +22,21 @@ def _iso_from_epoch(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _extract_causal_labels(run_id: str, labels: Dict[str, Any]) -> None:
+    """Parse causal experiment metadata from run_id suffix.
+
+    Paired-run workflows produce run_ids like:
+      12345-1-causal-20260403T120000Z-67890-p3-baseline
+    We extract experiment_id, pair_id, pair_order.
+    """
+    import re
+    m = re.search(r"(causal-[^-]+-\d+)-p(\d+)-(baseline|treatment)", run_id)
+    if m:
+        labels.setdefault("experiment_id", m.group(1))
+        labels.setdefault("pair_id", m.group(2))
+        labels.setdefault("pair_order", m.group(3))
+
+
 def emit_stage_event(
     *,
     ingest_url: str,
@@ -44,6 +59,22 @@ def emit_stage_event(
     merged_labels = dict(labels or {})
     if "variant" not in merged_labels:
         merged_labels["variant"] = os.environ.get("VARIANT", "baseline")
+    # Causal evaluation labels — extract from env or parse from RUN_ID.
+    # Paired-run workflows set run_suffix to:
+    #   causal-<ts>-<ghid>-p<N>-baseline  or  ...-p<N>-treatment
+    for env_key, label_key in (
+        ("EXPERIMENT_ID", "experiment_id"),
+        ("PAIR_ID", "pair_id"),
+        ("PAIR_ORDER", "pair_order"),
+    ):
+        val = os.environ.get(env_key, "")
+        if val and label_key not in merged_labels:
+            merged_labels[label_key] = val
+    # Auto-detect from RUN_ID if explicit env vars are absent
+    if "experiment_id" not in merged_labels:
+        _run_id = os.environ.get("RUN_ID", run_id)
+        if "causal-" in _run_id:
+            _extract_causal_labels(_run_id, merged_labels)
     payload: Dict[str, Any] = {
         "run_id": run_id,
         "scenario_id": scenario_id,

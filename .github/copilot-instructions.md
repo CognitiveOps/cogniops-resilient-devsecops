@@ -110,5 +110,5 @@ Always start new capabilities in `shadow` mode.
 | S3 (Resilience) | MTTD, MTTR |
 | S4 (PQC) | TTV, VSR, FDR |
 | S5 (Explainability) | AL, ACR |
-| SS1 (Policy Audit) | CFR, DF, FDR, ACR |
+| SS1 (Policy Audit) | CFR, FDR |
 | SS2 (Adaptive Threat) | MTTD, AL, ACR |

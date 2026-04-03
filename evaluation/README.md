@@ -20,7 +20,7 @@ Each cell is a **variant** — a complete system configuration run against all s
 | S3 (Resilience) | MTTD, MTTR | lower, lower |
 | S4 (PQC) | TTV, VSR, FDR | lower, higher, higher |
 | S5 (Explainability) | AL, ACR | lower, higher |
-| SS1 (Policy Audit) | CFR, FDR, ACR | lower, higher, higher |
+| SS1 (Policy Audit) | CFR, FDR | lower, higher |
 | SS2 (Adaptive Threat) | MTTD, AL, ACR | lower, lower, higher |
 
 ## Statistical Methods
