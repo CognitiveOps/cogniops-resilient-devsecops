@@ -27,10 +27,11 @@ def _extract_causal_labels(run_id: str, labels: Dict[str, Any]) -> None:
 
     Paired-run workflows produce run_ids like:
       12345-1-causal-20260403T120000Z-67890-p3-baseline
+      12345-1-causal-20260403T120000Z-s3b-p3-treatment
     We extract experiment_id, pair_id, pair_order.
     """
     import re
-    m = re.search(r"(causal-[^-]+-\d+)-p(\d+)-(baseline|treatment)", run_id)
+    m = re.search(r"(causal-.+?)-p(\d+)-(baseline|treatment)", run_id)
     if m:
         labels.setdefault("experiment_id", m.group(1))
         labels.setdefault("pair_id", m.group(2))
