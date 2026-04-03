@@ -72,9 +72,7 @@ def run(
     logger.info("Running statistical comparisons...")
     results = compare_all_variants(metrics_df)
     if not results:
-        logger.warning(
-            "No comparison results — insufficient data or variants."
-        )
+        logger.warning("No comparison results — insufficient data or variants.")
         return {
             "status": "warning",
             "reason": "no_comparisons",
@@ -142,9 +140,7 @@ def _build_summary(
             "improved": n_improved,
             "significant": n_sig,
             "practical": n_prac,
-            "mean_cohens_d": (
-                float(v_df["cohens_d"].mean()) if len(v_df) > 0 else 0
-            ),
+            "mean_cohens_d": (float(v_df["cohens_d"].mean()) if len(v_df) > 0 else 0),
         }
 
     for scenario_id, s_df in comparison_df.groupby("scenario_id"):
@@ -174,9 +170,7 @@ def _build_summary(
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="CogniOps 2-Axis Evaluation")
-    parser.add_argument(
-        "--scenarios", nargs="+", help="Scenario IDs to evaluate"
-    )
+    parser.add_argument("--scenarios", nargs="+", help="Scenario IDs to evaluate")
     parser.add_argument("--project", help="GCP project ID")
     parser.add_argument(
         "--start", default="2020-01-01", help="Start timestamp (YYYY-MM-DD)"
@@ -192,13 +186,10 @@ def main() -> None:
         "--causal-mode",
         action="store_true",
         help=(
-            "Filter samples to baseline-treatment overlap windows "
-            "before comparison"
+            "Filter samples to baseline-treatment overlap windows " "before comparison"
         ),
     )
-    parser.add_argument(
-        "--all", action="store_true", help="Evaluate all scenarios"
-    )
+    parser.add_argument("--all", action="store_true", help="Evaluate all scenarios")
     parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()

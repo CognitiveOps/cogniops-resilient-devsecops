@@ -1,47 +1,47 @@
 name: _eval_pair_ss2 (reusable)
 
 on:
-  workflow_call:
-    inputs:
-      experiment_id:
-        required: true
-        type: string
-      pair_id:
-        required: true
-        type: string
-      treatment_variant:
-        required: true
-        type: string
-      auto_approve:
-        required: false
-        default: "true"
-        type: string
-      auto_approve_delay_sec:
-        required: false
-        default: "15"
-        type: string
+    workflow_call:
+        inputs:
+            experiment_id:
+                required: true
+                type: string
+            pair_id:
+                required: true
+                type: string
+            treatment_variant:
+                required: true
+                type: string
+            auto_approve:
+                required: false
+                default: "true"
+                type: string
+            auto_approve_delay_sec:
+                required: false
+                default: "15"
+                type: string
 
 permissions:
-  contents: read
-  id-token: write
-  issues: write
+    contents: read
+    id-token: write
+    issues: write
 
 jobs:
-  baseline:
-    uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
-    with:
-      run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-baseline
-      variant: baseline
-      auto_approve: ${{ inputs.auto_approve }}
-      auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
-    secrets: inherit
+    baseline:
+        uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-baseline
+            variant: baseline
+            auto_approve: ${{ inputs.auto_approve }}
+            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
+        secrets: inherit
 
-  treatment:
-    needs: baseline
-    uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
-    with:
-      run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
-      variant: ${{ inputs.treatment_variant }}
-      auto_approve: ${{ inputs.auto_approve }}
-      auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
-    secrets: inherit
+    treatment:
+        needs: baseline
+        uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
+            variant: ${{ inputs.treatment_variant }}
+            auto_approve: ${{ inputs.auto_approve }}
+            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
+        secrets: inherit

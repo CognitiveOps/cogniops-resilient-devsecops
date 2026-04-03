@@ -121,8 +121,7 @@ METRIC_EXTRACTION: dict[tuple[str, str], dict[str, Any]] = {
         "value_expr": "CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64)",
         "status_filter": "success",
         "extra_where": (
-            "AND CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64) "
-            "BETWEEN 5 AND 50"
+            "AND CAST(JSON_VALUE(metrics, '$.al_sec') AS FLOAT64) " "BETWEEN 5 AND 50"
         ),
     },
     ("ss2", "ACR"): {
@@ -153,9 +152,7 @@ def _build_sample_query(
     key = (scenario_id, metric_name)
     config = METRIC_EXTRACTION.get(key)
     if not config:
-        logger.warning(
-            "No extraction config for %s/%s", scenario_id, metric_name
-        )
+        logger.warning("No extraction config for %s/%s", scenario_id, metric_name)
         return None
 
     bq_scenario_id = _BQ_SCENARIO_ID.get(scenario_id, scenario_id)
@@ -226,9 +223,7 @@ def query_metric_samples(
         logger.error("GCP_PROJECT_ID not set")
         return pd.DataFrame()
 
-    query = _build_sample_query(
-        scenario_id, metric_name, proj, start_ts, end_ts
-    )
+    query = _build_sample_query(scenario_id, metric_name, proj, start_ts, end_ts)
     if not query:
         return pd.DataFrame()
 
@@ -237,9 +232,7 @@ def query_metric_samples(
 
         client = bigquery.Client(project=proj)
         df = client.query(query).to_dataframe()
-        logger.info(
-            "Fetched %d rows for %s/%s", len(df), scenario_id, metric_name
-        )
+        logger.info("Fetched %d rows for %s/%s", len(df), scenario_id, metric_name)
         return df
     except Exception:  # pragma: no cover - network/credentials failures
         logger.warning(
@@ -342,12 +335,10 @@ def _filter_to_overlap_windows(
             continue
 
         b_sel = baseline[
-            (baseline["t_end"] >= overlap_start)
-            & (baseline["t_end"] <= overlap_end)
+            (baseline["t_end"] >= overlap_start) & (baseline["t_end"] <= overlap_end)
         ]
         t_sel = treat[
-            (treat["t_end"] >= overlap_start)
-            & (treat["t_end"] <= overlap_end)
+            (treat["t_end"] >= overlap_start) & (treat["t_end"] <= overlap_end)
         ]
         if b_sel.empty or t_sel.empty:
             continue

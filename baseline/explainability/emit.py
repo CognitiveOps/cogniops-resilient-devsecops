@@ -19,7 +19,9 @@ from typing import Any, Dict, Optional
 
 
 def _iso_from_epoch(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    )
 
 
 def _extract_causal_labels(run_id: str, labels: Dict[str, Any]) -> None:
@@ -31,6 +33,7 @@ def _extract_causal_labels(run_id: str, labels: Dict[str, Any]) -> None:
     We extract experiment_id, pair_id, pair_order.
     """
     import re
+
     m = re.search(r"(causal-.+?)-p(\d+)-(baseline|treatment)", run_id)
     if m:
         labels.setdefault("experiment_id", m.group(1))
@@ -99,7 +102,9 @@ def emit_stage_event(
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.getcode() != 200:
-                sys.stderr.write(f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n")
+                sys.stderr.write(
+                    f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n"
+                )
     except urllib.error.HTTPError as e:
         sys.stderr.write(f"[ingest] HTTPError status={e.code} body={e.read()!r}\n")
     except Exception as e:  # pragma: no cover
@@ -131,7 +136,9 @@ def emit_cloudevent(
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.getcode() != 200:
-                sys.stderr.write(f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n")
+                sys.stderr.write(
+                    f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n"
+                )
     except urllib.error.HTTPError as e:
         sys.stderr.write(f"[ingest] HTTPError status={e.code} body={e.read()!r}\n")
     except Exception as e:  # pragma: no cover

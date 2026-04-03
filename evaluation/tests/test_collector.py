@@ -134,9 +134,7 @@ class TestComputeRateMetric:
         )
         result = compute_rate_metric(df, "failure_rate")
         assert len(result) == 20
-        baseline_vals = result.loc[
-            result["variant"] == "baseline", "metric_value"
-        ]
+        baseline_vals = result.loc[result["variant"] == "baseline", "metric_value"]
         assert abs(float(baseline_vals.mean()) - 0.2) < 0.001
 
     def test_success_rate(self) -> None:
@@ -204,9 +202,7 @@ class TestCausalOverlapFilter:
                 "metric_value": [1.0, 2.0, 1.5, 1.7],
             }
         )
-        out = _filter_to_overlap_windows(
-            df, treatment_variants=("runtime_only",)
-        )
+        out = _filter_to_overlap_windows(df, treatment_variants=("runtime_only",))
         # Overlap window is [2026-01-05, 2026-01-10],
         # so one row per variant remains.
         assert len(out) == 2
@@ -220,9 +216,7 @@ class TestCausalOverlapFilter:
                 "metric_value": [1.0, 2.0],
             }
         )
-        out = _filter_to_overlap_windows(
-            df, treatment_variants=("runtime_only",)
-        )
+        out = _filter_to_overlap_windows(df, treatment_variants=("runtime_only",))
         assert out.empty
 
 
