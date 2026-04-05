@@ -323,32 +323,24 @@ def _filter_to_overlap_windows(
     if baseline.empty:
         return pd.DataFrame(columns=work.columns)
 
-    selected_frames: list[pd.DataFrame] = []
-    for tv in treatment_variants:
-        treat = work[work["variant"] == tv]
-        if treat.empty:
-            continue
-
-        overlap_start = max(baseline["t_end"].min(), treat["t_end"].min())
-        overlap_end = min(baseline["t_end"].max(), treat["t_end"].max())
-        if overlap_start > overlap_end:
-            continue
-
-        b_sel = baseline[
-            (baseline["t_end"] >= overlap_start) & (baseline["t_end"] <= overlap_end)
-        ]
-        t_sel = treat[
-            (treat["t_end"] >= overlap_start) & (treat["t_end"] <= overlap_end)
-        ]
-        if b_sel.empty or t_sel.empty:
-            continue
-
-        selected_frames.extend([b_sel, t_sel])
-
-    if not selected_frames:
+    # Compute global overlap window across ALL treatment variants so that
+    # baseline rows are included exactly once (avoids N× duplication).
+    all_treat = work[work["variant"].isin(treatment_variants)]
+    if all_treat.empty:
         return pd.DataFrame(columns=work.columns)
 
-    return pd.concat(selected_frames, ignore_index=True)
+    overlap_start = max(baseline["t_end"].min(), all_treat["t_end"].min())
+    overlap_end = min(baseline["t_end"].max(), all_treat["t_end"].max())
+    if overlap_start > overlap_end:
+        return pd.DataFrame(columns=work.columns)
+
+    mask = (work["t_end"] >= overlap_start) & (work["t_end"] <= overlap_end)
+    filtered = work[mask & work["variant"].isin(("baseline", *treatment_variants))]
+
+    if filtered.empty:
+        return pd.DataFrame(columns=work.columns)
+
+    return filtered.reset_index(drop=True)
 
 
 def collect_all_metrics(

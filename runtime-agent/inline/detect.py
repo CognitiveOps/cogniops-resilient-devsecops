@@ -17,38 +17,36 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 
 
 def _fetch_status(service_url: str) -> tuple[int, float, dict]:
-    """Fetch /status and return (http_code, latency_sec, body_dict)."""
+    """Fetch /status and return (http_code, latency_sec, body_dict).
+
+    Uses stdlib urllib — no subprocess spawn overhead.
+    """
+    url = f"{service_url}/status"
+    t0 = time.monotonic()
     try:
-        result = subprocess.run(
-            [
-                "curl", "-s", "-w", "\n%{time_total} %{http_code}",
-                f"{service_url}/status",
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-        lines = result.stdout.strip().rsplit("\n", 1)
-        body_str = lines[0] if len(lines) > 1 else "{}"
-        meta = lines[-1].split()
-        http_code = int(meta[0]) if len(meta) >= 1 else 0
-        latency = float(meta[1]) if len(meta) >= 2 else 10.0
-        # curl outputs "time_total http_code", but -w format is
-        # "\n%{time_total} %{http_code}" so order might differ.
-        # The http_code is always an integer >= 100.
-        if http_code < 100 and latency >= 100:
-            http_code, latency = int(latency), float(meta[0])
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            latency = time.monotonic() - t0
+            body_bytes = resp.read()
+            http_code = resp.status
         try:
-            body = json.loads(body_str)
+            body = json.loads(body_bytes)
         except (json.JSONDecodeError, ValueError):
             body = {}
         return http_code, latency, body
+    except urllib.error.HTTPError as e:
+        latency = time.monotonic() - t0
+        return e.code, latency, {}
     except Exception:
-        return 0, 10.0, {}
+        latency = time.monotonic() - t0
+        return 0, latency, {}
 
 
 def _compute_anomaly_score(
