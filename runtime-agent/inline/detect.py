@@ -58,16 +58,24 @@ def _compute_anomaly_score(
     detection_rate_min: float,
     history: list[dict],
 ) -> float:
-    """Compute 0-1 anomaly score from current observation + recent history."""
+    """Compute 0-1 anomaly score from current observation + recent history.
+
+    Weights are calibrated so that any single primary signal (latency,
+    fps, detection_rate, healthy) exceeds the 0.7 threshold on its own,
+    matching baseline detection speed.  Trend signals provide additive
+    early-warning that can trigger BEFORE thresholds are crossed.
+    """
     # Hard failure: non-200
     if http_code != 200:
         return 1.0
 
     score = 0.0
 
+    # ── Primary signals (any one sufficient to trigger at 0.7) ──
+
     # Latency anomaly
     if latency_budget > 0 and latency > latency_budget:
-        score += 0.4
+        score += 0.8
 
     # Metric anomalies from /status body
     fps = body.get("fps", 999)
@@ -75,27 +83,27 @@ def _compute_anomaly_score(
     healthy = body.get("healthy", True)
 
     if not healthy:
-        score += 0.5
+        score += 0.9
     if fps < fps_min:
-        score += 0.3
+        score += 0.8
     if detection_rate < detection_rate_min:
-        score += 0.3
+        score += 0.8
 
-    # Trend detection: last 3 observations
+    # ── Trend signals (early warning, additive) ──
     if len(history) >= 3:
         recent_latencies = [h["latency"] for h in history[-3:]]
         recent_codes = [h["http_code"] for h in history[-3:]]
 
-        # Rising latency trend
+        # Rising latency trend across 3 consecutive samples
         if all(
             recent_latencies[i] < recent_latencies[i + 1]
             for i in range(len(recent_latencies) - 1)
         ):
-            score += 0.2
+            score += 0.4
 
-        # Any intermittent non-200 in window
+        # Any intermittent non-200 in recent window
         if any(c != 200 for c in recent_codes):
-            score += 0.3
+            score += 0.4
 
     return min(score, 1.0)
 
