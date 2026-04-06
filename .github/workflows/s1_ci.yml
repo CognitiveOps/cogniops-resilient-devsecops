@@ -30,6 +30,20 @@ on:
         default: ""
         type: string
 
+  # Reusable workflow
+  workflow_call:
+    inputs:
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID"
+        required: false
+        default: ""
+        type: string
+
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
