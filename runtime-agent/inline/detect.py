@@ -1,14 +1,15 @@
 """
-Inline fault detection for S3 agent-managed workflows.
+Inline metric collector for S3/SS2 agent-managed workflows.
 
-Replaces the baseline's simple curl-poll-sleep loop with anomaly scoring
-that detects degradation trends BEFORE full failure, reducing MTTD.
+Pure sensor: polls service /status, collects raw metrics, and stops
+when a basic degradation signal is observed (HTTP non-200 or healthy=false).
 
-Key differences from baseline detection:
-- 1s polling (vs 5s baseline) — faster observation cycle
-- Continuous anomaly score (0-1) instead of binary pass/fail
-- Trend detection: rising latency across 3+ samples → early warning
-- Multi-signal fusion: HTTP, latency, fps, detection_rate combined
+NO anomaly scoring — that is the agent's job (perception module).
+The agent receives raw metrics and interprets them cognitively.
+
+Architecture:
+  detect.py (sensor, local)  →  raw metrics  →  agent /decide (Cloud Run)
+  collect & trigger               transport        interpret & decide
 
 Deterministic — no LLM. Runs as CLI in GitHub Actions step.
 """
@@ -49,78 +50,31 @@ def _fetch_status(service_url: str) -> tuple[int, float, dict]:
         return 0, latency, {}
 
 
-def _compute_anomaly_score(
-    http_code: int,
-    latency: float,
-    body: dict,
-    latency_budget: float,
-    fps_min: float,
-    detection_rate_min: float,
-    history: list[dict],
-) -> float:
-    """Compute 0-1 anomaly score from current observation + recent history.
+def _is_degraded(http_code: int, body: dict) -> bool:
+    """Simple binary check: is the service showing ANY sign of degradation?
 
-    Weights are calibrated so that any single primary signal (latency,
-    fps, detection_rate, healthy) exceeds the 0.7 threshold on its own,
-    matching baseline detection speed.  Trend signals provide additive
-    early-warning that can trigger BEFORE thresholds are crossed.
+    This is intentionally simple — the agent does the real analysis.
+    We just need to know when to stop polling and ship metrics.
     """
-    # Hard failure: non-200
     if http_code != 200:
-        return 1.0
-
-    score = 0.0
-
-    # ── Primary signals (any one sufficient to trigger at 0.7) ──
-
-    # Latency anomaly
-    if latency_budget > 0 and latency > latency_budget:
-        score += 0.8
-
-    # Metric anomalies from /status body
-    fps = body.get("fps", 999)
-    detection_rate = body.get("detection_rate", 1.0)
-    healthy = body.get("healthy", True)
-
-    if not healthy:
-        score += 0.9
-    if fps < fps_min:
-        score += 0.8
-    if detection_rate < detection_rate_min:
-        score += 0.8
-
-    # ── Trend signals (early warning, additive) ──
-    if len(history) >= 3:
-        recent_latencies = [h["latency"] for h in history[-3:]]
-        recent_codes = [h["http_code"] for h in history[-3:]]
-
-        # Rising latency trend across 3 consecutive samples
-        if all(
-            recent_latencies[i] < recent_latencies[i + 1]
-            for i in range(len(recent_latencies) - 1)
-        ):
-            score += 0.4
-
-        # Any intermittent non-200 in recent window
-        if any(c != 200 for c in recent_codes):
-            score += 0.4
-
-    return min(score, 1.0)
+        return True
+    if not body.get("healthy", True):
+        return True
+    return False
 
 
 def detect(
     service_url: str,
     poll_interval: float = 1.0,
-    anomaly_threshold: float = 0.7,
     timeout_sec: int = 300,
     latency_budget: float = 2.0,
     fps_min: float = 10.0,
     detection_rate_min: float = 0.01,
 ) -> dict:
-    """Poll service and detect anomalies.
+    """Poll service and collect raw metrics until degradation.
 
-    Returns dict with detected, t_detect, ttd_sample, anomaly_score,
-    detection_method, detect_metrics_raw.
+    Returns dict with detected flag, timing info, and raw_metrics
+    (the actual sensor readings for the agent to interpret).
     """
     t_start = time.time()
     deadline = t_start + timeout_sec
@@ -133,34 +87,39 @@ def detect(
         observation = {
             "ts": now,
             "http_code": http_code,
-            "latency": latency,
-            "body": body,
+            "latency_ms": round(latency * 1000, 1),
+            "fps": body.get("fps"),
+            "detection_rate": body.get("detection_rate"),
+            "healthy": body.get("healthy"),
         }
         history.append(observation)
 
-        score = _compute_anomaly_score(
-            http_code, latency, body,
-            latency_budget, fps_min, detection_rate_min,
-            history,
-        )
+        degraded = _is_degraded(http_code, body)
 
-        print(f"[{int(now)}] /status -> {http_code} ({latency:.2f}s) score={score:.2f}")
+        print(f"[{int(now)}] /status -> {http_code} ({latency:.2f}s) degraded={degraded}")
 
-        if score >= anomaly_threshold:
+        if degraded:
             t_detect = now
             ttd = t_detect - t_start
-            method = "anomaly_score" if http_code == 200 else "http_failure"
+            # Collect the last few observations as raw metrics for the agent
+            recent = history[-5:] if len(history) >= 5 else history
+            raw_metrics = {
+                "trigger": "http_failure" if http_code != 200 else "health_false",
+                "current": observation,
+                "recent_history": recent,
+                "latency_budget_sec": latency_budget,
+                "fps_min": fps_min,
+                "detection_rate_min": detection_rate_min,
+            }
             print(
-                f"Anomaly detected at {int(t_detect)} "
-                f"(score={score:.2f}, method={method})"
+                f"Degradation detected at {int(t_detect)} "
+                f"(trigger={raw_metrics['trigger']})"
             )
             return {
                 "detected": True,
                 "t_detect": int(t_detect),
                 "ttd_sample": int(ttd),
-                "anomaly_score": round(score, 3),
-                "detection_method": method,
-                "detect_metrics_raw": json.dumps(body),
+                "raw_metrics": json.dumps(raw_metrics),
             }
 
         time.sleep(poll_interval)
@@ -169,17 +128,14 @@ def detect(
         "detected": False,
         "t_detect": int(time.time()),
         "ttd_sample": timeout_sec,
-        "anomaly_score": 0.0,
-        "detection_method": "timeout",
-        "detect_metrics_raw": "{}",
+        "raw_metrics": json.dumps({"trigger": "timeout", "history_len": len(history)}),
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Inline S3 fault detection")
+    parser = argparse.ArgumentParser(description="Inline metric collector")
     parser.add_argument("--service-url", required=True)
     parser.add_argument("--poll-interval", type=float, default=1.0)
-    parser.add_argument("--anomaly-threshold", type=float, default=0.7)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--latency-budget", type=float, default=2.0)
     parser.add_argument("--fps-min", type=float, default=10.0)
@@ -189,7 +145,6 @@ def main() -> None:
     result = detect(
         service_url=args.service_url,
         poll_interval=args.poll_interval,
-        anomaly_threshold=args.anomaly_threshold,
         timeout_sec=args.timeout,
         latency_budget=args.latency_budget,
         fps_min=args.fps_min,

@@ -78,3 +78,132 @@ class TestPerceive:
         """anomaly_type must be copied from event_type."""
         anomaly = perceive(sample_event)
         assert anomaly.anomaly_type == sample_event.event_type
+
+
+class TestScoreRawMetrics:
+    """Tests for _score_raw_metrics — agent interprets sensor data."""
+
+    def test_http_failure_scores_1(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "trigger": "http_failure",
+            "current": {"http_code": 500, "latency_ms": 100, "fps": 30, "healthy": True},
+            "recent_history": [],
+        }
+        assert _score_raw_metrics(raw) == 1.0
+
+    def test_healthy_false_scores_high(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "trigger": "health_false",
+            "current": {"http_code": 200, "latency_ms": 100, "fps": 30, "healthy": False},
+            "recent_history": [],
+        }
+        assert _score_raw_metrics(raw) >= 0.9
+
+    def test_normal_metrics_score_zero(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "trigger": "timeout",
+            "current": {"http_code": 200, "latency_ms": 50, "fps": 30, "healthy": True},
+            "recent_history": [],
+            "latency_budget_sec": 2.0,
+            "fps_min": 10.0,
+            "detection_rate_min": 0.01,
+        }
+        assert _score_raw_metrics(raw) == 0.0
+
+    def test_latency_over_budget_scores_high(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "current": {"http_code": 200, "latency_ms": 3000, "fps": 30, "healthy": True},
+            "recent_history": [],
+            "latency_budget_sec": 2.0,
+        }
+        assert _score_raw_metrics(raw) >= 0.8
+
+    def test_low_fps_scores_high(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "current": {"http_code": 200, "latency_ms": 50, "fps": 5, "healthy": True},
+            "recent_history": [],
+            "fps_min": 10.0,
+        }
+        assert _score_raw_metrics(raw) >= 0.8
+
+    def test_trend_detection_adds_score(self):
+        from perception.handler import _score_raw_metrics
+
+        raw = {
+            "current": {"http_code": 200, "latency_ms": 500, "fps": 30, "healthy": True},
+            "recent_history": [
+                {"http_code": 200, "latency_ms": 100},
+                {"http_code": 200, "latency_ms": 200},
+                {"http_code": 200, "latency_ms": 500},
+            ],
+            "latency_budget_sec": 2.0,
+        }
+        # Rising latency trend should add 0.4
+        assert _score_raw_metrics(raw) >= 0.4
+
+
+class TestPerceiveWithRawMetrics:
+    """Tests for perceive() when event contains raw_metrics."""
+
+    def test_raw_metrics_used_for_severity(self):
+        """When raw_metrics present, agent scores them instead of using labels."""
+        import json
+        from datetime import datetime, timezone
+        from models.schemas import EventContext, RuntimeEvent
+
+        raw = {
+            "trigger": "http_failure",
+            "current": {"http_code": 500, "latency_ms": 100},
+            "recent_history": [],
+        }
+        event = RuntimeEvent(
+            event_id="raw-001",
+            event_type="resilience_degradation",
+            occurred_at=datetime.now(timezone.utc),
+            source="test",
+            context=EventContext(
+                status="failure",
+                scenario_id="s3",
+                raw_metrics=json.dumps(raw),
+            ),
+        )
+        anomaly = perceive(event)
+        # http_code=500 → score=1.0
+        assert anomaly.severity == 1.0
+
+    def test_raw_metrics_override_severity_label(self):
+        """raw_metrics takes priority over severity label."""
+        import json
+        from datetime import datetime, timezone
+        from models.schemas import EventContext, RuntimeEvent
+
+        raw = {
+            "trigger": "health_false",
+            "current": {"http_code": 200, "latency_ms": 50, "healthy": False},
+            "recent_history": [],
+        }
+        event = RuntimeEvent(
+            event_id="raw-002",
+            event_type="resilience_degradation",
+            occurred_at=datetime.now(timezone.utc),
+            source="test",
+            context=EventContext(
+                status="failure",
+                severity="low",  # would give 0.3, but raw_metrics wins
+                scenario_id="s3",
+                raw_metrics=json.dumps(raw),
+            ),
+        )
+        anomaly = perceive(event)
+        # healthy=False → 0.9, NOT severity="low" → 0.3
+        assert anomaly.severity >= 0.9
