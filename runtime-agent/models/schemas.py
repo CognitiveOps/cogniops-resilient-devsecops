@@ -42,6 +42,8 @@ ALLOWED_EVENT_TYPES_PHASE0 = frozenset(
         "pipeline_failure",
         "policy_violation",
         "resilience_degradation",
+        "risk_assessment",
+        "adaptive_threat",
         "manual_test_event",
     ]
 )
