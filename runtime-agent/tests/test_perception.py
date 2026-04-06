@@ -81,30 +81,30 @@ class TestPerceive:
 
 
 class TestScoreRawMetrics:
-    """Tests for _score_raw_metrics — agent interprets sensor data."""
+    """Tests for score_raw_metrics — agent's anomaly scoring model."""
 
     def test_http_failure_scores_1(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "trigger": "http_failure",
             "current": {"http_code": 500, "latency_ms": 100, "fps": 30, "healthy": True},
             "recent_history": [],
         }
-        assert _score_raw_metrics(raw) == 1.0
+        assert score_raw_metrics(raw) == 1.0
 
     def test_healthy_false_scores_high(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "trigger": "health_false",
             "current": {"http_code": 200, "latency_ms": 100, "fps": 30, "healthy": False},
             "recent_history": [],
         }
-        assert _score_raw_metrics(raw) >= 0.9
+        assert score_raw_metrics(raw) >= 0.9
 
     def test_normal_metrics_score_zero(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "trigger": "timeout",
@@ -114,30 +114,30 @@ class TestScoreRawMetrics:
             "fps_min": 10.0,
             "detection_rate_min": 0.01,
         }
-        assert _score_raw_metrics(raw) == 0.0
+        assert score_raw_metrics(raw) == 0.0
 
     def test_latency_over_budget_scores_high(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "current": {"http_code": 200, "latency_ms": 3000, "fps": 30, "healthy": True},
             "recent_history": [],
             "latency_budget_sec": 2.0,
         }
-        assert _score_raw_metrics(raw) >= 0.8
+        assert score_raw_metrics(raw) >= 0.8
 
     def test_low_fps_scores_high(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "current": {"http_code": 200, "latency_ms": 50, "fps": 5, "healthy": True},
             "recent_history": [],
             "fps_min": 10.0,
         }
-        assert _score_raw_metrics(raw) >= 0.8
+        assert score_raw_metrics(raw) >= 0.8
 
     def test_trend_detection_adds_score(self):
-        from perception.handler import _score_raw_metrics
+        from perception.scoring import score_raw_metrics
 
         raw = {
             "current": {"http_code": 200, "latency_ms": 500, "fps": 30, "healthy": True},
@@ -149,7 +149,7 @@ class TestScoreRawMetrics:
             "latency_budget_sec": 2.0,
         }
         # Rising latency trend should add 0.4
-        assert _score_raw_metrics(raw) >= 0.4
+        assert score_raw_metrics(raw) >= 0.4
 
 
 class TestPerceiveWithRawMetrics:
