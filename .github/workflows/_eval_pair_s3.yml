@@ -1,0 +1,58 @@
+name: _eval_pair_s3 (reusable)
+
+on:
+    workflow_call:
+        inputs:
+            experiment_id:
+                required: true
+                type: string
+            pair_id:
+                required: true
+                type: string
+            treatment_variant:
+                required: true
+                type: string
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    # ── Baseline (no agent) ─────────────────────────────────────
+    baseline:
+        uses: ./.github/workflows/s3_rollback.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-baseline
+            variant: baseline
+        secrets: inherit
+
+    # ── Treatment — route to correct variant workflow ───────────
+    # GitHub Actions requires static `uses:`, so one job per variant
+    # with an `if:` guard.  Only one will actually run.
+
+    treatment-runtime:
+        needs: baseline
+        if: inputs.treatment_variant == 'runtime_only'
+        uses: ./.github/workflows/s3_rollback_runtime.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
+            variant: runtime_only
+        secrets: inherit
+
+    treatment-design:
+        needs: baseline
+        if: inputs.treatment_variant == 'design_only'
+        uses: ./.github/workflows/s3_rollback_design.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
+            variant: design_only
+        secrets: inherit
+
+    treatment-full:
+        needs: baseline
+        if: inputs.treatment_variant == 'full'
+        uses: ./.github/workflows/s3_rollback_full.yml
+        with:
+            run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
+            variant: full
+        secrets: inherit

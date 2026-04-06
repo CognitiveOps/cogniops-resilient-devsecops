@@ -1,0 +1,143 @@
+name: Causal Evaluation — Paired Baseline/Treatment Runs
+
+on:
+    workflow_dispatch:
+        inputs:
+            scenarios:
+                description: "Comma-separated scenarios to run (s1,s3,ss2,s5,ss1,s2,s4)"
+                required: true
+                default: "s3,ss2"
+                type: string
+            treatment_variant:
+                description: "Treatment variant to pair against baseline"
+                required: true
+                default: "full"
+                type: choice
+                options:
+                    - runtime_only
+                    - design_only
+                    - full
+            pairs_per_scenario:
+                description: "Number of baseline+treatment pairs per scenario"
+                required: false
+                default: "15"
+                type: string
+            auto_approve:
+                description: "Auto-pass HITL gates (for unattended sampling)"
+                required: false
+                default: "true"
+                type: string
+            auto_approve_delay_sec:
+                description: "Delay before auto-approval is stamped (seconds)"
+                required: false
+                default: "15"
+                type: string
+
+permissions:
+    contents: read
+    id-token: write
+    issues: write
+
+concurrency:
+    group: eval-paired-${{ github.ref }}
+    cancel-in-progress: false
+
+# ── Strategy ───────────────────────────────────────────────────────
+# For each pair_id we run baseline THEN treatment sequentially.
+# This keeps them in the same time window (within minutes).
+# The experiment_id + pair_id + pair_order labels enable paired
+# statistical analysis downstream.
+
+jobs:
+    # ── Generate pair matrix ────────────────────────────────────────
+    matrix:
+        runs-on: self-hosted
+        outputs:
+            pairs: ${{ steps.gen.outputs.pairs }}
+            experiment_id: ${{ steps.gen.outputs.experiment_id }}
+        steps:
+            - id: gen
+              name: Generate pair matrix
+              run: |
+                  set -euo pipefail
+                  N=${{ inputs.pairs_per_scenario }}
+                  EXP_ID="causal-$(date +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}"
+                  echo "experiment_id=${EXP_ID}" >> "$GITHUB_OUTPUT"
+
+                  # Build JSON array: [{pair: 1}, {pair: 2}, ...]
+                  PAIRS="["
+                  for i in $(seq 1 "$N"); do
+                    [ "$i" -gt 1 ] && PAIRS="${PAIRS},"
+                    PAIRS="${PAIRS}{\"pair\":$i}"
+                  done
+                  PAIRS="${PAIRS}]"
+                  echo "pairs=${PAIRS}" >> "$GITHUB_OUTPUT"
+                  echo "Generated ${N} pairs for experiment ${EXP_ID}"
+
+    # ── S3 Cloud pairs ─────────────────────────────────────────────
+    s3-pairs:
+        needs: matrix
+        if: contains(inputs.scenarios, 's3')
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix:
+                pair: ${{ fromJson(needs.matrix.outputs.pairs) }}
+        uses: ./.github/workflows/_eval_pair_s3.yml
+        with:
+            experiment_id: ${{ needs.matrix.outputs.experiment_id }}
+            pair_id: ${{ matrix.pair.pair }}
+            treatment_variant: ${{ inputs.treatment_variant }}
+        secrets: inherit
+
+    # ── SS2 pairs ───────────────────────────────────────────────────
+    ss2-pairs:
+        needs: matrix
+        if: contains(inputs.scenarios, 'ss2')
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix:
+                pair: ${{ fromJson(needs.matrix.outputs.pairs) }}
+        uses: ./.github/workflows/_eval_pair_ss2.yml
+        with:
+            experiment_id: ${{ needs.matrix.outputs.experiment_id }}
+            pair_id: ${{ matrix.pair.pair }}
+            treatment_variant: ${{ inputs.treatment_variant }}
+            auto_approve: ${{ inputs.auto_approve }}
+            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
+        secrets: inherit
+
+    # ── S5 pairs ────────────────────────────────────────────────────
+    s5-pairs:
+        needs: matrix
+        if: contains(inputs.scenarios, 's5')
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix:
+                pair: ${{ fromJson(needs.matrix.outputs.pairs) }}
+        uses: ./.github/workflows/_eval_pair_s5.yml
+        with:
+            experiment_id: ${{ needs.matrix.outputs.experiment_id }}
+            pair_id: ${{ matrix.pair.pair }}
+            treatment_variant: ${{ inputs.treatment_variant }}
+            auto_approve: ${{ inputs.auto_approve }}
+            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
+        secrets: inherit
+
+    # ── S1 pairs ────────────────────────────────────────────────────
+    s1-pairs:
+        needs: matrix
+        if: contains(inputs.scenarios, 's1')
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix:
+                pair: ${{ fromJson(needs.matrix.outputs.pairs) }}
+        uses: ./.github/workflows/_eval_pair_s1.yml
+        with:
+            experiment_id: ${{ needs.matrix.outputs.experiment_id }}
+            pair_id: ${{ matrix.pair.pair }}
+            treatment_variant: ${{ inputs.treatment_variant }}
+        secrets: inherit
