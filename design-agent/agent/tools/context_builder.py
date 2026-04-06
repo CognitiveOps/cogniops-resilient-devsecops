@@ -92,6 +92,7 @@ WHERE scenario_id = '{scenario_id}'
   AND status = 'success'
   AND t_end >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {window_days} DAY)
   AND JSON_VALUE(metrics, '$.{metric_key}') IS NOT NULL
+  {variant_clause}
 """
 
 # SQL for runtime decisions summary.
@@ -115,6 +116,7 @@ WITH recent AS (
     AND status = 'success'
     AND t_end >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
     AND JSON_VALUE(metrics, '$.{metric_key}') IS NOT NULL
+    {variant_clause}
 ),
 prior AS (
   SELECT CAST(JSON_VALUE(metrics, '$.{metric_key}') AS FLOAT64) AS val
@@ -124,6 +126,7 @@ prior AS (
     AND t_end >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {window_days} DAY)
     AND t_end < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
     AND JSON_VALUE(metrics, '$.{metric_key}') IS NOT NULL
+    {variant_clause}
 )
 SELECT
   (SELECT AVG(val) FROM recent) AS recent_avg,
@@ -206,6 +209,7 @@ def _read_gcs_yaml(path: str) -> dict | None:
 def build_context(
     window_days: int = 0,
     scenarios: list[str] | None = None,
+    variant_filter: str | None = None,
 ) -> dict:
     """Build structured analysis context from BQ metrics and GCS config.
 
@@ -213,12 +217,24 @@ def build_context(
         window_days: Override for the analysis lookback window (0 = use default).
         scenarios: Optional list of scenario IDs to focus on.
             If empty/None, all tracked scenarios are included.
+        variant_filter: Optional variant label to filter runs.
+            Use 'baseline' for original runs, 'design_only', 'runtime_only',
+            'full' for treatment runs, or 'none' for runs without a variant label.
+            If empty/None, all runs are included (no filter).
 
     Returns:
         Serialized AnalysisContext dict ready for LLM consumption.
     """
     window = window_days if window_days > 0 else WINDOW_DAYS
     target_scenarios = scenarios or list(SCENARIO_METRIC_MAP.keys())
+
+    # Build variant SQL clause
+    if variant_filter == "none":
+        variant_clause = "AND JSON_VALUE(labels, '$.variant') IS NULL"
+    elif variant_filter:
+        variant_clause = f"AND JSON_VALUE(labels, '$.variant') = '{variant_filter}'"
+    else:
+        variant_clause = ""
 
     # ── 1. Scenario metrics ──
     metric_summaries: list[dict] = []
@@ -233,6 +249,7 @@ def build_context(
                 project=GCP_PROJECT_ID,
                 dataset=BIGQUERY_DATASET,
                 window_days=window,
+                variant_clause=variant_clause,
             )
             rows = _query_bq(query)
             if rows and rows[0].get("sample_count", 0) > 0:
@@ -245,6 +262,7 @@ def build_context(
                     project=GCP_PROJECT_ID,
                     dataset=BIGQUERY_DATASET,
                     window_days=window,
+                    variant_clause=variant_clause,
                 )
                 trend_rows = _query_bq(trend_query)
                 trend = "stable"
@@ -305,6 +323,7 @@ def build_context(
     context = {
         "built_at": datetime.now(timezone.utc).isoformat(),
         "window_days": window,
+        "variant_filter": variant_filter,
         "scenario_metrics": metric_summaries,
         "runtime_decisions": runtime_summary,
         "current_thresholds": thresholds,

@@ -148,6 +148,7 @@ def _create_github_issue(proposal: dict) -> str | None:
 
 async def _run_pipeline(
     scenarios: list[str] | None = None,
+    variant_filter: str | None = None,
 ) -> dict:
     """Execute the full design-time analysis pipeline.
 
@@ -158,17 +159,29 @@ async def _run_pipeline(
 
     # Build the user message for the LLM
     focus = f" focusing on scenarios: {', '.join(scenarios)}" if scenarios else ""
+    variant_instruction = ""
+    if variant_filter:
+        variant_instruction = (
+            f" Use variant_filter='{variant_filter}' when calling build_context"
+            " to filter runs by variant label."
+        )
     user_message = (
         f"Analyze the current CogniOps metrics (last {CONTEXT_WINDOW_DAYS} days)"
         f"{focus}. "
-        "First call build_context to gather metrics and configuration, "
-        "then analyze the data and either generate_proposal with specific "
-        "improvements or call no_proposal_needed if metrics are healthy."
+        "First call build_context to gather metrics and configuration"
+        f"{variant_instruction}, "
+        "then analyze the data for optimization opportunities. "
+        "Even if metrics are stable, look for ways to improve them — "
+        "for example, reducing MTTD or MTTR through polling interval adjustments, "
+        "threshold tuning, or workflow improvements. "
+        "Call generate_proposal with specific improvements, "
+        "or call no_proposal_needed only if metrics are already at theoretical optimum."
     )
 
     # Run through ADK
     proposal_data = None
     no_proposal_reason = None
+    all_events = []
 
     try:
         async for event in runner.run_async(
@@ -179,14 +192,14 @@ async def _run_pipeline(
                 parts=[types.Part.from_text(text=user_message)],
             ),
         ):
-            if event.actions and event.actions.tool_results:
-                for tr in event.actions.tool_results:
-                    result_parts = tr.get("result", {})
-                    if isinstance(result_parts, dict):
-                        if result_parts.get("status") == "proposal_generated":
-                            proposal_data = result_parts.get("proposal")
-                        elif result_parts.get("status") == "no_proposal_needed":
-                            no_proposal_reason = result_parts.get("reason")
+            all_events.append(event)
+            for fn_resp in event.get_function_responses():
+                response = fn_resp.response
+                if isinstance(response, dict):
+                    if response.get("status") == "proposal_generated":
+                        proposal_data = response.get("proposal")
+                    elif response.get("status") == "no_proposal_needed":
+                        no_proposal_reason = response.get("reason")
     except Exception:
         logger.error("ADK pipeline failed", exc_info=True)
         return {

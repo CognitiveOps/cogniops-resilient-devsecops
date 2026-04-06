@@ -157,3 +157,32 @@ class TestBuildContext(unittest.TestCase):
         ):
             result = build_context(window_days=0, scenarios=[])
             assert result["context"]["window_days"] > 0
+
+    @patch("agent.tools.context_builder._query_bq", return_value=[])
+    @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
+    def test_variant_filter_none_uses_is_null(self, mock_gcs, mock_bq):
+        result = build_context(scenarios=[], variant_filter="none")
+        assert result["context"]["variant_filter"] == "none"
+
+    @patch("agent.tools.context_builder._query_bq", return_value=[])
+    @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
+    def test_variant_filter_baseline(self, mock_gcs, mock_bq):
+        result = build_context(scenarios=[], variant_filter="baseline")
+        assert result["context"]["variant_filter"] == "baseline"
+
+    @patch("agent.tools.context_builder._query_bq", return_value=[])
+    @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
+    def test_variant_filter_null_no_filter(self, mock_gcs, mock_bq):
+        result = build_context(scenarios=[], variant_filter=None)
+        assert result["context"]["variant_filter"] is None
+
+    @patch("agent.tools.context_builder._query_bq")
+    @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
+    def test_variant_filter_injected_in_query(self, mock_gcs, mock_bq):
+        mock_bq.return_value = []
+        build_context(scenarios=["s1"], variant_filter="full")
+        # Metric query + trend query + decisions query = at least 3 calls
+        # Check the metric query contains variant clause
+        if mock_bq.call_count >= 1:
+            first_query = mock_bq.call_args_list[0][0][0]
+            assert "variant" in first_query

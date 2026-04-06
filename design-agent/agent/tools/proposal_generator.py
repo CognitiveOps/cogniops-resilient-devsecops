@@ -16,38 +16,53 @@ logger = logging.getLogger("design-agent.proposal_generator")
 
 def generate_proposal(
     intent: str,
-    target_scenarios: list[str],
+    target_scenarios: str,
     analysis_summary: str,
-    changes: list[dict],
-    expected_impact: list[dict] | None = None,
-    policy_refs: list[str] | None = None,
+    changes: str,
+    expected_impact: str = "",
+    policy_refs: str = "",
 ) -> dict:
     """Generate a structured design proposal from LLM analysis.
 
     Args:
         intent: Goal statement (e.g. "Reduce MTTR in S3").
-        target_scenarios: Scenarios affected (e.g. ["S3", "SS2"]).
+        target_scenarios: Comma-separated scenarios (e.g. "S3, SS2").
         analysis_summary: 2-5 sentence summary of the metric analysis.
-        changes: List of proposed changes. Each dict must have:
-            - change_type: one of threshold_adjustment, policy_addition,
-              policy_modification, workflow_improvement, config_update
-            - target_file: file to modify
-            - description: what to change
-            - proposed_value: the new value
+        changes: JSON array of proposed changes. Each object must have:
+            change_type, target_file, description, proposed_value.
             Optionally: current_value, rationale.
-        expected_impact: Optional list of expected metric changes.
-            Each dict: {metric_name, estimated_change, confidence}.
-        policy_refs: Optional NIST/ISO control references.
+        expected_impact: JSON array of expected metric changes.
+            Each object: {metric_name, estimated_change, confidence}.
+        policy_refs: Comma-separated NIST/ISO control references.
 
     Returns:
         Serialized DesignProposal dict for validation and storage.
     """
+    import json as _json
+
     now = datetime.now(timezone.utc)
     proposal_id = f"design-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}"
 
+    # Parse inputs
+    scenarios_list = [s.strip() for s in target_scenarios.split(",") if s.strip()]
+
+    try:
+        changes_list = _json.loads(changes) if changes else []
+    except _json.JSONDecodeError:
+        changes_list = []
+
+    try:
+        impact_list = _json.loads(expected_impact) if expected_impact else []
+    except _json.JSONDecodeError:
+        impact_list = []
+
+    refs_list = [r.strip() for r in policy_refs.split(",") if r.strip()] if policy_refs else []
+
     # Normalize changes
     normalized_changes = []
-    for ch in changes:
+    for ch in changes_list:
+        if not isinstance(ch, dict):
+            continue
         normalized_changes.append(
             {
                 "change_type": ch.get("change_type", "config_update"),
@@ -61,7 +76,9 @@ def generate_proposal(
 
     # Normalize expected impact
     normalized_impact = []
-    for imp in expected_impact or []:
+    for imp in impact_list:
+        if not isinstance(imp, dict):
+            continue
         normalized_impact.append(
             {
                 "metric_name": imp.get("metric_name", ""),
@@ -74,11 +91,11 @@ def generate_proposal(
         "proposal_id": proposal_id,
         "created_at": now.isoformat(),
         "intent": intent,
-        "target_scenarios": target_scenarios,
+        "target_scenarios": scenarios_list,
         "analysis_summary": analysis_summary,
         "changes": normalized_changes,
         "expected_impact": normalized_impact,
-        "policy_refs": policy_refs or [],
+        "policy_refs": refs_list,
         "validation": {
             "valid": False,
             "checks_passed": [],
