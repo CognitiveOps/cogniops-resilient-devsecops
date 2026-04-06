@@ -223,6 +223,7 @@ async def receive_runtime_event(request: Request):
         decision_executed=decision_executed,
         rationale=rationale,
         policy_refs=policy_refs,
+        mode=COGNIOPS_MODE,
         agentops_trace_id=agentops_trace_id,
     )
 

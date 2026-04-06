@@ -444,7 +444,7 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
       }
       env {
         name  = "COGNIOPS_MODE"
-        value = "shadow"
+        value = "advisory"
       }
       env {
         name  = "COGNIOPS_MODEL"
