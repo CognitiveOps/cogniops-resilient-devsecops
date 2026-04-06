@@ -189,6 +189,11 @@ cython_debug/
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
+# Evaluation reports & outputs (kept local, regenerated from BQ)
+evaluation/results/*.md
+evaluation/results/*.docx
+evaluation/results/security_agent/
+
 # Drawio diagrams (binary, not diffable)
 *.drawio
 
