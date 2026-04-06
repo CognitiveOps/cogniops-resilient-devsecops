@@ -70,7 +70,7 @@ jobs:
           - { name: wrong-arch, fail_mode: wrong_arch, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
           # corrupt model: deterministic 500 on inference/status
           - { name: corrupt-weights, fail_mode: corrupt_weights, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     env:
       SCENARIO: s3

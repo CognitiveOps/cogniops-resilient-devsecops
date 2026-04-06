@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   rollback:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       recovered: ${{ steps.out.outputs.recovered }}
       lkg_manifest: ${{ steps.out.outputs.lkg_manifest }}

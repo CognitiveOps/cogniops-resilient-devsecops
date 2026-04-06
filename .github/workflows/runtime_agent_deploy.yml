@@ -29,7 +29,7 @@ concurrency:
 jobs:
   # ── Job 1: Run tests ──────────────────────────────────────────────
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
   bundle-policies:
     needs: test
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
   build-push:
     needs: test
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -111,7 +111,7 @@ jobs:
   # ── Job 4: Deploy to Cloud Run ────────────────────────────────────
   deploy:
     needs: [build-push, bundle-policies]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     steps:
       - name: Auth to GCP (OIDC/WIF)
@@ -134,7 +134,7 @@ jobs:
   # ── Job 5: Smoke test ─────────────────────────────────────────────
   smoke-test:
     needs: deploy
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

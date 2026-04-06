@@ -76,7 +76,7 @@ env:
 
 jobs:
   s4-pqc:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline

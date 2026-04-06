@@ -51,7 +51,7 @@ concurrency:
 jobs:
     # ── Generate pair matrix ────────────────────────────────────────
     matrix:
-        runs-on: ubuntu-latest
+        runs-on: self-hosted
         outputs:
             pairs: ${{ steps.gen.outputs.pairs }}
             experiment_id: ${{ steps.gen.outputs.experiment_id }}

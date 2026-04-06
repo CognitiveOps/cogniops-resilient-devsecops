@@ -45,7 +45,7 @@ concurrency:
 jobs:
   s3_edge:
     name: s3_edge – ${{ matrix.fault_mode }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       max-parallel: 1

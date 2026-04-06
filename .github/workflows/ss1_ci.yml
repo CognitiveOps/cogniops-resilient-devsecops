@@ -74,7 +74,7 @@ concurrency:
 jobs:
   ss1:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 35
 
     strategy:

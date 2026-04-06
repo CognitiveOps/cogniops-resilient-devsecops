@@ -51,7 +51,7 @@ jobs:
   build-test-push-deploy:
     # Only run if WIF is configured
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 30
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
