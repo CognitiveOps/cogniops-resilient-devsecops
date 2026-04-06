@@ -108,6 +108,24 @@ jobs:
             auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
         secrets: inherit
 
+    # ── S5 pairs ────────────────────────────────────────────────────
+    s5-pairs:
+        needs: matrix
+        if: contains(inputs.scenarios, 's5')
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix:
+                pair: ${{ fromJson(needs.matrix.outputs.pairs) }}
+        uses: ./.github/workflows/_eval_pair_s5.yml
+        with:
+            experiment_id: ${{ needs.matrix.outputs.experiment_id }}
+            pair_id: ${{ matrix.pair.pair }}
+            treatment_variant: ${{ inputs.treatment_variant }}
+            auto_approve: ${{ inputs.auto_approve }}
+            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
+        secrets: inherit
+
     # ── S1 pairs ────────────────────────────────────────────────────
     s1-pairs:
         needs: matrix

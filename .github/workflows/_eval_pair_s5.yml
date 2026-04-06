@@ -1,4 +1,4 @@
-name: _eval_pair_ss2 (reusable)
+name: _eval_pair_s5 (reusable)
 
 on:
     workflow_call:
@@ -29,19 +29,17 @@ permissions:
 jobs:
     # ── Baseline (no agent) ─────────────────────────────────────
     baseline:
-        uses: ./.github/workflows/ss2_adaptive_threat_mitigation.yml
+        uses: ./.github/workflows/s5_explainability.yml
         with:
             run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-baseline
             variant: baseline
-            auto_approve: ${{ inputs.auto_approve }}
-            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
         secrets: inherit
 
     # ── Treatment — route to correct variant workflow ───────────
     treatment-runtime:
         needs: baseline
         if: inputs.treatment_variant == 'runtime_only'
-        uses: ./.github/workflows/ss2_runtime.yml
+        uses: ./.github/workflows/s5_explainability_runtime.yml
         with:
             run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
             variant: runtime_only
@@ -52,18 +50,16 @@ jobs:
     treatment-design:
         needs: baseline
         if: inputs.treatment_variant == 'design_only'
-        uses: ./.github/workflows/ss2_design.yml
+        uses: ./.github/workflows/s5_explainability_design.yml
         with:
             run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
             variant: design_only
-            auto_approve: ${{ inputs.auto_approve }}
-            auto_approve_delay_sec: ${{ inputs.auto_approve_delay_sec }}
         secrets: inherit
 
     treatment-full:
         needs: baseline
         if: inputs.treatment_variant == 'full'
-        uses: ./.github/workflows/ss2_full.yml
+        uses: ./.github/workflows/s5_explainability_full.yml
         with:
             run_suffix: ${{ inputs.experiment_id }}-p${{ inputs.pair_id }}-treatment
             variant: full
