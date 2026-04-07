@@ -237,7 +237,7 @@ jobs:
         id: tfout
         working-directory: infra
         run: |
-          sudo apt-get update -y >/dev/null && sudo apt-get install -y jq >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null && sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
           OUT=$(terraform output -json)
           echo "$OUT" > tf_outputs.json
           echo "wif_provider=$(jq -r '.workload_identity_provider_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT

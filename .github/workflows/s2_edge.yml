@@ -127,8 +127,8 @@ jobs:
             --platform linux/amd64 \
             -t "$IMG" --push baseline/services/edge_cv_app
 
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y jq >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
           RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
           DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
           if [ -z "$DIGEST" ]; then

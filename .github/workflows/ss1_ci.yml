@@ -121,8 +121,8 @@ jobs:
       - name: Install deps (tests + OPA)
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+          sudo flock /var/lock/apt-actions.lock apt-get update -y
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq
           python -m pip install --upgrade pip
           pip install pytest httpx
           curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64

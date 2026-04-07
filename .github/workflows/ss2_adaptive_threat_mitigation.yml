@@ -152,8 +152,8 @@ jobs:
       - name: Install PQC backend (OQS)
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+          sudo flock /var/lock/apt-actions.lock apt-get update -y
+          sudo flock /var/lock/apt-actions.lock apt-get install -y build-essential cmake ninja-build libssl-dev
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
 
@@ -209,8 +209,8 @@ jobs:
       - name: Install jq
         run: |
           set -euo pipefail
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y jq >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
