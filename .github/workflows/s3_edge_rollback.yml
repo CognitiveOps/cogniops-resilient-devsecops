@@ -85,6 +85,9 @@ jobs:
       S3_WRONG_FAIL_WINDOW: "10.0"
       S3_WRONG_RETRY_SUCCESS_P: "0.2"
 
+      # Unique container name per concurrent run (self-hosted runners share Docker daemon)
+      EDGE_CONTAINER: edge_cv_app_${{ github.run_id }}_${{ matrix.fault_mode }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -135,6 +138,14 @@ jobs:
           set -euo pipefail
           sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
           sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
+
+      - name: Allocate unique host port
+        id: edge_port
+        run: |
+          PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "EDGE_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "Allocated host port: $PORT"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -222,17 +233,17 @@ jobs:
         id: s3fault
         run: |
           set -euo pipefail
-          SERVICE_URL="http://127.0.0.1:8080"
+          SERVICE_URL="http://127.0.0.1:${EDGE_PORT}"
           echo "Using edge service URL: ${SERVICE_URL}"
 
           T_INJECT=$(date +%s)
           echo "t_inject=${T_INJECT}" >> "$GITHUB_OUTPUT"
 
           IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
-          docker rm -f edge_cv_app || true
-          docker run -d --restart=always \
-            --name edge_cv_app \
-            -p 8080:8080 \
+          docker rm -f "$EDGE_CONTAINER" || true
+          docker run -d --restart=no \
+            --name "$EDGE_CONTAINER" \
+            -p "${EDGE_PORT}:8080" \
             -e MODE=twin \
             -e FAIL_MODE="${FAIL_MODE}" \
             -e SCENARIO="${FAIL_MODE}" \
@@ -315,7 +326,7 @@ jobs:
         id: s3recover_wait
         run: |
           set -euo pipefail
-          SERVICE_URL="http://127.0.0.1:8080"
+          SERVICE_URL="http://127.0.0.1:${EDGE_PORT}"
           T_DETECT=${{ steps.s3fault.outputs.t_detect }}
           echo "Starting recovery poll from detection time: ${T_DETECT}"
 

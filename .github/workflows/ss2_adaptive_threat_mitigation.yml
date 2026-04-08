@@ -129,6 +129,9 @@ jobs:
       SS2_AUTO_APPROVE: ${{ inputs.auto_approve || vars.SS2_AUTO_APPROVE || 'false' }}
       SS2_AUTO_APPROVE_DELAY_SEC: ${{ inputs.auto_approve_delay_sec || vars.SS2_AUTO_APPROVE_DELAY_SEC || '15' }}
 
+      # Unique container name per concurrent run (self-hosted runners share Docker daemon)
+      EDGE_CONTAINER: edge_cv_app_${{ github.run_id }}_${{ matrix.fault_mode }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -168,6 +171,14 @@ jobs:
           echo "incident_type=${INCIDENT_TYPE}" >> "$GITHUB_OUTPUT"
           echo "fail_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
           echo "artifacts_name=ss2_${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Allocate unique host port
+        id: edge_port
+        run: |
+          PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "EDGE_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "Allocated host port: $PORT"
 
       - name: Require METRICS_INGEST_URL
         run: |
@@ -518,12 +529,12 @@ jobs:
           echo "t_inject_epoch=$T_INJECT" >> "$GITHUB_OUTPUT"
 
           IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
-          docker rm -f edge_cv_app || true
+          docker rm -f "$EDGE_CONTAINER" || true
 
           # Inject a failure mode at runtime (simulates compromise/misconfig after a successful S2 activation).
-          docker run -d --restart=always \
-            --name edge_cv_app \
-            -p 8080:8080 \
+          docker run -d --restart=no \
+            --name "$EDGE_CONTAINER" \
+            -p "${EDGE_PORT}:8080" \
             -e MODE=twin \
             -e FAIL_MODE="${FAIL_MODE}" \
             "$IMG"
@@ -535,7 +546,7 @@ jobs:
           set -euo pipefail
           mkdir -p baseline/metrics/ss2
           python baseline/scripts/ss2_detect.py \
-            --service-url "http://127.0.0.1:8080" \
+            --service-url "http://127.0.0.1:${EDGE_PORT}" \
             --t-inject-epoch "${{ steps.inject.outputs.t_inject_epoch }}" \
             --deadline-sec 180 \
             --poll-interval-sec 2 \
@@ -552,7 +563,7 @@ jobs:
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
         run: |
           set -euo pipefail
-          docker rm -f edge_cv_app || true
+          docker rm -f "$EDGE_CONTAINER" || true
 
       - name: Build HITL case inputs
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
