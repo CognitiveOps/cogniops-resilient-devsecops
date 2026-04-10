@@ -110,6 +110,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       # 0) Start S3 overall timer
       - name: Start S3 timer
         id: t0
