@@ -33,6 +33,10 @@ on:
           - runtime_only
           - design_only
           - full
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -58,7 +62,7 @@ jobs:
     env:
       SCENARIO_ID: s3
       MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ inputs.run_suffix && format('-{0}', inputs.run_suffix) || '' }}
       VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
