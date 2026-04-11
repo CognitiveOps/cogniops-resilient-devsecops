@@ -76,14 +76,14 @@ Counting rules:
 
 | Scenario | baseline | design_only | runtime_only | full | Status |
 |----------|:--------:|:-----------:|:------------:|:----:|--------|
-| **S1** | 1 | 0 | 0 | 0 | ❌ Needs all variant runs |
-| **S2** | 0 | 0 | 0 | 0 | ❌ Needs all variant runs |
-| **S3 Cloud** | 112 | 100 | 41 | 33 | ✅ Sufficient (≥30 each) |
-| **S3 Edge** | 0 | 0 | 0 | 0 | ❌ Needs all variant runs |
-| **S4** | 0 | 0 | 0 | 0 | ❌ Needs all variant runs |
-| **S5** | 65 | 61 | 18 | 16 | ⚠ runtime_only/full below 30 |
-| **SS1** | 0 | 0 | 0 | 0 | ❌ Needs all variant runs |
-| **SS2** | 77 | 46 | 33 | 38 | ✅ Sufficient (≥30 each) |
+| **S1** | 5 | 0 | 2 | 0 | ❌ Queue draining (300 dispatched) |
+| **S2** | 3 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
+| **S3 Cloud** | 118 | 107 | 43 | 40 | ✅ Evaluated |
+| **S3 Edge** | 0 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
+| **S4** | 4 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
+| **S5** | 98 | 115 | 62 | 62 | ✅ Evaluated |
+| **SS1** | 2 | 0 | 1 | 0 | ❌ Queue draining (300 dispatched) |
+| **SS2** | 84 | 51 | 42 | 43 | ✅ Evaluated |
 
 > **Discarded runs** (exist in BQ but excluded from evaluation):
 > - **Shadow-era runtime/full** (before 04-06): S3 Cloud 45+78, S5 39+71, SS2 43+60
@@ -172,11 +172,48 @@ Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
 - S3 Edge baseline fix: added `run_suffix` input to `s3_edge_rollback.yml`
 - Total queue: ~500+ runs (300 new + ~177 remaining from Phase 1)
 
-### Phase 6: Run Evaluation Pipeline ⏳ PENDING
-After all runs complete:
+### Phase 6: Run Evaluation Pipeline ✅ PARTIAL (3/8 scenarios)
+First pass completed for **S3 Cloud, S5, SS2** (the 3 scenarios with ≥30 runs per variant).
+Remaining 5 scenarios (S1, S2, S3 Edge, S4, SS1) still queued.
+
+**Results summary (21 comparisons, 3908 metric samples):**
+
+| Scenario | Metric | Variant | Δ% | p-value | Cohen's d | Effect | Improved |
+|----------|--------|---------|---:|--------:|----------:|--------|----------|
+| S3 Cloud | MTTD | design_only | -8.9% | 0.001 | -0.11 | negligible | ✅ |
+| S3 Cloud | MTTD | **runtime_only** | **-65.8%** | <0.001 | **-0.96** | **large** | ✅ |
+| S3 Cloud | MTTD | **full** | **-67.3%** | <0.001 | **-0.98** | **large** | ✅ |
+| S3 Cloud | MTTR | design_only | -9.2% | 0.002 | -0.12 | negligible | ✅ |
+| S3 Cloud | MTTR | **runtime_only** | **-31.4%** | 0.002 | **-0.46** | **small** | ✅ |
+| S3 Cloud | MTTR | **full** | **-37.4%** | <0.001 | **-0.55** | **medium** | ✅ |
+| S5 | AL | design_only | +6.5% | 0.54 | 0.03 | negligible | ❌ |
+| S5 | AL | runtime_only | +282% | <0.001 | 1.07 | large | ❌ ↑worse |
+| S5 | AL | full | +287% | <0.001 | 1.17 | large | ❌ ↑worse |
+| S5 | ACR | all variants | 0% | 1.0 | 0.00 | — | — ceiling |
+| SS2 | AL | **design_only** | **-25.7%** | <0.001 | **-1.48** | **large** | ✅ |
+| SS2 | AL | runtime_only | -10.3% | 0.031 | -0.64 | medium | ✅ |
+| SS2 | AL | full | -7.3% | 0.106 | -0.42 | small | — |
+| SS2 | MTTD | all variants | <±7% | >0.1 | <0.25 | negligible | — |
+| SS2 | ACR | all variants | 0% | 1.0 | 0.00 | — | — ceiling |
+
+**Key findings:**
+1. **S3 Cloud:** Both axes work. Runtime agent dominates MTTD (-66%, large effect).
+   Design agent provides modest but significant structural improvement (-9%).
+   Combined (full) marginally better than runtime_only.
+2. **S5:** Runtime agent **increases** AL (+282%) — the `/decide` gate adds latency.
+   This is an expected trade-off: explainability + cognitive oversight costs time.
+   ACR at 100% ceiling across all variants (no room for improvement).
+3. **SS2:** Design agent is the star — AL -26% (large effect, d=-1.48).
+   Runtime agent provides modest AL reduction (-10%). Combination is not additive.
+   MTTD shows no significant change. ACR at ceiling.
+
+**Artifacts:** [summary](evaluation/results/analysis/summary_20260411T202005Z.json),
+[comparison CSV](evaluation/results/analysis/comparison_20260411T202005Z.csv),
+[raw metrics](evaluation/results/raw/metrics_20260411T202005Z.csv)
+
+**Re-run for all 8 scenarios** after queue drains:
 ```bash
 source 3_12_7_venv/bin/activate
-# Full 2-axis evaluation across ALL scenarios
 python -m evaluation.scripts.run_experiment \
   --scenarios s1 s2 s3_cloud s3_edge s4 s5 ss1 ss2 \
   --causal-mode -v
