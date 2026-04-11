@@ -124,27 +124,20 @@ Runner is active and processing sequentially.
 
 ## Required Actions
 
-### Phase 1: Drain Existing Queue ✅ IN PROGRESS
+### Phase 1: Drain Existing Queue ✅ DONE
 - **227 runs** queued (S3/S5/SS2 paired + S1/S2/S4/SS1 baselines)
 - Runner `cogniops-fresh` active and processing
 - Monitor: `tail -f /tmp/runner1.log`
 
-### Phase 2: Commit + Push New Workflow Files ⏳ NEXT
-New variant workflows created but **not yet pushed** to `design_time_agent_dev`:
-- `s1_ci_design.yml`, `s1_ci_runtime.yml`, `s1_ci_full.yml`
-- `s2_edge_design.yml`, `s2_edge_runtime.yml`, `s2_edge_full.yml`
-- `s4_pqc_design.yml`, `s4_pqc_runtime.yml`, `s4_pqc_full.yml`
-- `ss1_ci_design.yml`, `ss1_ci_runtime.yml`, `ss1_ci_full.yml`
-- Refactored: `s3_rollback_design.yml`, `s5_explainability_design.yml`, `ss2_design.yml`
-- NEW: `s3_edge_rollback_design.yml`, `s3_edge_rollback_runtime.yml`, `s3_edge_rollback_full.yml`
+### Phase 2: Commit + Push New Workflow Files ✅ DONE
+Pushed to `design_time_agent_dev` (commit `b00c728`) and cherry-picked to `main` (commit `2905353`):
+- 15 new variant workflows for S1/S2/S4/SS1/S3-Edge
+- 3 refactored design workflows (S3 Cloud, S5, SS2)
+- Design-agent `GET /proposals/active` endpoint
+- Seed proposals script, dispatch scripts, EVALUATION_PLAN.md
 
-```bash
-git add .github/workflows/ scripts/ evaluation/ design-agent/main.py
-git commit -m "feat(eval): add dynamic design-agent integration for all 7 scenarios"
-git push origin design_time_agent_dev
-```
-
-### Phase 3: Seed Design Proposals to GCS ⏳ PENDING
+### Phase 3: Seed Design Proposals to GCS ✅ DONE
+7 proposals seeded to `gs://cogent-wall-445012-h5-agent-artifacts/proposals/design/active/`.
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=$PWD/key.json
 python scripts/seed_design_proposals.py --bucket $AGENT_ARTIFACTS_BUCKET
@@ -166,32 +159,18 @@ Proposal params per scenario (see `scripts/seed_design_proposals.py`):
 | SS2 | `SS2_AUTO_APPROVE_DELAY_SEC` | 15 | 8 |
 | SS2 | `SS2_DETECT_POLL_SEC` | 2 | 1 |
 
-### Phase 4: Deploy Updated Design Agent ⏳ PENDING
-Rebuild & deploy design-agent to Cloud Run with new `GET /proposals/active` endpoint.
-```bash
-cd design-agent
-gcloud builds submit --tag gcr.io/$PROJECT_ID/design-agent .
-gcloud run deploy design-agent --image gcr.io/$PROJECT_ID/design-agent --region $REGION
-```
+### Phase 4: Deploy Updated Design Agent ✅ DONE
+Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
+- Image: `europe-docker.pkg.dev/cogent-wall-445012-h5/apps/design-agent:latest`
+- URL: `https://design-agent-kauyrrwc3a-ew.a.run.app`
+- GitHub variable `DESIGN_AGENT_URL` set for workflow access
 
-### Phase 5: Dispatch Variant Runs for S1/S2/S4/SS1 ⏳ PENDING
-After Phases 2–4 complete. S3 Cloud/S5/SS2 already have data; S3 Edge needs runs.
-```bash
-# 15 paired runs for new scenarios × 4 variants = 300 runs
-./scripts/dispatch_paired_runs.sh \
-  --pairs 15 \
-  --scenarios s1,s2,s3_edge,s4,ss1 \
-  --branch design_time_agent_dev
-```
-
-For a quick validation first:
-```bash
-# 3 pairs to validate workflows work
-./scripts/dispatch_paired_runs.sh \
-  --pairs 3 \
-  --scenarios s1,s2,s3_edge,s4,ss1 \
-  --branch design_time_agent_dev
-```
+### Phase 5: Dispatch Variant Runs for S1/S2/S3-Edge/S4/SS1 ✅ DONE
+300 runs dispatched (15 pairs × 5 scenarios × 4 variants):
+- Validation batch: 3 pairs (60 runs) — confirmed all workflows trigger
+- Full batch: 12 pairs (240 runs) — 240/240 dispatched, 0 failures
+- S3 Edge baseline fix: added `run_suffix` input to `s3_edge_rollback.yml`
+- Total queue: ~500+ runs (300 new + ~177 remaining from Phase 1)
 
 ### Phase 6: Run Evaluation Pipeline ⏳ PENDING
 After all runs complete:
@@ -240,19 +219,20 @@ python -m evaluation.scripts.run_experiment \
 | 1 | SS2 | design_only | ≥30 | 46 | — | ✅ Done |
 | 1 | SS2 | runtime_only | ≥30 | 33 | — | ✅ Done (advisory only) |
 | 1 | SS2 | full | ≥30 | 38 | — | ✅ Done (advisory only) |
-| 1+ | S3,S5,SS2 | all ×15 | +167 | — | 167 | 🔄 Queued (227 total in queue) |
+| 1+ | S3,S5,SS2 | all ×15 | +167 | — | 167 | 🔄 Queued (draining) |
 | 2 | S1 | baseline | 15 | 1 | 14 | 🔄 Queued (15 dispatched) |
 | 2 | S2 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
 | 2 | S4 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
 | 2 | SS1 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
-| 5 | S1 | all ×15 | 60 | 0 | 60 | ⏳ Pending (workflows created, not pushed) |
-| 5 | S2 | all ×15 | 60 | 0 | 60 | ⏳ Pending (workflows created, not pushed) |
-| 5 | S3 Edge | all ×15 | 60 | 0 | 60 | ⏳ Pending (workflows created, not pushed) |
-| 5 | S4 | all ×15 | 60 | 0 | 60 | ⏳ Pending (workflows created, not pushed) |
-| 5 | SS1 | all ×15 | 60 | 0 | 60 | ⏳ Pending (workflows created, not pushed) |
+| 5 | S1 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
+| 5 | S2 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
+| 5 | S3 Edge | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
+| 5 | S4 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
+| 5 | SS1 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
 
 > **Note:** "advisory only" = shadow-era runtime_only/full runs excluded.
-> The 227 queued runs (all advisory era) will boost S5 runtime_only/full past ≥30.
+> Queue total: ~500+ runs (177 Phase 1 remaining + 300 Phase 5 new + 60 baselines).
+> All new dispatches are advisory era → will count toward evaluation.
 
 ---
 
