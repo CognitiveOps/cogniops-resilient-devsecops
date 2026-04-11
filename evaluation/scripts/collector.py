@@ -343,6 +343,32 @@ def _filter_to_overlap_windows(
     return filtered.reset_index(drop=True)
 
 
+def _filter_shadow_era(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude shadow-era runtime_only/full rows.
+
+    Before 2026-04-06 the runtime agent ran in shadow mode — decisions
+    were logged but NOT communicated to workflows, making runtime_only
+    and full runs indistinguishable from baseline.  Only advisory-era
+    (≥2026-04-06) runtime/full rows are valid treatment samples.
+    """
+    if df.empty or "variant" not in df.columns or "t_end" not in df.columns:
+        return df
+    work = df.copy()
+    work["t_end"] = pd.to_datetime(work["t_end"], utc=True, errors="coerce")
+    cutover = pd.Timestamp("2026-04-06", tz="UTC")
+    shadow_mask = work["variant"].isin(("runtime_only", "full")) & (
+        work["t_end"] < cutover
+    )
+    removed = shadow_mask.sum()
+    if removed:
+        logger.info(
+            "Removed %d shadow-era runtime_only/full rows (before %s)",
+            removed,
+            cutover.date(),
+        )
+    return work[~shadow_mask].reset_index(drop=True)
+
+
 def collect_all_metrics(
     scenarios: list[str] | None = None,
     project: str | None = None,
@@ -373,6 +399,10 @@ def collect_all_metrics(
                 start_ts=start_ts,
                 end_ts=end_ts,
             )
+            if df.empty:
+                continue
+
+            df = _filter_shadow_era(df)
             if df.empty:
                 continue
 

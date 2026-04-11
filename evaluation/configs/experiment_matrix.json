@@ -60,7 +60,9 @@
             "name": "Edge OTA Deployment",
             "variants": [
                 "baseline",
-                "runtime_only"
+                "design_only",
+                "runtime_only",
+                "full"
             ],
             "metrics": [
                 "TDL",
@@ -230,6 +232,7 @@
             "name": "Adaptive Threat Mitigation",
             "variants": [
                 "baseline",
+                "design_only",
                 "runtime_only",
                 "full"
             ],
