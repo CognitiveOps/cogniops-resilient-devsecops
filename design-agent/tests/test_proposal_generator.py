@@ -15,16 +15,18 @@ class TestGenerateProposal(unittest.TestCase):
             "intent": "Reduce MTTR in S3",
             "target_scenarios": "S3, SS2",
             "analysis_summary": "MTTR trending upward. Recovery activation is the bottleneck.",
-            "changes": json.dumps([
-                {
-                    "change_type": "threshold_adjustment",
-                    "target_file": "s3_rollback.yml",
-                    "description": "Reduce poll interval during recovery",
-                    "current_value": "5",
-                    "proposed_value": "2",
-                    "rationale": "Faster recovery confirmation",
-                },
-            ]),
+            "changes": json.dumps(
+                [
+                    {
+                        "change_type": "threshold_adjustment",
+                        "target_file": "s3_rollback.yml",
+                        "description": "Reduce poll interval during recovery",
+                        "current_value": "5",
+                        "proposed_value": "2",
+                        "rationale": "Faster recovery confirmation",
+                    },
+                ]
+            ),
         }
         defaults.update(overrides)
         return generate_proposal(**defaults)
@@ -73,9 +75,15 @@ class TestGenerateProposal(unittest.TestCase):
         import json
 
         result = self._make_proposal(
-            expected_impact=json.dumps([
-                {"metric_name": "MTTR", "estimated_change": "-25%", "confidence": 0.6},
-            ])
+            expected_impact=json.dumps(
+                [
+                    {
+                        "metric_name": "MTTR",
+                        "estimated_change": "-25%",
+                        "confidence": 0.6,
+                    },
+                ]
+            )
         )
         impact = result["proposal"]["expected_impact"]
         assert len(impact) == 1
@@ -85,9 +93,15 @@ class TestGenerateProposal(unittest.TestCase):
         import json
 
         result = self._make_proposal(
-            expected_impact=json.dumps([
-                {"metric_name": "MTTR", "estimated_change": "-25%", "confidence": 1.5},
-            ])
+            expected_impact=json.dumps(
+                [
+                    {
+                        "metric_name": "MTTR",
+                        "estimated_change": "-25%",
+                        "confidence": 1.5,
+                    },
+                ]
+            )
         )
         assert result["proposal"]["expected_impact"][0]["confidence"] == 1.0
 
@@ -95,9 +109,15 @@ class TestGenerateProposal(unittest.TestCase):
         import json
 
         result = self._make_proposal(
-            expected_impact=json.dumps([
-                {"metric_name": "MTTR", "estimated_change": "-25%", "confidence": -0.5},
-            ])
+            expected_impact=json.dumps(
+                [
+                    {
+                        "metric_name": "MTTR",
+                        "estimated_change": "-25%",
+                        "confidence": -0.5,
+                    },
+                ]
+            )
         )
         assert result["proposal"]["expected_impact"][0]["confidence"] == 0.0
 

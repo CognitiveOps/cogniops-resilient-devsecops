@@ -22,7 +22,7 @@ on:
       - "infra/**"
       - ".github/workflows/infra_apply.yml"
       - "functions/ingest/**"
-      - "functions/ingest_runs/**" 
+      - "functions/ingest_runs/**"
 
 permissions:
   id-token: write
@@ -34,17 +34,17 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PROJECT_ID:        ${{ vars.GCP_PROJECT_ID }}
-  REGION:            ${{ vars.GCP_REGION }}
-  REPO_LOCATION:     ${{ vars.GCP_REPO_LOCATION || 'europe' }}
-  BUCKET_LOCATION:   ${{ vars.GCP_BUCKET_LOCATION || 'EU' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  REPO_LOCATION: ${{ vars.GCP_REPO_LOCATION || 'europe' }}
+  BUCKET_LOCATION: ${{ vars.GCP_BUCKET_LOCATION || 'EU' }}
   BIGQUERY_LOCATION: ${{ vars.GCP_BIGQUERY_LOCATION || 'EU' }}
-  GITHUB_REPO:       ${{ github.repository }}
-  TF_STATE_BUCKET:   ${{ vars.TF_STATE_BUCKET }}
-  TF_STATE_PREFIX:   "terraform/state"
+  GITHUB_REPO: ${{ github.repository }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_PREFIX: "terraform/state"
   BOOTSTRAP_SA_EMAIL: ${{ vars.GCP_SA_BOOTSTRAP_EMAIL || '' }}
-  S4_PQC_BACKEND:    ${{ github.event.inputs.s4_pqc_backend || vars.S4_PQC_BACKEND || 'oqs' }}
-  S4_PQC_ALG:        ${{ github.event.inputs.s4_pqc_alg || vars.S4_PQC_ALG || 'Dilithium2' }}
+  S4_PQC_BACKEND: ${{ github.event.inputs.s4_pqc_backend || vars.S4_PQC_BACKEND || 'oqs' }}
+  S4_PQC_ALG: ${{ github.event.inputs.s4_pqc_alg || vars.S4_PQC_ALG || 'Dilithium2' }}
 
 jobs:
   terraform:
@@ -209,28 +209,28 @@ jobs:
         id: plan
         working-directory: infra
         env:
-          TF_VAR_project_id:            ${{ env.PROJECT_ID }}
-          TF_VAR_region:                ${{ env.REGION }}
-          TF_VAR_repo_location:         ${{ env.REPO_LOCATION }}
-          TF_VAR_bucket_location:       ${{ env.BUCKET_LOCATION }}
-          TF_VAR_bigquery_location:     ${{ env.BIGQUERY_LOCATION }}
-          TF_VAR_github_repo:           ${{ env.GITHUB_REPO }}
-          TF_VAR_bootstrap_sa_email:    ${{ env.BOOTSTRAP_SA_EMAIL }}
-          TF_VAR_tf_state_bucket_name:  ${{ env.TF_STATE_BUCKET }}
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_repo_location: ${{ env.REPO_LOCATION }}
+          TF_VAR_bucket_location: ${{ env.BUCKET_LOCATION }}
+          TF_VAR_bigquery_location: ${{ env.BIGQUERY_LOCATION }}
+          TF_VAR_github_repo: ${{ env.GITHUB_REPO }}
+          TF_VAR_bootstrap_sa_email: ${{ env.BOOTSTRAP_SA_EMAIL }}
+          TF_VAR_tf_state_bucket_name: ${{ env.TF_STATE_BUCKET }}
         run: terraform plan -input=false -no-color
 
       - name: Terraform Apply
         if: ${{ github.event.inputs.plan_only != 'true' }}
         working-directory: infra
         env:
-          TF_VAR_project_id:            ${{ env.PROJECT_ID }}
-          TF_VAR_region:                ${{ env.REGION }}
-          TF_VAR_repo_location:         ${{ env.REPO_LOCATION }}
-          TF_VAR_bucket_location:       ${{ env.BUCKET_LOCATION }}
-          TF_VAR_bigquery_location:     ${{ env.BIGQUERY_LOCATION }}
-          TF_VAR_github_repo:           ${{ env.GITHUB_REPO }}
-          TF_VAR_bootstrap_sa_email:    ${{ env.BOOTSTRAP_SA_EMAIL }}
-          TF_VAR_tf_state_bucket_name:  ${{ env.TF_STATE_BUCKET }}
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_repo_location: ${{ env.REPO_LOCATION }}
+          TF_VAR_bucket_location: ${{ env.BUCKET_LOCATION }}
+          TF_VAR_bigquery_location: ${{ env.BIGQUERY_LOCATION }}
+          TF_VAR_github_repo: ${{ env.GITHUB_REPO }}
+          TF_VAR_bootstrap_sa_email: ${{ env.BOOTSTRAP_SA_EMAIL }}
+          TF_VAR_tf_state_bucket_name: ${{ env.TF_STATE_BUCKET }}
         run: terraform apply -auto-approve -input=false
 
       - name: Read Terraform outputs

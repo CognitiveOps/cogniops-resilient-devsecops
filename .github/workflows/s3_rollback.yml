@@ -44,7 +44,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC to GCP
+  id-token: write # required for OIDC to GCP
 
 concurrency:
   group: s3-resilience-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
@@ -59,17 +59,53 @@ jobs:
       matrix:
         fault:
           # net: detect on latency or non-200; keep lax fps/detection thresholds
-          - { name: net-unstable, fail_mode: net_unstable, latency_budget_sec: 2, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: net-unstable,
+              fail_mode: net_unstable,
+              latency_budget_sec: 2,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # disk-full: deterministic error; thresholds unused but kept default
-          - { name: disk-full, fail_mode: disk_full, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: disk-full,
+              fail_mode: disk_full,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # cpu: detect via fps drop + latency; tighten fps_min
-          - { name: cpu-starvation, fail_mode: cpu_starvation, latency_budget_sec: 3, fps_min: 15, detection_rate_min: 0.05 }
+          - {
+              name: cpu-starvation,
+              fail_mode: cpu_starvation,
+              latency_budget_sec: 3,
+              fps_min: 15,
+              detection_rate_min: 0.05,
+            }
           # camera: detect via detection_rate ~0
-          - { name: dead-camera, fail_mode: dead_camera, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.001 }
+          - {
+              name: dead-camera,
+              fail_mode: dead_camera,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.001,
+            }
           # wrong-arch: deterministic non-200
-          - { name: wrong-arch, fail_mode: wrong_arch, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: wrong-arch,
+              fail_mode: wrong_arch,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # corrupt model: deterministic 500 on inference/status
-          - { name: corrupt-weights, fail_mode: corrupt_weights, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: corrupt-weights,
+              fail_mode: corrupt_weights,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
     runs-on: self-hosted
 
     env:

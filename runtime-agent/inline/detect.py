@@ -16,6 +16,7 @@ Architecture:
 
 Deterministic — no LLM. Runs as CLI in GitHub Actions step.
 """
+
 from __future__ import annotations
 
 import argparse

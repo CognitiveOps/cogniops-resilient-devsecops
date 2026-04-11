@@ -272,6 +272,50 @@ async def run_analysis(
     return JSONResponse(content=result, status_code=status_code)
 
 
+@app.get("/proposals/active")
+async def get_active_proposal(scenario: str | None = None) -> JSONResponse:
+    """Return the active design proposal for a scenario.
+
+    Reads from GCS ``{PROPOSALS_PREFIX}/active/{scenario}.json``.
+    If no proposal exists or GCS is unreachable, returns empty params
+    so the calling workflow can fall back to defaults safely.
+    """
+    if not CONFIG_BUCKET:
+        return JSONResponse(
+            {"status": "no_config_bucket", "scenario": scenario, "params": {}},
+        )
+
+    try:
+        from google.cloud import storage as gcs
+
+        client = gcs.Client()
+        bucket = client.bucket(CONFIG_BUCKET)
+
+        if scenario:
+            blob = bucket.blob(f"{PROPOSALS_PREFIX}/active/{scenario}.json")
+            if blob.exists():
+                data = json.loads(blob.download_as_text())
+                return JSONResponse(data)
+            return JSONResponse(
+                {"status": "not_found", "scenario": scenario, "params": {}},
+            )
+
+        # List all active proposals
+        prefix = f"{PROPOSALS_PREFIX}/active/"
+        blobs = client.list_blobs(CONFIG_BUCKET, prefix=prefix)
+        proposals = {}
+        for blob in blobs:
+            name = blob.name.split("/")[-1].replace(".json", "")
+            proposals[name] = json.loads(blob.download_as_text())
+        return JSONResponse({"status": "ok", "proposals": proposals})
+
+    except Exception:
+        logger.warning("Failed to read active proposals", exc_info=True)
+        return JSONResponse(
+            {"status": "error", "scenario": scenario, "params": {}},
+        )
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "design-agent"}

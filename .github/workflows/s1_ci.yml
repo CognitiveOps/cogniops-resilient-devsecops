@@ -48,7 +48,7 @@ env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
   SERVICE: "baseline-app"
-  REPO_LOCATION: "europe"      # region prefix (europe, us, asia)
+  REPO_LOCATION: "europe" # region prefix (europe, us, asia)
   AR_REPO: "apps"
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   ENV: "prod"
@@ -119,7 +119,7 @@ jobs:
           pip install pytest httpx requests
 
       # --- Prepare metrics context (scenario/branch/env) ----------------------
-      - name: Set run context (scenario/branch/env) 
+      - name: Set run context (scenario/branch/env)
         run: |
           echo "SCENARIO_ID=S1" >> $GITHUB_ENV
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV

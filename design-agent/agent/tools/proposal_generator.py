@@ -56,7 +56,9 @@ def generate_proposal(
     except _json.JSONDecodeError:
         impact_list = []
 
-    refs_list = [r.strip() for r in policy_refs.split(",") if r.strip()] if policy_refs else []
+    refs_list = (
+        [r.strip() for r in policy_refs.split(",") if r.strip()] if policy_refs else []
+    )
 
     # Normalize changes
     normalized_changes = []

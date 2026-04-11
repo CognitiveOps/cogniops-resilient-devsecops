@@ -57,7 +57,7 @@ env:
   AR_REPO: "apps"
   ENV: "prod"
   SS1_ALLOWED_REGIONS: ${{ vars.SS1_ALLOWED_REGIONS || vars.GCP_REGION }}
-  SS1_ALLOWED_INGRESS: "all"  # keep Cloud Run reachable for pipeline health checks
+  SS1_ALLOWED_INGRESS: "all" # keep Cloud Run reachable for pipeline health checks
   SS1_ALLOWED_SERVICE_ACCOUNTS: ${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS || vars.RUN_EXEC_SA_EMAIL }}
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
@@ -66,7 +66,7 @@ env:
 permissions:
   id-token: write
   contents: read
-  
+
 concurrency:
   group: ss1-${{ github.repository }}-${{ github.ref_name }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: true

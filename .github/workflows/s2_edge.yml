@@ -43,7 +43,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC auth to GCP
+  id-token: write # required for OIDC auth to GCP
 
 concurrency:
   group: s2-baseline-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
