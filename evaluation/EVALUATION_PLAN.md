@@ -69,30 +69,37 @@ Every design variant workflow includes:
 ### Usable Runs (as of 2026-04-11, advisory-era filter applied)
 
 Counting rules:
-- **baseline / design_only:** All runs count (runtime agent not involved)
-- **runtime_only / full:** Only runs after 2026-04-06 count (advisory mode).
-  Shadow-era runs (before 04-06) are excluded — agent logged decisions but did
-  not notify, so runtime behavior was indistinguishable from baseline.
+- **baseline:** All variant-labeled runs count
+- **design_only:** Only runs from **dynamic** workflows count (≥2026-04-11).
+  Old hardcoded design_only runs (S1 31, S4 9, SS1 38) are excluded —
+  params were baked into YAML, not fetched from design-agent.
+- **runtime_only / full:** Only runs from **dynamic** variant workflows count (≥2026-04-11).
+  Shadow-era runs (before 04-06) excluded — agent in shadow mode.
+  Advisory-era manual tests (S1 2, SS1 1 from 04-06) excluded —
+  used old hardcoded workflows, not the new dynamic variant files.
 
 | Scenario | baseline | design_only | runtime_only | full | Status |
 |----------|:--------:|:-----------:|:------------:|:----:|--------|
-| **S1** | 5 | 0 | 2 | 0 | ❌ Queue draining (300 dispatched) |
-| **S2** | 3 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
+| **S1** | 18 | 0 | 0 | 0 | ❌ Queue draining |
+| **S2** | 14 | 0 | 0 | 0 | ❌ Queue draining |
 | **S3 Cloud** | 118 | 107 | 43 | 40 | ✅ Evaluated |
-| **S3 Edge** | 0 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
-| **S4** | 4 | 0 | 0 | 0 | ❌ Queue draining (300 dispatched) |
-| **S5** | 98 | 115 | 62 | 62 | ✅ Evaluated |
-| **SS1** | 2 | 0 | 1 | 0 | ❌ Queue draining (300 dispatched) |
-| **SS2** | 84 | 51 | 42 | 43 | ✅ Evaluated |
+| **S3 Edge** | 0 | 0 | 0 | 0 | ❌ Queue draining |
+| **S4** | 14 | 0 | 0 | 0 | ❌ Queue draining |
+| **S5** | 98 | 115 | 63 | 63 | ✅ Evaluated |
+| **SS1** | 11 | 0 | 0 | 0 | ❌ Queue draining |
+| **SS2** | 84 | 52 | 42 | 43 | ✅ Evaluated |
 
 > **Discarded runs** (exist in BQ but excluded from evaluation):
 > - **Shadow-era runtime/full** (before 04-06): S3 Cloud 45+78, S5 39+71, SS2 43+60
-> - **Hardcoded design params:** S1 31d/32r/32f, S2 21r, S4 9d/20f, SS1 38d/60f
+> - **Hardcoded design params** (before 04-11): S1 31d, S4 9d, SS1 38d
+> - **Hardcoded runtime/full** (before 04-11): S1 32r/32f, S2 21r, S4 20f, SS1 60f
+> - **Manual advisory tests** (04-06, old workflows): S1 2r, SS1 1r
 > - **S3 Edge legacy:** 3 runtime (shadow, no matching variants)
 >
 > Exclusion criteria:
 > 1. **Design axis:** params hardcoded in workflows, not fetched from design-agent
-> 2. **Runtime axis:** agent in shadow mode (decisions logged only, not advisory)
+> 2. **Runtime axis:** old workflow (no `/decide` gate) or shadow mode
+> 3. **Cutover date:** Dynamic variant workflows deployed 2026-04-11 (commit `b00c728`)
 
 ### Unlabeled Legacy Runs (`variant=NULL`)
 
@@ -244,32 +251,31 @@ python -m evaluation.scripts.run_experiment \
 
 | Phase | Scenario | Variant | Target | Current | Gap | Status |
 |-------|----------|---------|:------:|:-------:|:---:|--------|
-| 1 | S3 Cloud | baseline | ≥30 | 112 | — | ✅ Done |
-| 1 | S3 Cloud | design_only | ≥30 | 100 | — | ✅ Done |
-| 1 | S3 Cloud | runtime_only | ≥30 | 41 | — | ✅ Done (advisory only) |
-| 1 | S3 Cloud | full | ≥30 | 33 | — | ✅ Done (advisory only) |
-| 1 | S5 | baseline | ≥30 | 65 | — | ✅ Done |
-| 1 | S5 | design_only | ≥30 | 61 | — | ✅ Done |
-| 1 | S5 | runtime_only | ≥30 | 18 | 12 | ⚠ Below target (advisory only) |
-| 1 | S5 | full | ≥30 | 16 | 14 | ⚠ Below target (advisory only) |
-| 1 | SS2 | baseline | ≥30 | 77 | — | ✅ Done |
-| 1 | SS2 | design_only | ≥30 | 46 | — | ✅ Done |
-| 1 | SS2 | runtime_only | ≥30 | 33 | — | ✅ Done (advisory only) |
-| 1 | SS2 | full | ≥30 | 38 | — | ✅ Done (advisory only) |
-| 1+ | S3,S5,SS2 | all ×15 | +167 | — | 167 | 🔄 Queued (draining) |
-| 2 | S1 | baseline | 15 | 1 | 14 | 🔄 Queued (15 dispatched) |
-| 2 | S2 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
-| 2 | S4 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
-| 2 | SS1 | baseline | 15 | 0 | 15 | 🔄 Queued (15 dispatched) |
-| 5 | S1 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
-| 5 | S2 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
-| 5 | S3 Edge | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
-| 5 | S4 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
-| 5 | SS1 | all ×15 | 60 | 0 | 60 | 🔄 Dispatched (15p × 4v = 60 runs) |
+| 1 | S3 Cloud | baseline | ≥30 | 118 | — | ✅ Evaluated |
+| 1 | S3 Cloud | design_only | ≥30 | 107 | — | ✅ Evaluated |
+| 1 | S3 Cloud | runtime_only | ≥30 | 43 | — | ✅ Evaluated |
+| 1 | S3 Cloud | full | ≥30 | 40 | — | ✅ Evaluated |
+| 1 | S5 | baseline | ≥30 | 98 | — | ✅ Evaluated |
+| 1 | S5 | design_only | ≥30 | 115 | — | ✅ Evaluated |
+| 1 | S5 | runtime_only | ≥30 | 63 | — | ✅ Evaluated |
+| 1 | S5 | full | ≥30 | 63 | — | ✅ Evaluated |
+| 1 | SS2 | baseline | ≥30 | 84 | — | ✅ Evaluated |
+| 1 | SS2 | design_only | ≥30 | 52 | — | ✅ Evaluated |
+| 1 | SS2 | runtime_only | ≥30 | 42 | — | ✅ Evaluated |
+| 1 | SS2 | full | ≥30 | 43 | — | ✅ Evaluated |
+| 5 | S1 | baseline | ≥30 | 18 | 12 | 🔄 Draining (dynamic only) |
+| 5 | S1 | design/rt/full | ≥30 | 0 | 30 | 🔄 Draining (dynamic ≥04-11) |
+| 5 | S2 | baseline | ≥30 | 14 | 16 | 🔄 Draining |
+| 5 | S2 | design/rt/full | ≥30 | 0 | 30 | 🔄 Draining |
+| 5 | S3 Edge | all ×15 | ≥30 | 0 | 30 | 🔄 Draining |
+| 5 | S4 | baseline | ≥30 | 14 | 16 | 🔄 Draining |
+| 5 | S4 | design/rt/full | ≥30 | 0 | 30 | 🔄 Draining |
+| 5 | SS1 | baseline | ≥30 | 11 | 19 | 🔄 Draining |
+| 5 | SS1 | design/rt/full | ≥30 | 0 | 30 | 🔄 Draining |
 
-> **Note:** "advisory only" = shadow-era runtime_only/full runs excluded.
-> Queue total: ~500+ runs (177 Phase 1 remaining + 300 Phase 5 new + 60 baselines).
-> All new dispatches are advisory era → will count toward evaluation.
+> **Counting rules:** S1/S2/S4/SS1 treatment variants (design_only, runtime_only, full)
+> only count runs from dynamic workflows (≥2026-04-11). Old hardcoded runs excluded.
+> Queue: ~352 runs remaining on `cogniops-fresh`.
 
 ---
 

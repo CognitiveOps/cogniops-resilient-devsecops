@@ -343,30 +343,55 @@ def _filter_to_overlap_windows(
     return filtered.reset_index(drop=True)
 
 
-def _filter_shadow_era(df: pd.DataFrame) -> pd.DataFrame:
-    """Exclude shadow-era runtime_only/full rows.
+def _filter_shadow_era(df: pd.DataFrame, scenario_id: str = "") -> pd.DataFrame:
+    """Exclude invalid treatment rows from before the dynamic-workflow era.
 
-    Before 2026-04-06 the runtime agent ran in shadow mode — decisions
-    were logged but NOT communicated to workflows, making runtime_only
-    and full runs indistinguishable from baseline.  Only advisory-era
-    (≥2026-04-06) runtime/full rows are valid treatment samples.
+    Two exclusion rules:
+
+    1. **Shadow-era runtime/full (all scenarios):** Before 2026-04-06 the
+       runtime agent ran in shadow mode — decisions were logged but NOT
+       communicated to workflows.  runtime_only/full rows before that date
+       are indistinguishable from baseline.
+
+    2. **Hardcoded-workflow treatments (S1/S2/S4/SS1):** Before 2026-04-11
+       (commit b00c728), variant workflows for these scenarios used hardcoded
+       params, not dynamic design-agent proposals.  All design_only,
+       runtime_only, and full rows before that date are invalid.
+       S3/S5/SS2 already had dynamic workflows and are unaffected.
     """
     if df.empty or "variant" not in df.columns or "t_end" not in df.columns:
         return df
     work = df.copy()
     work["t_end"] = pd.to_datetime(work["t_end"], utc=True, errors="coerce")
-    cutover = pd.Timestamp("2026-04-06", tz="UTC")
+
+    shadow_cutover = pd.Timestamp("2026-04-06", tz="UTC")
+    dynamic_cutover = pd.Timestamp("2026-04-11", tz="UTC")
+
+    # Rule 1: shadow-era runtime/full for ALL scenarios
     shadow_mask = work["variant"].isin(("runtime_only", "full")) & (
-        work["t_end"] < cutover
+        work["t_end"] < shadow_cutover
     )
-    removed = shadow_mask.sum()
+
+    # Rule 2: hardcoded treatments for S1/S2/S4/SS1
+    # scenario_id passed from caller (logical id, e.g. "s1", "s3_cloud")
+    bq_id = _BQ_SCENARIO_ID.get(scenario_id, scenario_id)
+    hardcoded_scenarios = {"s1", "s2", "s4", "ss1"}
+    if bq_id in hardcoded_scenarios:
+        hardcoded_treatment_mask = work["variant"].isin(
+            ("design_only", "runtime_only", "full")
+        ) & (work["t_end"] < dynamic_cutover)
+    else:
+        hardcoded_treatment_mask = pd.Series(False, index=work.index)
+
+    combined_mask = shadow_mask | hardcoded_treatment_mask
+    removed = combined_mask.sum()
     if removed:
         logger.info(
-            "Removed %d shadow-era runtime_only/full rows (before %s)",
+            "Removed %d invalid treatment rows for %s (shadow-era + hardcoded)",
             removed,
-            cutover.date(),
+            scenario_id,
         )
-    return work[~shadow_mask].reset_index(drop=True)
+    return work[~combined_mask].reset_index(drop=True)
 
 
 def collect_all_metrics(
@@ -402,7 +427,7 @@ def collect_all_metrics(
             if df.empty:
                 continue
 
-            df = _filter_shadow_era(df)
+            df = _filter_shadow_era(df, scenario_id=scenario_id)
             if df.empty:
                 continue
 
