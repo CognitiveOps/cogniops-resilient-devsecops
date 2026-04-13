@@ -28,8 +28,13 @@ permissions:
   contents: read
 
 concurrency:
+<<<<<<< HEAD
   group: s1-baseline-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
+=======
+  group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+  cancel-in-progress: false
+>>>>>>> 312c4dd (fix(ci): set cancel-in-progress: false on all 32 workflows)
 
 jobs:
   build-test-push-deploy:
