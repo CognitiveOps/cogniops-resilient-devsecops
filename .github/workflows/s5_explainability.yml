@@ -54,7 +54,7 @@ permissions:
 
 concurrency:
   group: s5-explainability-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}

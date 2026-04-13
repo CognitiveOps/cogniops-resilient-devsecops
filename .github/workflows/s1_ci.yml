@@ -59,7 +59,7 @@ permissions:
 
 concurrency:
   group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-test-push-deploy:

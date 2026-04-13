@@ -47,7 +47,7 @@ permissions:
 
 concurrency:
   group: s2-baseline-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   s2:

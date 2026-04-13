@@ -69,7 +69,7 @@ permissions:
 
 concurrency:
   group: ss1-${{ github.repository }}-${{ github.ref_name }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ss1:

@@ -67,7 +67,7 @@ permissions:
 
 concurrency:
   group: ss2-mitigation-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   prepare:
