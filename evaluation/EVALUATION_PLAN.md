@@ -66,7 +66,7 @@ Every design variant workflow includes:
 
 ## Current Data Inventory (BigQuery `agent_metrics.runs`)
 
-### Usable Runs (as of 2026-04-12, advisory-era filter applied)
+### Usable Runs (as of 2026-04-13, advisory-era filter applied)
 
 Counting rules:
 - **baseline:** All variant-labeled runs count
@@ -80,14 +80,14 @@ Counting rules:
 
 | Scenario | baseline | design_only | runtime_only | full | Status |
 |----------|:--------:|:-----------:|:------------:|:----:|--------|
-| **S1** | 18 | 2 | 4 | 3 | 🔄 Draining (est. →32/15/15/15 + 15 new pairs) |
-| **S2** | 17 | 1 | 1 | 2 | 🔄 Draining (est. →30/15/15/15 + 15 new pairs) |
-| **S3 Cloud** | 118 | 108 | 43 | 40 | ✅ Evaluated |
-| **S3 Edge** | 0 | 0 | 3 | 0 | 🔄 Draining (30 baselines + 15 pairs dispatched) |
-| **S4** | 15 | 2 | 3 | 3 | 🔄 Draining (est. →30/15/15/15 + 15 new pairs) |
+| **S1** | 21 | 4 | 6 | 5 | 🔄 Batch 3 queued (30 pairs) |
+| **S2** | 20 | 3 | 2 | 4 | 🔄 Batch 3 queued (30 pairs) |
+| **S3 Cloud** | 118 | 109 | 46 | 46 | ✅ Evaluated |
+| **S3 Edge** | 0 | 1 | 1 | 2 | 🔄 Batch 3 queued (30 pairs) |
+| **S4** | 18 | 3 | 5 | 4 | 🔄 Batch 3 queued (30 pairs) |
 | **S5** | 99 | 115 | 63 | 63 | ✅ Evaluated |
-| **SS1** | 15 | 2 | 2 | 4 | 🔄 Draining (est. →31/17/17/19 + 15 new pairs) |
-| **SS2** | 84 | 52 | 42 | 43 | ✅ Evaluated |
+| **SS1** | 17 | 5 | 4 | 5 | 🔄 Batch 3 queued (30 pairs) |
+| **SS2** | 85 | 53 | 42 | 45 | ✅ Evaluated |
 
 > **Discarded runs** (exist in BQ but excluded from evaluation):
 > - **Shadow-era runtime/full** (before 04-06): S3 Cloud 45+78, S5 39+71, SS2 43+60
@@ -118,14 +118,13 @@ Legacy runs lack `variant` label and predate the 2-axis evaluation framework.
 
 ### Queue Status
 
-**~600+ runs queued** on GitHub Actions (self-hosted runner `cogniops-fresh`):
-- Original queue: ~312 remaining (from Phase 5 dispatch of 300 + Phase 1 leftovers)
-- New dispatch (2026-04-12): 300 runs (15 pairs × 5 scenarios × 4 variants for S1/S2/S3-Edge/S4/SS1)
-- Extra S3 Edge baselines: 15 runs (to cover 29-run baseline gap)
-- Total new dispatches: 315 runs
-- **Cancellation note:** 115 of original 500 runs were cancelled due to
-  `concurrency: cancel-in-progress` groups colliding in rapid-fire dispatch.
-  Not an issue for new dispatch (unique `run_suffix` per run).
+**~670 runs queued** on GitHub Actions (self-hosted runner `cogniops-fresh`):
+- Batch 3 (2026-04-13): 600 runs (30 pairs × 5 scenarios × 4 variants)
+- Remaining from previous batches: ~73 runs
+- **Root cause of previous failures fixed:** `cancel-in-progress: true` was
+  causing mass cancellations (407/426 runs cancelled in Batches 1-2).
+  Fixed to `cancel-in-progress: false` on all 32 workflows (commit `312c4dd`,
+  cherry-picked to `main` as `db4bb50`).
 
 Runner `cogniops-fresh` is **online and busy**, processing sequentially.
 
@@ -175,15 +174,24 @@ Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
 - GitHub variable `DESIGN_AGENT_URL` set for workflow access
 
 ### Phase 5: Dispatch Variant Runs for S1/S2/S3-Edge/S4/SS1 ✅ DONE
-600 runs dispatched total (two batches):
+~1215 runs dispatched total (three batches):
 - **Batch 1** (2026-04-11): 300 runs (15 pairs × 5 scenarios × 4 variants)
   - Validation batch: 3 pairs (60 runs) — confirmed all workflows trigger
   - Full batch: 12 pairs (240 runs) — 240/240 dispatched, 0 failures
   - S3 Edge baseline fix: added `run_suffix` input to `s3_edge_rollback.yml`
+  - ⚠️ **Most runs cancelled** due to `cancel-in-progress: true` (see below)
 - **Batch 2** (2026-04-12): 315 runs to fill treatment variant gaps
-  - 300 runs: 15 pairs × 5 scenarios (S1/S2/S3-Edge/S4/SS1) × 4 variants
-  - 15 extra S3 Edge baselines (to cover 29-run baseline deficit)
-  - All 315/315 dispatched successfully
+  - 300 runs: 15 pairs × 5 scenarios × 4 variants + 15 extra S3 Edge baselines
+  - ⚠️ **Most runs cancelled** — same `cancel-in-progress` issue
+- **⚠️ Cancellation root cause:** `cancel-in-progress: true` in concurrency groups
+  caused 407 of 426 completed runs to be cancelled despite unique `run_suffix`.
+  GitHub Actions expression `${{ (inputs.run_suffix || '') != '' && format(...) }}`
+  in the `concurrency.group` context did not resolve correctly for queued runs.
+- **Fix:** `cancel-in-progress: false` on all 32 workflows (commit `312c4dd`).
+  Cherry-picked to `main` (`db4bb50`).
+- **Batch 3** (2026-04-13): 600 runs (30 pairs × 5 scenarios × 4 variants)
+  - 599/600 dispatched + 1 retried = 600 total
+  - With `cancel-in-progress: false`, runs should complete without cancellation
 
 ### Phase 6: Run Evaluation Pipeline ✅ PARTIAL (3/8 scenarios)
 First pass completed for **S3 Cloud, S5, SS2** (the 3 scenarios with ≥30 runs per variant).
@@ -269,31 +277,32 @@ python -m evaluation.scripts.run_experiment \
 | 1 | SS2 | design_only | ≥30 | 52 | — | ✅ Evaluated |
 | 1 | SS2 | runtime_only | ≥30 | 42 | — | ✅ Evaluated |
 | 1 | SS2 | full | ≥30 | 43 | — | ✅ Evaluated |
-| 5 | S1 | baseline | ≥30 | 18 | — | 🔄 Draining (+14q +15 new = ~47 est.) |
-| 5 | S1 | design_only | ≥30 | 2 | 28 | 🔄 Draining (+13q +15 new = ~30 est.) |
-| 5 | S1 | runtime_only | ≥30 | 4 | 26 | 🔄 Draining (+11q +15 new = ~30 est.) |
-| 5 | S1 | full | ≥30 | 3 | 27 | 🔄 Draining (+12q +15 new = ~30 est.) |
-| 5 | S2 | baseline | ≥30 | 17 | — | 🔄 Draining (+13q +15 new = ~45 est.) |
-| 5 | S2 | design_only | ≥30 | 1 | 29 | 🔄 Draining (+14q +15 new = ~30 est.) |
-| 5 | S2 | runtime_only | ≥30 | 1 | 29 | 🔄 Draining (+14q +15 new = ~30 est.) |
-| 5 | S2 | full | ≥30 | 2 | 28 | 🔄 Draining (+13q +15 new = ~30 est.) |
-| 5 | S3 Edge | baseline | ≥30 | 0 | 30 | 🔄 Draining (+1q +15+15 new = ~31 est.) |
-| 5 | S3 Edge | design_only | ≥30 | 0 | 30 | 🔄 Draining (+15q +15 new = ~30 est.) |
-| 5 | S3 Edge | runtime_only | ≥30 | 3 | 27 | 🔄 Draining (+15q +15 new = ~33 est.) |
-| 5 | S3 Edge | full | ≥30 | 0 | 30 | 🔄 Draining (+15q +15 new = ~30 est.) |
-| 5 | S4 | baseline | ≥30 | 15 | — | 🔄 Draining (+15q +15 new = ~45 est.) |
-| 5 | S4 | design_only | ≥30 | 2 | 28 | 🔄 Draining (+13q +15 new = ~30 est.) |
-| 5 | S4 | runtime_only | ≥30 | 3 | 27 | 🔄 Draining (+12q +15 new = ~30 est.) |
-| 5 | S4 | full | ≥30 | 3 | 27 | 🔄 Draining (+12q +15 new = ~30 est.) |
-| 5 | SS1 | baseline | ≥30 | 15 | — | 🔄 Draining (+16q +15 new = ~46 est.) |
-| 5 | SS1 | design_only | ≥30 | 2 | 28 | 🔄 Draining (+15q +15 new = ~32 est.) |
-| 5 | SS1 | runtime_only | ≥30 | 2 | 28 | 🔄 Draining (+15q +15 new = ~32 est.) |
-| 5 | SS1 | full | ≥30 | 4 | 26 | 🔄 Draining (+15q +15 new = ~34 est.) |
+| 5 | S1 | baseline | ≥30 | 21 | 9 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S1 | design_only | ≥30 | 4 | 26 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S1 | runtime_only | ≥30 | 6 | 24 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S1 | full | ≥30 | 5 | 25 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S2 | baseline | ≥30 | 20 | 10 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S2 | design_only | ≥30 | 3 | 27 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S2 | runtime_only | ≥30 | 2 | 28 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S2 | full | ≥30 | 4 | 26 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S3 Edge | baseline | ≥30 | 0 | 30 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S3 Edge | design_only | ≥30 | 1 | 29 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S3 Edge | runtime_only | ≥30 | 1 | 29 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S3 Edge | full | ≥30 | 2 | 28 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S4 | baseline | ≥30 | 18 | 12 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S4 | design_only | ≥30 | 3 | 27 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S4 | runtime_only | ≥30 | 5 | 25 | 🔄 Batch 3: +30 pairs queued |
+| 5 | S4 | full | ≥30 | 4 | 26 | 🔄 Batch 3: +30 pairs queued |
+| 5 | SS1 | baseline | ≥30 | 17 | 13 | 🔄 Batch 3: +30 pairs queued |
+| 5 | SS1 | design_only | ≥30 | 5 | 25 | 🔄 Batch 3: +30 pairs queued |
+| 5 | SS1 | runtime_only | ≥30 | 4 | 26 | 🔄 Batch 3: +30 pairs queued |
+| 5 | SS1 | full | ≥30 | 5 | 25 | 🔄 Batch 3: +30 pairs queued |
 
 > **Counting rules:** S1/S2/S4/SS1 treatment variants (design_only, runtime_only, full)
 > only count runs from dynamic workflows (≥2026-04-11). Old hardcoded runs excluded.
-> Queue: ~600+ runs remaining on `cogniops-fresh` (Batch 1 leftovers + Batch 2 new).
-> **Batch 2 dispatched 2026-04-12:** 315 runs (15 pairs × 5 scenarios + 15 S3 Edge baselines).
+> Queue: ~670 runs on `cogniops-fresh` (Batch 3 = 600 + ~73 leftovers).
+> **Batch 3 dispatched 2026-04-13:** 600 runs (30 pairs × 5 scenarios × 4 variants).
+> **Fix applied:** `cancel-in-progress: false` prevents cancellation (commit `312c4dd`).
 
 ---
 
