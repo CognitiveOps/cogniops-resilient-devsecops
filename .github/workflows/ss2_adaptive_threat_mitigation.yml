@@ -223,9 +223,6 @@ jobs:
           sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
           sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
       - name: Compute image refs
         id: refs
         run: |
@@ -241,15 +238,12 @@ jobs:
         run: |
           set -euo pipefail
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
-          docker buildx build \
-            --platform linux/amd64 \
-            -t "$IMG" --push baseline/services/edge_cv_app
+          docker build -t "$IMG" baseline/services/edge_cv_app
+          docker push "$IMG"
 
-          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
-          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" 2>/dev/null | sed 's/.*@//')
           if [ -z "$DIGEST" ]; then
-            echo "Failed to resolve image digest for $IMG" >&2
-            exit 1
+            DIGEST=$(docker inspect --format='{{.Id}}' "$IMG")
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
@@ -841,8 +835,7 @@ jobs:
             gcloud storage cp -r baseline/metrics/hitl "${GCS_PREFIX}/"
           fi
 
-      - name: Cleanup Docker buildx builder
+      - name: Cleanup Docker
         if: always()
         run: |
-          docker buildx rm --force $(docker buildx ls | grep -oP 'builder-\S+' | head -1) 2>/dev/null || true
           docker builder prune -f 2>/dev/null || true
