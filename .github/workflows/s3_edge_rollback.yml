@@ -161,13 +161,26 @@ jobs:
           echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
           echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build & Push image
+      - name: Pull image from Artifact Registry
         id: buildpush
         run: |
           set -euo pipefail
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
-          docker build -t "$IMG" baseline/services/edge_cv_app
-          docker push "$IMG"
+          # Pull pre-built image instead of building (saves ~400MB peak RAM)
+          if docker pull "$IMG" 2>/dev/null; then
+            echo "Pulled image by commit SHA"
+          else
+            # Exact tag not in registry — re-use locally cached edge-cv-app image
+            EXISTING=$(docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep 'edge-cv-app' | grep -v '<none>' | head -1)
+            if [ -n "$EXISTING" ]; then
+              docker tag "$EXISTING" "$IMG"
+              echo "Re-tagged local $EXISTING as current SHA"
+            else
+              echo "No cached image, building as fallback..."
+              DOCKER_BUILDKIT=0 docker build -t "$IMG" baseline/services/edge_cv_app
+            fi
+          fi
 
           DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" 2>/dev/null | sed 's/.*@//')
           if [ -z "$DIGEST" ]; then
