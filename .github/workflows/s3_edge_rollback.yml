@@ -488,7 +488,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"
-          gcloud storage cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
+          gsutil cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
 
       - name: Cleanup Docker
         if: always()
