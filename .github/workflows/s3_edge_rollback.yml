@@ -493,4 +493,6 @@ jobs:
       - name: Cleanup Docker
         if: always()
         run: |
+          docker rm -f $(docker ps -aq) 2>/dev/null || true
           docker builder prune -f 2>/dev/null || true
+          docker image prune -f 2>/dev/null || true
