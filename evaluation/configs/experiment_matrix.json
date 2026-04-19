@@ -169,7 +169,11 @@
                     "higher_is_better": true
                 },
                 "FDR": {
-                    "stages": ["s4_p1_tamper", "s4_p2_wrong_key", "s4_p3_replay"],
+                    "stages": [
+                        "s4_p1_tamper",
+                        "s4_p2_wrong_key",
+                        "s4_p3_replay"
+                    ],
                     "aggregation": "rejection_rate",
                     "higher_is_better": true
                 }

@@ -317,8 +317,10 @@ jobs:
         id: s3recover
         run: |
           set -euo pipefail
+          # Kill faulty container so the port is freed for the healthy replacement
+          docker rm -f "$EDGE_CONTAINER" 2>/dev/null || true
           cd baseline/services/edge_cv_app
-          EDGE_MODE=real EDGE_FAIL_MODE=0 EDGE_HEALTH_CHECK=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          EDGE_HOST_PORT="${EDGE_PORT}" EDGE_MODE=real EDGE_FAIL_MODE=0 EDGE_HEALTH_CHECK=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
       - name: Wait for recovery (MTTR)
         id: s3recover_wait

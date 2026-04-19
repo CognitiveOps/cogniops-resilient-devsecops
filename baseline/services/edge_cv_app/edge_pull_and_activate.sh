@@ -84,8 +84,13 @@ docker run -d --restart=no \
   "$FINAL_REF"
 
 # 7) health probe
-cleanup() { docker rm -f "$CONTAINER_NAME" 2>/dev/null || true; }
-trap cleanup EXIT
+# Only set cleanup trap when the caller does NOT need the container to persist.
+# When EDGE_HEALTH_CHECK=0 the caller (e.g. S3 recovery step) relies on the
+# container staying alive after this script exits.
+if [ "${EDGE_HEALTH_CHECK:-1}" != "0" ]; then
+  cleanup() { docker rm -f "$CONTAINER_NAME" 2>/dev/null || true; }
+  trap cleanup EXIT
+fi
 
 if [ "${EDGE_HEALTH_CHECK}" = "0" ]; then
   echo "health check skipped (EDGE_HEALTH_CHECK=0)"

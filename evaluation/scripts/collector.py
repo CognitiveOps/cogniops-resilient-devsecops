@@ -147,6 +147,7 @@ def _build_sample_query(
     project: str,
     start_ts: str,
     end_ts: str,
+    labeled_baselines_only: bool = False,
 ) -> str | None:
     """Build a BQ SQL query to extract per-sample metric values by variant."""
     key = (scenario_id, metric_name)
@@ -157,6 +158,17 @@ def _build_sample_query(
 
     bq_scenario_id = _BQ_SCENARIO_ID.get(scenario_id, scenario_id)
     stage = config["stage"]
+
+    # When labeled_baselines_only=True, exclude rows without an explicit
+    # variant label.  Legacy (NULL) runs are genuine baselines but may
+    # introduce temporal confounders.  The filter keeps only rows that
+    # have an explicit labels.variant value.
+    variant_expr = "COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline')"
+    legacy_filter = (
+        "\n  AND JSON_VALUE(labels, '$.variant') IS NOT NULL"
+        if labeled_baselines_only
+        else ""
+    )
 
     if "aggregation" in config:
         # Rate metrics need the raw status column, not per-sample values.
@@ -169,7 +181,7 @@ def _build_sample_query(
             stage_clause = f"stage IN ({quoted})"
         return f"""
 SELECT
-  COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline') AS variant,
+  {variant_expr} AS variant,
   run_id,
   status,
     t_end,
@@ -179,7 +191,7 @@ SELECT
 FROM `{project}.agent_metrics.runs`
 WHERE scenario_id = '{bq_scenario_id}'
   AND {stage_clause}
-  AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')
+  AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}'){legacy_filter}
 ORDER BY variant, t_end
 """
 
@@ -188,7 +200,7 @@ ORDER BY variant, t_end
     extra_where = config.get("extra_where", "")
     return f"""
 SELECT
-  COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline') AS variant,
+  {variant_expr} AS variant,
   run_id,
   {value_expr} AS metric_value,
     t_end,
@@ -201,7 +213,7 @@ WHERE scenario_id = '{bq_scenario_id}'
   AND status = '{status_filter}'
   AND t_end BETWEEN TIMESTAMP('{start_ts}') AND TIMESTAMP('{end_ts}')
   AND {value_expr} IS NOT NULL
-  {extra_where}
+  {extra_where}{legacy_filter}
 ORDER BY variant, t_end
 """
 
@@ -212,6 +224,7 @@ def query_metric_samples(
     project: str | None = None,
     start_ts: str = "2020-01-01",
     end_ts: str = "2099-12-31",
+    labeled_baselines_only: bool = False,
 ) -> pd.DataFrame:
     """Query BQ for per-sample metric values, grouped by variant.
 
@@ -223,7 +236,14 @@ def query_metric_samples(
         logger.error("GCP_PROJECT_ID not set")
         return pd.DataFrame()
 
-    query = _build_sample_query(scenario_id, metric_name, proj, start_ts, end_ts)
+    query = _build_sample_query(
+        scenario_id,
+        metric_name,
+        proj,
+        start_ts,
+        end_ts,
+        labeled_baselines_only=labeled_baselines_only,
+    )
     if not query:
         return pd.DataFrame()
 
@@ -400,8 +420,15 @@ def collect_all_metrics(
     start_ts: str = "2020-01-01",
     end_ts: str = "2099-12-31",
     causal_mode: bool = False,
+    labeled_baselines_only: bool = False,
 ) -> pd.DataFrame:
     """Collect all metrics for all scenarios in long format.
+
+    Args:
+        labeled_baselines_only: When True, exclude legacy runs that lack an
+            explicit ``labels.variant`` value.  These NULL-variant runs are
+            genuine baselines but originate from the pre-framework era and
+            may introduce temporal confounders.
 
     Columns: scenario_id, metric_name, variant, metric_value, t_end
     """
@@ -423,6 +450,7 @@ def collect_all_metrics(
                 project=project,
                 start_ts=start_ts,
                 end_ts=end_ts,
+                labeled_baselines_only=labeled_baselines_only,
             )
             if df.empty:
                 continue

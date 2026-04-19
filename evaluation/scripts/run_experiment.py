@@ -37,6 +37,7 @@ def run(
     output_dir: Path | None = None,
     skip_charts: bool = False,
     causal_mode: bool = False,
+    labeled_baselines_only: bool = False,
 ) -> dict:
     """Execute full evaluation pipeline.
 
@@ -59,6 +60,7 @@ def run(
         start_ts=start_ts,
         end_ts=end_ts,
         causal_mode=causal_mode,
+        labeled_baselines_only=labeled_baselines_only,
     )
     if metrics_df.empty:
         logger.error("No metrics collected — aborting.")
@@ -107,6 +109,7 @@ def run(
         "n_comparisons": len(results),
         "n_charts": len(chart_paths),
         "causal_mode": causal_mode,
+        "labeled_baselines_only": labeled_baselines_only,
         "raw_csv": str(raw_csv),
         "comparison_csv": str(csv_path),
         "summary_json": str(summary_path),
@@ -189,6 +192,14 @@ def main() -> None:
             "Filter samples to baseline-treatment overlap windows " "before comparison"
         ),
     )
+    parser.add_argument(
+        "--labeled-baselines-only",
+        action="store_true",
+        help=(
+            "Exclude legacy (NULL-variant) runs from baselines. "
+            "Only use explicitly labeled variant=baseline runs."
+        ),
+    )
     parser.add_argument("--all", action="store_true", help="Evaluate all scenarios")
     parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -207,6 +218,7 @@ def main() -> None:
         output_dir=args.output,
         skip_charts=args.skip_charts,
         causal_mode=args.causal_mode,
+        labeled_baselines_only=args.labeled_baselines_only,
     )
     print(json.dumps(result, indent=2, default=str))
     sys.exit(0 if result.get("status") != "error" else 1)

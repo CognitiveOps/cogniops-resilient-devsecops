@@ -100,6 +100,41 @@ class TestBuildSampleQuery:
         assert sql is not None
         assert "COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline')" in sql
 
+    def test_labeled_baselines_only_adds_filter(self) -> None:
+        sql = _build_sample_query(
+            "s1",
+            "TTD",
+            "test-project",
+            "2024-01-01",
+            "2024-12-31",
+            labeled_baselines_only=True,
+        )
+        assert sql is not None
+        assert "JSON_VALUE(labels, '$.variant') IS NOT NULL" in sql
+
+    def test_labeled_baselines_only_rate_metric(self) -> None:
+        sql = _build_sample_query(
+            "s1",
+            "CFR",
+            "test-project",
+            "2024-01-01",
+            "2024-12-31",
+            labeled_baselines_only=True,
+        )
+        assert sql is not None
+        assert "JSON_VALUE(labels, '$.variant') IS NOT NULL" in sql
+
+    def test_default_includes_legacy(self) -> None:
+        sql = _build_sample_query(
+            "s1",
+            "TTD",
+            "test-project",
+            "2024-01-01",
+            "2024-12-31",
+        )
+        assert sql is not None
+        assert "JSON_VALUE(labels, '$.variant') IS NOT NULL" not in sql
+
     def test_s3_cloud_uses_detect_stage(self) -> None:
         sql = _build_sample_query(
             "s3_cloud", "MTTD", "test-project", "2024-01-01", "2024-12-31"
