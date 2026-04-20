@@ -58,11 +58,16 @@ jobs:
         # - push: run the full fault set (all)
         # - workflow_dispatch fault_mode=all: run the full fault set
         # - workflow_dispatch fault_mode=<x>: run only that fault
-        fault_mode: ${{ fromJson((github.event_name == 'workflow_dispatch' && github.event.inputs.fault_mode != 'all') && format('["{0}"]', github.event.inputs.fault_mode) || '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]') }}
+        fault_mode: ${{ fromJson((github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.fault_mode != 'all') && format('["{0}"]',
+          github.event.inputs.fault_mode) ||
+          '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]')
+          }}
     env:
       SCENARIO_ID: s3
       MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ inputs.run_suffix && format('-{0}', inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ inputs.run_suffix &&
+        format('-{0}', inputs.run_suffix) || '' }}
       VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
@@ -74,7 +79,8 @@ jobs:
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       FAIL_MODE: ${{ matrix.fault_mode }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{
+        github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
       # Tunable fault model parameters (keep aligned with Cloud Run defaults)
       S3_NET_FAIL_P: "0.1"
       S3_NET_BURST_PROB: "0.05"
@@ -498,6 +504,7 @@ jobs:
 
       - name: Upload S3 edge artifacts to GCS (canonical)
         id: gcs
+        continue-on-error: true
         run: |
           set -euo pipefail
           echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"

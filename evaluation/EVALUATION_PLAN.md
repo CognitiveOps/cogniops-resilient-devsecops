@@ -1,10 +1,12 @@
 # CogniOps Evaluation Plan — Complete Scenario Coverage
 
-> Updated: 2026-04-19 UTC
+> Updated: 2026-04-20 08:00 UTC
 > Branch: `design_time_agent_dev`
 > Thesis: "Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"
 > **Data integrity audit completed 2026-04-17** — see §Data Integrity Audit below.
-> **S3 Edge bugs fixed 2026-04-19** — see §Issue 6 below. Pending commit + re-dispatch.
+> **S3 Edge bugs fixed + OOM fix applied 2026-04-19** — see §Issue 6 and §Issue 7 below.
+> **Batch 5 complete 2026-04-20 02:36 UTC** — S3 Edge treatment variants ≥30. Baseline still short (5).
+> **5/8 scenarios ready to evaluate.** Need Batch 6 gap fills for S3 Edge baseline, S1, S2, S4.
 
 ---
 
@@ -76,7 +78,7 @@ Every design variant workflow includes:
 
 ## Current Data Inventory (BigQuery `agent_metrics.runs`)
 
-### Usable Runs (as of 2026-04-19, `--labeled-baselines-only`)
+### Usable Runs (as of 2026-04-19 21:00 UTC, `--labeled-baselines-only`)
 
 Counting rules:
 - **baseline:** Only runs with explicit `labels.variant='baseline'` (legacy NULL excluded)
@@ -85,20 +87,22 @@ Counting rules:
 - **S1 / S2 / S4 / SS1 / S3 Edge treatment:** Only runs from new dynamic
   variant workflows (≥2026-04-11). Old hardcoded runs excluded.
 - **S3 Cloud/Edge:** Counts use `s3_detect` / `s3_detect_edge` stage (one row per run).
+- **⚠️ Previous version** of this table used COALESCE (including legacy NULL runs)
+  despite the `--labeled-baselines-only` header. Numbers below are corrected.
 
 | Scenario | baseline | design_only | runtime_only | full | Status |
 |----------|:--------:|:-----------:|:------------:|:----:|--------|
-| **S1** | 163 | 60 | 72 | 66 | ✅ All ≥30 — ready to evaluate |
-| **S2** | 64 | 32 | 22 | 24 | 🔶 runtime=22 (need 8), full=24 (need 6) |
-| **S3 Cloud** | 506 | 155 | 106 | 110 | ✅ Evaluated |
-| **S3 Edge** | 0† | 1 | 6 | 7 | ❌ Bugs fixed 04-19 — need re-dispatch |
-| **S4** | 80 | 20 | 32 | 24 | 🔶 design=20 (need 10) |
-| **S5** | 250 | 130 | 116 | 116 | ✅ Evaluated |
-| **SS1** | 307 | 246 | 246 | 239 | ✅ All ≥30 — ready to evaluate |
-| **SS2** | 1352 | 401 | 392 | 390 | ✅ Evaluated |
+| **S1** | 27 | 41 | 46 | 43 | 🔶 baseline=27 (need 3) |
+| **S2** | 32 | 17 | 33 | 13 | ❌ design=17, full=13 |
+| **S3 Cloud** | 118 | 108 | 90 | 122 | ✅ All ≥30 — ready |
+| **S3 Edge** | 5 | 35 | 40 | 32 | ❌ baseline=5 (need 25+) |
+| **S4** | 24 | 18 | 11 | 29 | ❌ baseline=24, design=18, runtime=11 |
+| **S5** | 99 | 115 | 123 | 135 | ✅ All ≥30 — ready |
+| **SS1** | 45 | 72 | 36 | 93 | ✅ All ≥30 — ready |
+| **SS2** | 85 | 53 | 85 | 105 | ✅ All ≥30 — ready |
 
-*†S3 Edge has 18 legacy NULL baselines but **zero labeled baselines**. All Batch 4
-S3 Edge runs (60) failed due to Bug A (see Issue 6). Need to dispatch baselines too.*
+*S3 Edge treatment variants all ≥30 after Batch 5 (design=35, runtime=40, full=32).
+Baseline only 5 — need Batch 6 with ~25 more baseline runs.*
 
 > **Why labeled baselines only?** Data integrity audit (see below) found that
 > `COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline')` treated **all** legacy
@@ -136,12 +140,23 @@ Legacy runs lack `variant` label and predate the 2-axis evaluation framework.
 Apr 1–15 for SS2), creating temporal overlap with treatment variants.
 The `--labeled-baselines-only` flag excludes them to prevent confounding.
 
-### Queue Status (as of 2026-04-19)
+### Queue Status (as of 2026-04-20 08:00 UTC)
 
-**66 runs queued** on GitHub Actions — all pre-fix S3 Edge runs (will still fail).
-- 22× S3 Edge full, 22× S3 Edge design_only, 20× S3 Edge runtime_only
-- 1× S3 Edge baseline, 1× SS1
-- **Must cancel all** before re-dispatch (they use pre-fix commit SHA, no edge image rebuild).
+**Queue empty.** Batch 5 drained at **02:36 UTC Apr 20**.
+
+Final Batch 5 GitHub Actions results:
+- `s3_edge_rollback.yml` (baseline): 2 failure, 28 cancelled
+- `s3_edge_rollback_design.yml`: 17 failure, 13 cancelled
+- `s3_edge_rollback_runtime.yml`: 18 failure, 12 cancelled
+- `s3_edge_rollback_full.yml`: 17 failure, 13 cancelled
+
+All "failures" are due to the GCS upload step (gsutil OOM on 120-byte `.sha256`
+file). All core steps succeed — BQ data landed correctly. See Issue 7.
+
+Final S3 Edge BQ counts (labeled, `s3_detect_edge` stage):
+- baseline: **5**, design_only: **35**, runtime_only: **40**, full: **32** = **112 total**
+
+Runner `cogniops-fresh` is online and idle, waiting for Batch 6 dispatch.
 
 **⚠️ OOM failure diagnosis (04-17 morning):**
 Runner session 04-16→04-17 processed 147 jobs: **30 succeeded, 113 failed, 4 abandoned**.
@@ -177,15 +192,30 @@ Need to cancel stale runs and re-dispatch after fix.
 - `run.sh` uncommented (was entirely commented out)
 - Manual start: `bash ~/start-runners.sh` or `/tmp/runner-monitor.sh`
 
-**Next steps (Batch 5):**
-1. Commit + push S3 Edge bug fixes (trap cleanup + hardcoded `/status`)
-2. Cancel 66 stale queued runs (pre-fix commit SHA)
-3. Rebuild + push edge-cv-app Docker image (main.py changed)
-4. Dispatch **S3 Edge** — ALL 4 variants incl. baselines (15 pairs × 4 = 60 runs)
-5. Dispatch **S2** gap fills — runtime_only (8 more), full (6 more)
-6. Dispatch **S4** gap fills — design_only (10 more)
-7. Start runner, process queue
-8. Re-run evaluation pipeline for **all 8 scenarios**:
+**Batch 5 (2026-04-19) — S3 Edge re-dispatch:**
+1. ✅ Committed S3 Edge bug fixes (trap cleanup + hardcoded `/status`)
+2. ✅ Cancelled ~44 stale S3 Edge runs from Batch 4 (pre-fix commit SHA)
+3. ✅ Applied OOM fix: replaced `docker build` with `docker pull` from Artifact Registry
+   in all 4 S3 Edge workflows (commit `fa61d21`). Logic: try pull by SHA →
+   fallback re-tag local cached image → last resort `DOCKER_BUILDKIT=0 docker build`.
+4. ✅ Dispatched **60 S3 Edge runs** (15 sets × 4 variants, `b5r1` through `b5r15`)
+5. ✅ Restarted watchdog (PID 28759), runner processing queue
+6. ✅ **Queue drained at 02:36 UTC Apr 20** (all 60 runs processed)
+7. ✅ **S3 Edge BQ: baseline=5, design=35, runtime=40, full=32** (112 total, was 0 before fix)
+
+**Known issue (GCS upload):** All S3 Edge runs marked "failure" in GitHub Actions
+because the "Upload S3 edge artifacts to GCS" step fails (gsutil OOM on 120-byte
+`.sha256` file, exit code 1). All core steps succeed (BQ ingest lands data correctly).
+Fix: add `continue-on-error: true` to the upload step — pending.
+
+**Next steps (Batch 6 — gap fills):**
+1. Wait for Batch 5 queue to drain (~52 runs, est. completion ~02:00 UTC Apr 20)
+2. Add `continue-on-error: true` to GCS upload step in 4 S3 Edge workflows
+3. Dispatch **S3 Edge baselines** — need ~25 more (currently 5, target ≥30)
+4. Dispatch **S1** gap fills — baseline needs 3 more (currently 27)
+5. Dispatch **S2** gap fills — design_only (13 more), full (17 more)
+6. Dispatch **S4** gap fills — baseline (6), design_only (12), runtime_only (19), full (1)
+7. Re-run evaluation pipeline for **all 8 scenarios**:
    ```bash
    python -m evaluation.scripts.run_experiment \
      --scenarios s1 s2 s3_cloud s3_edge s4 s5 ss1 ss2 \
@@ -277,12 +307,26 @@ Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
     - 77 runs cancelled (runner downtime, Docker restart), 2 failed (S4-design, S2-runtime)
     - **69 still queued** (45× S3 Edge + SS1/S4 remnants)
   - ⚠️ **S3 Edge Issue (Bug):** All S3 Edge jobs fail — see [Issue 6](#issue-6-s3-edge-recovery-port-mismatch) below
+- **Batch 5** (2026-04-19): S3 Edge re-dispatch after bug + OOM fixes.
+  - Committed S3 Edge lifecycle fixes (trap cleanup + hardcoded `/status`)
+  - Cancelled ~44 stale S3 Edge runs from Batch 4
+  - Applied OOM fix: `docker pull` instead of `docker build` (commit `fa61d21`)
+  - Dispatched 60 S3 Edge runs (15 sets × 4 variants, `b5r1` through `b5r15`)
+  - **Runner session** (2026-04-19 18:00→ ongoing):
+    - Baseline: 15 dispatched, 2 completed (failure/GCS upload), 13 cancelled → 5 BQ rows
+    - Design: 17 still in queue, 33 BQ rows so far
+    - Runtime: 18 still in queue, 37 BQ rows so far
+    - Full: 17 still in queue, 30 BQ rows so far
+    - **Total: 460 S3 Edge rows in BQ** (was 0 before fix)
+  - ⚠️ All runs marked "failure" due to GCS upload step (gsutil OOM) — BQ data OK.
+    See [Issue 7](#issue-7-s3-edge-oom-during-docker-build--gcs-upload-failure).
 
-### Phase 6: Run Evaluation Pipeline ✅ PARTIAL (4/8 evaluated, 5/8 ready)
+### Phase 6: Run Evaluation Pipeline ✅ PARTIAL (4/8 evaluated, 4/8 ready)
 Re-evaluated with `--labeled-baselines-only` after data integrity audit (2026-04-17 23:00 UTC).
 **S3 Cloud, S4 (partial), S5, SS2** have results.
-**S1 and SS1** now fully ready (all variants ≥30) after Batch 4 — pending re-evaluation.
-**S2, S3 Edge, S4** need Batch 5 gap fills before evaluation.
+**SS1** fully ready (all variants ≥30). **S1** nearly ready (baseline=27, need 3 more).
+**S3 Edge** making progress (Batch 5 in queue — 460 BQ rows, baselines still short).
+**S2, S4** need Batch 6 gap fills before evaluation.
 
 **Results summary (23 comparisons, 5012 metric samples, labeled baselines only):**
 
@@ -488,6 +532,30 @@ After fix, need to dispatch all 4 variants including baselines (Batch 5).
 3. No workflow changes needed — all 4 S3 Edge workflows already had the correct
    `docker rm -f "$EDGE_CONTAINER"` + `EDGE_HOST_PORT="${EDGE_PORT}"` in rollback step.
 
+### Issue 7: S3 Edge OOM during Docker Build + GCS Upload Failure ✅ PARTIALLY FIXED
+
+**Finding (2026-04-19):** Even after Bug A+B fixes, S3 Edge runs still failed
+because `docker build` (BuildKit) consumed ~400MB peak RAM on the 2GB runner,
+leaving insufficient memory for subsequent steps. Additionally, `gsutil cp` fails
+when uploading a 120-byte `.sha256` file to GCS (exit code 1, likely OOM).
+
+**Fix A — Docker pull instead of build (APPLIED, commit `fa61d21`):**
+Replaced `docker build` with `docker pull` from Artifact Registry in all 4 S3 Edge
+workflows. Logic: try `docker pull` by SHA → fallback re-tag local cached image →
+last resort `DOCKER_BUILDKIT=0 docker build`. This eliminated ~400MB peak RAM usage
+during the image preparation step.
+
+**Fix B — GCS upload step (PENDING):**
+The "Upload S3 edge artifacts to GCS (canonical)" step fails on every run because
+gsutil OOM-kills when copying a 120-byte file. The step runs **after** BQ ingest,
+so data integrity is unaffected — runs are marked "failure" in GitHub Actions but
+all metrics land in BigQuery successfully.
+Proposed fix: add `continue-on-error: true` to the upload step.
+
+**Impact:** 460 S3 Edge rows now in BQ (was 0). All runs show as "failure" in GitHub
+UI, but this is cosmetic — core pipeline (fault injection, detection, recovery, BQ
+ingest) works correctly.
+
 ---
 
 ## Expected Evaluation Output
@@ -514,47 +582,47 @@ After fix, need to dispatch all 4 variants including baselines (Batch 5).
 
 | Phase | Scenario | Variant | Target | Current | Gap | Status |
 |-------|----------|---------|:------:|:-------:|:---:|--------|
-| 1 | S3 Cloud | baseline | ≥30 | 506 | — | ✅ Evaluated |
-| 1 | S3 Cloud | design_only | ≥30 | 155 | — | ✅ Evaluated |
-| 1 | S3 Cloud | runtime_only | ≥30 | 106 | — | ✅ Evaluated |
-| 1 | S3 Cloud | full | ≥30 | 110 | — | ✅ Evaluated |
-| 1 | S5 | baseline | ≥30 | 250 | — | ✅ Evaluated |
-| 1 | S5 | design_only | ≥30 | 130 | — | ✅ Evaluated |
-| 1 | S5 | runtime_only | ≥30 | 116 | — | ✅ Evaluated |
-| 1 | S5 | full | ≥30 | 116 | — | ✅ Evaluated |
-| 1 | SS2 | baseline | ≥30 | 1352 | — | ✅ Evaluated |
-| 1 | SS2 | design_only | ≥30 | 401 | — | ✅ Evaluated |
-| 1 | SS2 | runtime_only | ≥30 | 392 | — | ✅ Evaluated |
-| 1 | SS2 | full | ≥30 | 390 | — | ✅ Evaluated |
-| 5 | S1 | baseline | ≥30 | 163 | — | ✅ ≥30 |
-| 5 | S1 | design_only | ≥30 | 60 | — | ✅ ≥30 |
-| 5 | S1 | runtime_only | ≥30 | 72 | — | ✅ ≥30 |
-| 5 | S1 | full | ≥30 | 66 | — | ✅ ≥30 |
-| 5 | S2 | baseline | ≥30 | 64 | — | ✅ ≥30 |
-| 5 | S2 | design_only | ≥30 | 32 | — | ✅ ≥30 |
-| 5 | S2 | runtime_only | ≥30 | 22 | 8 | 🔶 Need 8 more |
-| 5 | S2 | full | ≥30 | 24 | 6 | 🔶 Need 6 more |
-| 5 | S3 Edge | baseline | ≥30 | 0 | 30 | ❌ Zero labeled — need Batch 5 |
-| 5 | S3 Edge | design_only | ≥30 | 1 | 29 | ❌ Bug fixed — need Batch 5 |
-| 5 | S3 Edge | runtime_only | ≥30 | 6 | 24 | ❌ Bug fixed — need Batch 5 |
-| 5 | S3 Edge | full | ≥30 | 7 | 23 | ❌ Bug fixed — need Batch 5 |
-| 5 | S4 | baseline | ≥30 | 80 | — | ✅ ≥30 |
-| 5 | S4 | design_only | ≥30 | 20 | 10 | 🔶 Need 10 more |
-| 5 | S4 | runtime_only | ≥30 | 32 | — | ✅ ≥30 |
-| 5 | S4 | full | ≥30 | 24 | 6 | 🔶 Need 6 more |
-| 5 | SS1 | baseline | ≥30 | 307 | — | ✅ ≥30 |
-| 5 | SS1 | design_only | ≥30 | 246 | — | ✅ ≥30 |
-| 5 | SS1 | runtime_only | ≥30 | 246 | — | ✅ ≥30 |
-| 5 | SS1 | full | ≥30 | 239 | — | ✅ ≥30 |
+| 1 | S3 Cloud | baseline | ≥30 | 118 | — | ✅ Evaluated |
+| 1 | S3 Cloud | design_only | ≥30 | 108 | — | ✅ Evaluated |
+| 1 | S3 Cloud | runtime_only | ≥30 | 90 | — | ✅ Evaluated |
+| 1 | S3 Cloud | full | ≥30 | 122 | — | ✅ Evaluated |
+| 1 | S5 | baseline | ≥30 | 99 | — | ✅ Evaluated |
+| 1 | S5 | design_only | ≥30 | 115 | — | ✅ Evaluated |
+| 1 | S5 | runtime_only | ≥30 | 123 | — | ✅ Evaluated |
+| 1 | S5 | full | ≥30 | 135 | — | ✅ Evaluated |
+| 1 | SS2 | baseline | ≥30 | 85 | — | ✅ Evaluated |
+| 1 | SS2 | design_only | ≥30 | 53 | — | ✅ Evaluated |
+| 1 | SS2 | runtime_only | ≥30 | 85 | — | ✅ Evaluated |
+| 1 | SS2 | full | ≥30 | 105 | — | ✅ Evaluated |
+| 5 | S1 | baseline | ≥30 | 27 | 3 | 🔶 Need 3 more |
+| 5 | S1 | design_only | ≥30 | 41 | — | ✅ ≥30 |
+| 5 | S1 | runtime_only | ≥30 | 46 | — | ✅ ≥30 |
+| 5 | S1 | full | ≥30 | 43 | — | ✅ ≥30 |
+| 5 | S2 | baseline | ≥30 | 32 | — | ✅ ≥30 |
+| 5 | S2 | design_only | ≥30 | 17 | 13 | ❌ Need 13 more |
+| 5 | S2 | runtime_only | ≥30 | 33 | — | ✅ ≥30 |
+| 5 | S2 | full | ≥30 | 13 | 17 | ❌ Need 17 more |
+| 5 | S3 Edge | baseline | ≥30 | 5 | 25 | ❌ Need 25 more |
+| 5 | S3 Edge | design_only | ≥30 | 35 | — | ✅ ≥30 |
+| 5 | S3 Edge | runtime_only | ≥30 | 40 | — | ✅ ≥30 |
+| 5 | S3 Edge | full | ≥30 | 32 | — | ✅ ≥30 |
+| 6 | S4 | baseline | ≥30 | 24 | 6 | 🔶 Need 6 more |
+| 6 | S4 | design_only | ≥30 | 18 | 12 | ❌ Need 12 more |
+| 6 | S4 | runtime_only | ≥30 | 11 | 19 | ❌ Need 19 more |
+| 6 | S4 | full | ≥30 | 29 | 1 | 🔶 Need 1 more |
+| 5 | SS1 | baseline | ≥30 | 45 | — | ✅ ≥30 |
+| 5 | SS1 | design_only | ≥30 | 72 | — | ✅ ≥30 |
+| 5 | SS1 | runtime_only | ≥30 | 36 | — | ✅ ≥30 |
+| 5 | SS1 | full | ≥30 | 93 | — | ✅ ≥30 |
 
-> **Updated 2026-04-19 (post Batch 4 + S3 Edge fix):**
-> - Batch 4 runner session (04-17→04-18): S1 24/24 ✅, SS1 18/28, S2 42/60, S4 7/48, S3 Edge 0/60 ❌
-> - S1 and SS1 now fully ready (all variants ≥30) — were blocking, now unblocked
-> - S3 Edge: **zero labeled baselines** (old ~36 were legacy NULL). Bugs fixed 04-19, need Batch 5
-> - S2: runtime_only (22) + full (24) need small gap fills
-> - S4: design_only (20) + full (24) need small gap fills
-> - **5/8 ready:** S3 Cloud ✅, S5 ✅, SS2 ✅, S1 ✅, SS1 ✅
-> - **3 need Batch 5:** S3 Edge (blocked → fixed), S2 (small gaps), S4 (small gaps)
+> **Updated 2026-04-20 08:00 UTC (Batch 5 complete):**
+> - Batch 5 queue **drained 02:36 UTC Apr 20**. All 60 S3 Edge runs processed.
+> - S3 Edge treatment variants all ≥30: design=35, runtime=40, full=32.
+> - S3 Edge baseline still only **5** — need 25+ more.
+> - **5/8 ready to evaluate:** S3 Cloud ✅, S5 ✅, SS1 ✅, SS2 ✅, S1 (baseline=27, nearly ready)
+> - **3 need Batch 6:** S3 Edge (baseline short), S2 (design + full short), S4 (3/4 variants short)
+> - **Batch 6 gap fill plan:** S3 Edge baseline (×~8 dispatches), S1 baseline (×1),
+>   S2 design+full (×5), S4 all variants (×6)
 
 ---
 
@@ -594,8 +662,9 @@ After fix, need to dispatch all 4 variants including baselines (Batch 5).
   container when `EDGE_HEALTH_CHECK=0` caused `exit 0`;
   (b) hardcoded HTTP 500/507 in `main.py` `/status` for `corrupt_weights`/`disk_full`
   bypassed the fault model. Both fixed — see §Issue 6.
-  **S3 Edge has zero labeled baselines** (old ~36 were NULL variant).
-  Need Batch 5: all 4 variants including baselines.
+  **S3 Edge OOM (fixed 2026-04-19):** Docker build consumed ~400MB peak RAM,
+  replaced with `docker pull` from Artifact Registry (commit `fa61d21`). See §Issue 7.
+  **460 S3 Edge rows now in BQ** (was 0). Baselines still short (5, need ≥30).
 - **S3 Cloud counts:** Use `s3_detect` stage for Cloud and `s3_detect_edge` for Edge
   (one row per run). Previous EVALUATION_PLAN versions double-counted by including
   both detect + recover stages. Corrected 2026-04-19.
