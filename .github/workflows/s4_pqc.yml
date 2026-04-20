@@ -162,6 +162,7 @@ jobs:
             --replay-cutoff-sec 900
 
       - name: Upload S4 artifacts to GCS (canonical)
+        continue-on-error: true
         run: |
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s4/${RUN_ID}"

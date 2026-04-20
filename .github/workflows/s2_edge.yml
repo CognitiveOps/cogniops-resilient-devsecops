@@ -250,6 +250,7 @@ jobs:
 
       # 6️⃣ Upload artifacts to GCS (canonical)
       - name: Upload S2 artifacts to GCS (canonical)
+        continue-on-error: true
         run: |
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s2/${RUN_ID}"
