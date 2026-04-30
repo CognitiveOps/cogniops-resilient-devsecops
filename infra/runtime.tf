@@ -399,7 +399,7 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
     service_account = google_service_account.runtime_agent.email
 
     scaling {
-      min_instance_count = 0
+      min_instance_count = 1
       max_instance_count = 2
     }
 
@@ -448,7 +448,7 @@ resource "google_cloud_run_v2_service" "runtime_agent" {
       }
       env {
         name  = "COGNIOPS_MODEL"
-        value = "gemini-2.5-flash"
+        value = "gemini-2.0-flash"
       }
       env {
         name  = "GOOGLE_GENAI_USE_VERTEXAI"

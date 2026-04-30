@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
+from google.genai.types import GenerateContentConfig
 
 from agent.callbacks.guard_callback import guard_callback
 from agent.tools.execution_tools import (
@@ -26,7 +27,7 @@ from agent.tools.execution_tools import (
 from agent.tools.memory_tools import query_recent_decisions
 from agent.tools.perception_tool import perceive_anomaly
 
-COGNIOPS_MODEL = os.getenv("COGNIOPS_MODEL", "gemini-2.5-flash")
+COGNIOPS_MODEL = os.getenv("COGNIOPS_MODEL", "gemini-2.0-flash")
 
 _PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -63,6 +64,10 @@ cogniops_agent = LlmAgent(
     name="cogniops_planning",
     model=COGNIOPS_MODEL,
     instruction=_build_instruction(),
+    generate_content_config=GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=256,
+    ),
     tools=[
         perceive_anomaly,
         no_action,
