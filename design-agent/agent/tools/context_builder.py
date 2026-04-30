@@ -43,15 +43,27 @@ SCENARIO_METRIC_MAP: dict[str, list[dict[str, str]]] = {
     ],
     "s3": [
         {
+            "stage": "s3_detect",
+            "metric_key": "ttd_sample_sec",
+            "name": "MTTD_cloud",
+            "unit": "seconds",
+        },
+        {
+            "stage": "s3_recover",
+            "metric_key": "ttr_sample_sec",
+            "name": "MTTR_cloud",
+            "unit": "seconds",
+        },
+        {
             "stage": "s3_detect_edge",
             "metric_key": "ttd_sample_sec",
-            "name": "MTTD",
+            "name": "MTTD_edge",
             "unit": "seconds",
         },
         {
             "stage": "s3_recover_edge",
             "metric_key": "ttr_sample_sec",
-            "name": "MTTR",
+            "name": "MTTR_edge",
             "unit": "seconds",
         },
     ],
@@ -63,6 +75,21 @@ SCENARIO_METRIC_MAP: dict[str, list[dict[str, str]]] = {
             "unit": "milliseconds",
         },
     ],
+    "s5": [
+        {
+            "stage": "s5_final",
+            "metric_key": "al_sec",
+            "name": "AL",
+            "unit": "seconds",
+        },
+        {
+            "stage": "s5_final",
+            "metric_key": "acr",
+            "name": "ACR",
+            "unit": "ratio",
+        },
+    ],
+    "ss1": [],  # CFR/FDR are rate-based, not extracted from metrics JSON
     "ss2": [
         {
             "stage": "ss2_detect",
@@ -208,31 +235,40 @@ def _read_gcs_yaml(path: str) -> dict | None:
 
 def build_context(
     window_days: int = 0,
-    scenarios: list[str] | None = None,
-    variant_filter: str | None = None,
+    scenarios: str = "",
+    variant_filter: str = "",
 ) -> dict:
     """Build structured analysis context from BQ metrics and GCS config.
 
     Args:
         window_days: Override for the analysis lookback window (0 = use default).
-        scenarios: Optional list of scenario IDs to focus on.
-            If empty/None, all tracked scenarios are included.
+        scenarios: Comma-separated scenario IDs to focus on (e.g. "s5, s3, s2").
+            If empty, all tracked scenarios are included.
         variant_filter: Optional variant label to filter runs.
             Use 'baseline' for original runs, 'design_only', 'runtime_only',
             'full' for treatment runs, or 'none' for runs without a variant label.
-            If empty/None, all runs are included (no filter).
+            If empty, all runs are included (no filter).
 
     Returns:
         Serialized AnalysisContext dict ready for LLM consumption.
     """
     window = window_days if window_days > 0 else WINDOW_DAYS
-    target_scenarios = scenarios or list(SCENARIO_METRIC_MAP.keys())
+
+    # Parse scenarios — handle both comma-separated string and list
+    if isinstance(scenarios, list):
+        parsed = [s.strip().lower() for s in scenarios if s.strip()]
+    elif isinstance(scenarios, str) and scenarios.strip():
+        parsed = [s.strip().lower() for s in scenarios.split(",") if s.strip()]
+    else:
+        parsed = []
+    target_scenarios = parsed or list(SCENARIO_METRIC_MAP.keys())
+    logger.info("build_context called: scenarios=%s → target=%s", scenarios, target_scenarios)
 
     # Build variant SQL clause
     if variant_filter == "none":
         variant_clause = "AND JSON_VALUE(labels, '$.variant') IS NULL"
-    elif variant_filter:
-        variant_clause = f"AND JSON_VALUE(labels, '$.variant') = '{variant_filter}'"
+    elif variant_filter and variant_filter.strip():
+        variant_clause = f"AND JSON_VALUE(labels, '$.variant') = '{variant_filter.strip()}'"
     else:
         variant_clause = ""
 
@@ -319,6 +355,23 @@ def build_context(
             if isinstance(v, (int, float)):
                 thresholds[k] = float(v)
 
+    # ── 3b. Active design proposal params (from GCS) ──
+    active_params: dict[str, dict] = {}
+    for scen_key in ("s2", "s3", "s5", "ss2"):
+        proposal = _read_gcs_json(f"proposals/design/active/{scen_key}.json")
+        if proposal and isinstance(proposal, dict):
+            params = proposal.get("params", {})
+            if params:
+                active_params[scen_key.upper()] = params
+
+    # ── 3c. Causal graph context ──
+    causal_context = ""
+    try:
+        from agent.param_validator import get_causal_context
+        causal_context = get_causal_context()
+    except Exception:
+        logger.warning("Failed to load causal context", exc_info=True)
+
     # ── 4. Assemble context ──
     context = {
         "built_at": datetime.now(timezone.utc).isoformat(),
@@ -327,6 +380,8 @@ def build_context(
         "scenario_metrics": metric_summaries,
         "runtime_decisions": runtime_summary,
         "current_thresholds": thresholds,
+        "active_design_params": active_params,
+        "causal_graph": causal_context,
         "active_policies": [],
         "workflow_summaries": [],
     }

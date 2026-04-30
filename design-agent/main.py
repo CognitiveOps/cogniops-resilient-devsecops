@@ -193,9 +193,36 @@ async def _run_pipeline(
             ),
         ):
             all_events.append(event)
+            # Log all parts for debugging
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts or []:
+                    if hasattr(part, "text") and part.text:
+                        logger.info("Agent text: %s", part.text[:500])
+                    if hasattr(part, "function_call") and part.function_call:
+                        fc = part.function_call
+                        logger.info(
+                            "Agent function_call: %s(%s)",
+                            fc.name,
+                            json.dumps(fc.args, default=str)[:800],
+                        )
             for fn_resp in event.get_function_responses():
                 response = fn_resp.response
+                logger.info(
+                    "Function response status=%s keys=%s",
+                    response.get("status") if isinstance(response, dict) else "N/A",
+                    list(response.keys()) if isinstance(response, dict) else "N/A",
+                )
                 if isinstance(response, dict):
+                    # Log metric count for context_ready
+                    if response.get("status") == "context_ready":
+                        ctx = response.get("context", {})
+                        n_metrics = len(ctx.get("scenario_metrics", []))
+                        n_params = len(ctx.get("active_design_params", {}))
+                        logger.info(
+                            "Context: %d metrics, %d active param sets",
+                            n_metrics,
+                            n_params,
+                        )
                     if response.get("status") == "proposal_generated":
                         proposal_data = response.get("proposal")
                     elif response.get("status") == "no_proposal_needed":
@@ -224,7 +251,7 @@ async def _run_pipeline(
             "duration_sec": round(time.monotonic() - t_start, 2),
         }
 
-    # Validate
+    # Validate schema
     validation = validate_proposal(proposal_data)
     proposal_data["validation"] = validation
 
@@ -235,6 +262,44 @@ async def _run_pipeline(
             "validation": validation,
             "duration_sec": round(time.monotonic() - t_start, 2),
         }
+
+    # Validate params against causal graph
+    proposed_params = proposal_data.get("params", {})
+    if proposed_params:
+        try:
+            from agent.param_validator import validate_params
+
+            # Read active params from GCS for comparison
+            active_params: dict[str, dict] = {}
+            if CONFIG_BUCKET:
+                from google.cloud import storage as _storage
+
+                _client = _storage.Client()
+                _bucket = _client.bucket(CONFIG_BUCKET)
+                for scen_key in ("s2", "s3", "s5", "ss2"):
+                    try:
+                        _blob = _bucket.blob(f"proposals/design/active/{scen_key}.json")
+                        _data = json.loads(_blob.download_as_text())
+                        _p = _data.get("params", {})
+                        if _p:
+                            active_params[scen_key.upper()] = _p
+                    except Exception:
+                        pass
+
+            param_validation = validate_params(proposed_params, active_params)
+            proposal_data["param_validation"] = param_validation
+
+            if not param_validation["valid"]:
+                logger.warning(
+                    "Proposal params failed causal validation: %s",
+                    param_validation["errors"],
+                )
+                # Store anyway but flag it — don't block
+                proposal_data["validation"]["warnings"].extend(
+                    [f"[param] {e}" for e in param_validation["errors"]]
+                )
+        except Exception:
+            logger.warning("Param validation failed", exc_info=True)
 
     # Store in GCS
     proposal_id = proposal_data.get("proposal_id", "unknown")

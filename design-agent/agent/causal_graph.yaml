@@ -1,0 +1,162 @@
+# CogniOps Design Agent — Causal Parameter-Metric Graph
+#
+# Encodes HOW each tunable parameter affects each metric.
+# Used by the context builder to inject causal reasoning into the LLM context,
+# and by the constraint validator to reject nonsensical proposals.
+#
+# Key concepts:
+#   direction: LOWER_IS_BETTER | HIGHER_IS_BETTER — for the METRIC
+#   param_direction: LOWER_IS_BETTER | HIGHER_IS_BETTER — for the PARAM
+#     (i.e. should the param go UP or DOWN to improve the metric?)
+#   affects_variants: which evaluation variants this param actually influences
+#   max_expected_impact_pct: realistic upper bound on improvement from this param alone
+#   bottleneck_note: explains when this param is NOT the limiting factor
+
+parameters:
+  S3_DETECT_POLL_SEC:
+    scenario: S3
+    description: "Detection polling interval — how often the system checks for faults"
+    baseline_value: 5
+    current_seed: 1
+    bounds: [0.5, 10]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: MTTD_cloud
+        mechanism: "Faster polling detects faults sooner — cuts detection time by up to one poll interval"
+        max_expected_impact_pct: 15
+      - metric: MTTD_edge
+        mechanism: "Same mechanism on edge — but edge detection is already ~0.2s (near-instant)"
+        max_expected_impact_pct: 5
+        bottleneck_note: "Edge MTTD is already ~0.2s; further reduction yields negligible real improvement"
+    affects_variants: [design_only, full]
+
+  S3_RECOVER_POLL_SEC:
+    scenario: S3
+    description: "Recovery polling interval — how often the system confirms health after rollback"
+    baseline_value: 5
+    current_seed: 1
+    bounds: [0.5, 10]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: MTTR_cloud
+        mechanism: "Faster health confirmation after rollback shortens recovery tail"
+        max_expected_impact_pct: 15
+      - metric: MTTR_edge
+        mechanism: "Same on edge — but /decide latency (~12s) dominates MTTR in runtime_only/full"
+        max_expected_impact_pct: 5
+        bottleneck_note: >
+          Edge MTTR baseline ~8s. In runtime_only/full, /decide adds ~12s (network + LLM inference).
+          Recovery poll is ~3s of the total. Reducing poll from 1→0.5 saves ~0.5s max = ~3% of runtime_only MTTR.
+          The param is NOT the bottleneck in runtime_only/full variants.
+    affects_variants: [design_only, full]
+
+  S5_APPROVAL_DELAY_SEC:
+    scenario: S5
+    description: "Simulated HITL approval delay — time a human takes to review an anomaly"
+    baseline_value: 10
+    current_seed: 5
+    bounds: [1, 30]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: AL
+        mechanism: >
+          In design_only: directly reduces AL (approval delay is the dominant component).
+          In runtime_only/full: /decide call adds ~12s BEFORE the approval step.
+          The approval delay is additive — reducing it helps, but /decide overhead remains.
+        max_expected_impact_pct: 40
+        bottleneck_note: >
+          design_only: delay IS the bottleneck (baseline AL ~10s ≈ approval delay).
+          runtime_only: /decide adds ~12s, so total AL ≈ 12 + delay. Reducing delay
+          from 5→3 saves 2s out of ~17s = ~12%, not 40%.
+    affects_variants: [design_only, full]
+    note: "In runtime_only, this param has NO effect — runtime gate uses /decide, not approval delay"
+
+  S2_ACTIVATION_TIMEOUT_SEC:
+    scenario: S2
+    description: "Maximum wait time for edge device to activate after OTA deployment"
+    baseline_value: 300
+    current_seed: 120
+    bounds: [30, 300]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: TDL
+        mechanism: >
+          Lower timeout = faster failure detection when activation stalls.
+          Does NOT speed up successful activations (those complete in ~30-40s regardless).
+          Only affects the tail of the distribution (stalled activations).
+        max_expected_impact_pct: 10
+        bottleneck_note: >
+          Successful activations take ~37s mean. Timeout only matters for failures.
+          Current seed 120s already catches most stalls. Going below ~60s risks
+          false timeouts on legitimate slow activations.
+    affects_variants: [design_only, full]
+
+  SS2_AUTO_APPROVE_DELAY_SEC:
+    scenario: SS2
+    description: "Auto-approve delay for low-risk threat events"
+    baseline_value: 15
+    current_seed: 8
+    bounds: [1, 30]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: AL
+        mechanism: "Directly reduces action latency for auto-approved low-risk events"
+        max_expected_impact_pct: 40
+    affects_variants: [design_only, full]
+
+  SS2_DETECT_POLL_SEC:
+    scenario: SS2
+    description: "Detection polling interval for adaptive threat detection"
+    baseline_value: 2
+    current_seed: 1
+    bounds: [0.5, 5]
+    param_direction: LOWER_IS_BETTER
+    affects:
+      - metric: MTTD
+        mechanism: "Faster polling detects threats sooner"
+        max_expected_impact_pct: 15
+    affects_variants: [design_only, full]
+
+  S2_PLATFORM:
+    scenario: S2
+    description: "Docker platform for edge OTA image build"
+    baseline_value: "linux/amd64"
+    current_seed: "linux/amd64"
+    type: enum
+    allowed_values: ["linux/amd64", "linux/arm64"]
+    affects:
+      - metric: TDL
+        mechanism: "Native platform avoids QEMU emulation overhead during build"
+        max_expected_impact_pct: 5
+    affects_variants: [design_only, full]
+    note: "Runner is x86_64 — linux/amd64 is already optimal. Changing to arm64 would ADD overhead."
+
+# Architectural overhead — NOT tunable by params
+architectural_overhead:
+  runtime_decide_latency:
+    description: "Network call to /decide endpoint (Cloud Run) + Gemini LLM inference"
+    typical_latency_sec: 12
+    affects:
+      - metric: MTTR_edge
+        variant: runtime_only
+        overhead_pct: "+146%"
+        explanation: "12s on 8s baseline = +150%. Architectural — no param can reduce this."
+      - metric: MTTR_edge
+        variant: full
+        overhead_pct: "+150%"
+        explanation: "Same /decide call + design params. Design params save ~0.5s max."
+      - metric: AL
+        variant: runtime_only
+        overhead_pct: "+195%"
+        explanation: "12s on ~6s (delay=5s + overhead). Architectural."
+      - metric: AL
+        variant: full
+        overhead_pct: "+217%"
+        explanation: "12s + reduced delay. Net still much higher than baseline."
+    note: >
+      This is the EXPECTED COST of real-time AI risk assessment.
+      Every system that evaluates risk BEFORE allowing an action pays this cost.
+      It is a security-latency tradeoff, not a bug.
+      Reducing this requires: (a) faster LLM model, (b) edge-local inference,
+      (c) caching/pre-computation of decisions, (d) async decision pipeline.
+      All are out of scope for parameter tuning.

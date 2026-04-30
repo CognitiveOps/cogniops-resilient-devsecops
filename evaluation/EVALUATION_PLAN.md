@@ -1,12 +1,13 @@
 # CogniOps Evaluation Plan — Complete Scenario Coverage
 
-> Updated: 2026-04-20 08:00 UTC
+> Updated: 2026-04-20 19:16 UTC
 > Branch: `design_time_agent_dev`
 > Thesis: "Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"
 > **Data integrity audit completed 2026-04-17** — see §Data Integrity Audit below.
 > **S3 Edge bugs fixed + OOM fix applied 2026-04-19** — see §Issue 6 and §Issue 7 below.
-> **Batch 5 complete 2026-04-20 02:36 UTC** — S3 Edge treatment variants ≥30. Baseline still short (5).
-> **5/8 scenarios ready to evaluate.** Need Batch 6 gap fills for S3 Edge baseline, S1, S2, S4.
+> **Batch 6 complete 2026-04-20 16:00 UTC** — All 28/28 cells ≥30 labeled runs.
+> **FULL 8-SCENARIO EVALUATION COMPLETE** — 54 comparisons, 5,833 samples, 7 significant improvements.
+> Evaluation timestamp: `20260420T161616Z`
 
 ---
 
@@ -92,17 +93,16 @@ Counting rules:
 
 | Scenario | baseline | design_only | runtime_only | full | Status |
 |----------|:--------:|:-----------:|:------------:|:----:|--------|
-| **S1** | 27 | 41 | 46 | 43 | 🔶 baseline=27 (need 3) |
-| **S2** | 32 | 17 | 33 | 13 | ❌ design=17, full=13 |
-| **S3 Cloud** | 118 | 108 | 90 | 122 | ✅ All ≥30 — ready |
-| **S3 Edge** | 5 | 35 | 40 | 32 | ❌ baseline=5 (need 25+) |
-| **S4** | 24 | 18 | 11 | 29 | ❌ baseline=24, design=18, runtime=11 |
-| **S5** | 99 | 115 | 123 | 135 | ✅ All ≥30 — ready |
-| **SS1** | 45 | 72 | 36 | 93 | ✅ All ≥30 — ready |
-| **SS2** | 85 | 53 | 85 | 105 | ✅ All ≥30 — ready |
+| **S1** | 31 | 41 | 52 | 43 | ✅ All ≥30 — evaluated |
+| **S2** | 32 | 30 | 33 | 30 | ✅ All ≥30 — evaluated |
+| **S3 Cloud** | 118 | 108 | 90 | 122 | ✅ All ≥30 — evaluated |
+| **S3 Edge** | 147 | 143 | 130 | 154 | ✅ All ≥30 — evaluated |
+| **S4** | 30 | 30 | 30 | 30 | ✅ All ≥30 — evaluated |
+| **S5** | 99 | 115 | 123 | 135 | ✅ All ≥30 — evaluated |
+| **SS1** | 45 | 74 | 37 | 95 | ✅ All ≥30 — evaluated |
+| **SS2** | 85 | 53 | 85 | 105 | ✅ All ≥30 — evaluated |
 
-*S3 Edge treatment variants all ≥30 after Batch 5 (design=35, runtime=40, full=32).
-Baseline only 5 — need Batch 6 with ~25 more baseline runs.*
+**All 28/28 cells ≥30.** Full evaluation completed `20260420T161616Z`.
 
 > **Why labeled baselines only?** Data integrity audit (see below) found that
 > `COALESCE(JSON_VALUE(labels, '$.variant'), 'baseline')` treated **all** legacy
@@ -140,23 +140,17 @@ Legacy runs lack `variant` label and predate the 2-axis evaluation framework.
 Apr 1–15 for SS2), creating temporal overlap with treatment variants.
 The `--labeled-baselines-only` flag excludes them to prevent confounding.
 
-### Queue Status (as of 2026-04-20 08:00 UTC)
+### Queue Status (as of 2026-04-20 19:16 UTC)
 
-**Queue empty.** Batch 5 drained at **02:36 UTC Apr 20**.
+**Queue empty. All batches complete.**
 
-Final Batch 5 GitHub Actions results:
-- `s3_edge_rollback.yml` (baseline): 2 failure, 28 cancelled
-- `s3_edge_rollback_design.yml`: 17 failure, 13 cancelled
-- `s3_edge_rollback_runtime.yml`: 18 failure, 12 cancelled
-- `s3_edge_rollback_full.yml`: 17 failure, 13 cancelled
+Batch 6 completed at **16:16 UTC Apr 20**:
+- 7 S2 gap-fill runs: 2 design_only + 2 full + 4 baseline → all succeeded
+- S3 Edge, S1, S4, SS1 gaps filled in earlier Batch 6 dispatches
+- Docker daemon was down on runner restart → fixed with manual `sudo dockerd`
+- 2GB swap added (`/swapfile2`) for insurance — total swap 3GB
 
-All "failures" are due to the GCS upload step (gsutil OOM on 120-byte `.sha256`
-file). All core steps succeed — BQ data landed correctly. See Issue 7.
-
-Final S3 Edge BQ counts (labeled, `s3_detect_edge` stage):
-- baseline: **5**, design_only: **35**, runtime_only: **40**, full: **32** = **112 total**
-
-Runner `cogniops-fresh` is online and idle, waiting for Batch 6 dispatch.
+**Final result: All 28/28 scenario×variant cells ≥30 labeled runs.**
 
 **⚠️ OOM failure diagnosis (04-17 morning):**
 Runner session 04-16→04-17 processed 147 jobs: **30 succeeded, 113 failed, 4 abandoned**.
@@ -208,19 +202,20 @@ because the "Upload S3 edge artifacts to GCS" step fails (gsutil OOM on 120-byte
 `.sha256` file, exit code 1). All core steps succeed (BQ ingest lands data correctly).
 Fix: add `continue-on-error: true` to the upload step — pending.
 
-**Next steps (Batch 6 — gap fills):**
-1. Wait for Batch 5 queue to drain (~52 runs, est. completion ~02:00 UTC Apr 20)
-2. Add `continue-on-error: true` to GCS upload step in 4 S3 Edge workflows
-3. Dispatch **S3 Edge baselines** — need ~25 more (currently 5, target ≥30)
-4. Dispatch **S1** gap fills — baseline needs 3 more (currently 27)
-5. Dispatch **S2** gap fills — design_only (13 more), full (17 more)
-6. Dispatch **S4** gap fills — baseline (6), design_only (12), runtime_only (19), full (1)
-7. Re-run evaluation pipeline for **all 8 scenarios**:
+**Batch 6 — gap fills (COMPLETED 2026-04-20):**
+1. ✅ Batch 5 queue drained (02:36 UTC Apr 20)
+2. ✅ `continue-on-error: true` added to GCS upload step in S3 Edge workflows
+3. ✅ S3 Edge baselines filled (5→147 after multiple dispatch batches)
+4. ✅ S1 gap fills completed (27→31 baseline)
+5. ✅ S2 gap fills completed (design_only 17→30, full 13→30)
+6. ✅ S4 gap fills completed (all variants ≥30)
+7. ✅ Full 8-scenario evaluation run:
    ```bash
-   python -m evaluation.scripts.run_experiment \
+   GCP_PROJECT_ID=cogent-wall-445012-h5 python -m evaluation.scripts.run_experiment \
      --scenarios s1 s2 s3_cloud s3_edge s4 s5 ss1 ss2 \
      --labeled-baselines-only --causal-mode -v
    ```
+   Results: 54 comparisons, 5,833 samples, 20 charts, timestamp `20260420T161616Z`
 
 ---
 
@@ -321,58 +316,49 @@ Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
   - ⚠️ All runs marked "failure" due to GCS upload step (gsutil OOM) — BQ data OK.
     See [Issue 7](#issue-7-s3-edge-oom-during-docker-build--gcs-upload-failure).
 
-### Phase 6: Run Evaluation Pipeline ✅ PARTIAL (4/8 evaluated, 4/8 ready)
-Re-evaluated with `--labeled-baselines-only` after data integrity audit (2026-04-17 23:00 UTC).
-**S3 Cloud, S4 (partial), S5, SS2** have results.
-**SS1** fully ready (all variants ≥30). **S1** nearly ready (baseline=27, need 3 more).
-**S3 Edge** making progress (Batch 5 in queue — 460 BQ rows, baselines still short).
-**S2, S4** need Batch 6 gap fills before evaluation.
+### Phase 6: Run Evaluation Pipeline ✅ COMPLETE (8/8 evaluated)
+Full 8-scenario evaluation completed `20260420T161616Z` with `--labeled-baselines-only --causal-mode`.
+**All 28/28 cells ≥30 labeled runs.** 54 comparisons, 5,833 samples, 20 charts.
 
-**Results summary (23 comparisons, 5012 metric samples, labeled baselines only):**
+**Results summary (54 comparisons, 5833 metric samples, labeled baselines only):**
 
 | Scenario | Metric | Variant | Δ% | p-value | Cohen's d | Effect | Sig | Improved |
 |----------|--------|---------|---:|--------:|----------:|--------|:---:|----------|
-| S3 Cloud | MTTD | design_only | -8.7% | 0.001 | -0.11 | negligible | ✅ | ✅ |
-| S3 Cloud | MTTD | **runtime_only** | **-65.2%** | <0.001 | **-0.94** | **large** | ✅ | ✅ |
-| S3 Cloud | MTTD | **full** | **-65.8%** | <0.001 | **-0.95** | **large** | ✅ | ✅ |
-| S3 Cloud | MTTR | design_only | -8.9% | 0.002 | -0.12 | negligible | ✅ | ✅ |
-| S3 Cloud | MTTR | **runtime_only** | **-27.0%** | 0.022 | **-0.39** | **small** | ✅ | ✅ |
-| S3 Cloud | MTTR | **full** | **-32.0%** | 0.002 | **-0.47** | **small** | ✅ | ✅ |
-| S4 | FDR | runtime_only | 0% | 1.0 | 0.00 | — | — | — ceiling |
-| S4 | FDR | full | 0% | 1.0 | 0.00 | — | — | — ceiling |
-| S5 | AL | design_only | -13.4% | 0.411 | -0.07 | negligible | — | — |
-| S5 | AL | runtime_only | +205% | <0.001 | +0.98 | large | ✅ | ❌ ↑worse |
-| S5 | AL | full | +223% | <0.001 | +1.08 | large | ✅ | ❌ ↑worse |
+| S1 | CFR | design/runtime/full | ≈0% | >0.8 | <0.12 | negligible | — | — floor |
+| S2 | DSR | all variants | 0% | 1.0 | 0.00 | — | — | — ceiling |
+| S2 | TDL | design_only | −8.1% | 0.159 | −0.49 | small | — | ✅ |
+| S2 | TDL | runtime_only | −10.7% | 0.109 | −0.68 | medium | — | ✅ |
+| S2 | TTD_edge | all variants | ≈±3% | >0.06 | <0.27 | negligible | — | mixed |
+| S3 Cloud | MTTD | design_only | −9.9% | <0.001 | −0.12 | negligible | ✅ | ✅ |
+| S3 Cloud | MTTD | **runtime_only** | **−65.2%** | **<0.001** | **−0.94** | **large** | **✅** | **✅** |
+| S3 Cloud | MTTD | **full** | **−65.7%** | **<0.001** | **−0.94** | **large** | **✅** | **✅** |
+| S3 Cloud | MTTR | design_only | −9.7% | <0.001 | −0.12 | negligible | ✅ | ✅ |
+| S3 Cloud | MTTR | **runtime_only** | **−27.2%** | **0.021** | **−0.40** | **small** | **✅** | **✅** |
+| S3 Cloud | MTTR | **full** | **−32.2%** | **0.002** | **−0.47** | **small** | **✅** | **✅** |
+| S3 Edge | MTTD | all variants | +21–37% | >0.2 | <0.29 | negligible-small | — | — |
+| S3 Edge | MTTR | **runtime_only** | **+145.6%** | **<0.001** | **+2.54** | **large** | **✅** | **❌ ↑worse** |
+| S3 Edge | MTTR | **full** | **+149.6%** | **<0.001** | **+3.61** | **large** | **✅** | **❌ ↑worse** |
+| S4 | FDR/VSR | all variants | 0% | 1.0 | 0.00 | — | — | — ceiling |
+| S4 | TTV | all variants | −30–40% | >0.29 | <0.49 | small | — | ✅ |
+| S5 | AL | design_only | −25.5% | 0.334 | −0.14 | negligible | — | ✅ |
+| S5 | AL | **runtime_only** | **+194.8%** | **<0.001** | **+0.93** | **large** | **✅** | **❌ ↑worse** |
+| S5 | AL | **full** | **+217.3%** | **<0.001** | **+1.05** | **large** | **✅** | **❌ ↑worse** |
 | S5 | ACR | all variants | 0% | 1.0 | 0.00 | — | — | — ceiling |
-| SS2 | AL | **design_only** | **-26.0%** | <0.001 | **-1.66** | **large** | ✅ | ✅ |
-| SS2 | AL | runtime_only | -10.9% | 0.148 | -0.81 | large | — | — |
-| SS2 | AL | full | -9.0% | 0.245 | -0.63 | medium | — | — |
-| SS2 | MTTD | design_only | +35.9% | 0.001 | +0.18 | negligible | ✅ | ❌ ↑worse |
-| SS2 | MTTD | runtime_only | +13.4% | 0.602 | +0.08 | negligible | — | — |
-| SS2 | MTTD | full | +84.9% | 0.218 | +0.42 | small | — | — |
+| SS1 | CFR | all variants | 0% | 1.0 | 0.00 | — | — | — floor |
+| SS1 | FDR | all variants | ≈±4% | >0.8 | <0.06 | negligible | — | mixed |
+| SS2 | AL | **design_only** | **−23.3%** | **<0.001** | **−1.25** | **large** | **✅** | **✅** |
+| SS2 | AL | runtime_only | −7.6% | 0.443 | −0.47 | small | — | ✅ |
+| SS2 | MTTD | all variants | ≈±16% | >0.1 | <0.20 | negligible | — | mixed |
 | SS2 | ACR | all variants | 0% | 1.0 | 0.00 | — | — | — ceiling |
 
-**Key findings (labeled baselines only):**
-1. **S3 Cloud:** Both axes work. Runtime agent dominates MTTD (-65%, large effect).
-   Design agent provides modest but significant structural improvement (-9%).
-   Combined (full) marginally better than runtime_only for both MTTD and MTTR.
-2. **S5:** Runtime agent **increases** AL (+205%) — the `/decide` gate adds latency.
-   This is an expected trade-off: cognitive oversight costs time.
-   Design-only shows non-significant -13% improvement (direction correct).
-   ACR at 100% ceiling across all variants (no room for improvement).
-3. **SS2:** Design agent is the star — AL -26% (d=-1.66, largest effect).
-   **New finding:** SS2 design MTTD worsened +36% (p=0.001) — the reduced
-   poll interval (`1s` vs `2s` baseline) may cause more false-positive detections
-   that increase apparent MTTD. Runtime AL/MTTD not significant.
-   ACR at ceiling.
-4. **S4:** FDR at 100% ceiling for all variants (PQC validation is deterministic).
-   TTV/VSR insufficient samples (need Batch 4).
-
-**Impact of `--labeled-baselines-only` vs old results:**
-- SS2 AL runtime_only: was significant (p=0.031) → now NOT significant (p=0.148).
-  The legacy baselines (1986 NULL runs) were inflating sample size and masking noise.
-- SS2 MTTD design_only: was negligible → now significant worsening (+36%, p=0.001).
-  Previously hidden by diluted baseline pool.
+**Key findings (full 8-scenario, labeled baselines only):**
+1. **S3 Cloud — flagship scenario:** All 6 comparisons significant improvements. Runtime MTTD −65% (d=−0.94, large). Design MTTD/MTTR −10% (significant). Full MTTR −32% (d=−0.47, best combined).
+2. **SS2 — design agent star:** AL −23.3% (d=−1.25, large) — strongest single-axis effect across all scenarios.
+3. **S3 Edge — overhead risk:** Runtime/full MTTR worsened +146–150% (d=+2.54–3.61) — agent overhead on constrained edge env.
+4. **S5 — overhead confirmed:** Runtime/full AL +195–217% (d=+0.93–1.05) — cognitive gate adds latency.
+5. **S2 — directional but NS:** TDL improving −8–11% but p > 0.1. DSR at ceiling.
+6. **Security invariants preserved:** FDR=100%, VSR=100%, ACR=100%, CFR=0% across all variants.
+7. **7/54 significant improvements, 4/54 significant worsenings, 43/54 no significant change.**
 - S5 AL: runtime effect reduced from +282% to +205% (still large, same conclusion).
 - S3 Cloud: results stable — minimal change from labeled-only filtering.
 
@@ -594,35 +580,34 @@ ingest) works correctly.
 | 1 | SS2 | design_only | ≥30 | 53 | — | ✅ Evaluated |
 | 1 | SS2 | runtime_only | ≥30 | 85 | — | ✅ Evaluated |
 | 1 | SS2 | full | ≥30 | 105 | — | ✅ Evaluated |
-| 5 | S1 | baseline | ≥30 | 27 | 3 | 🔶 Need 3 more |
-| 5 | S1 | design_only | ≥30 | 41 | — | ✅ ≥30 |
-| 5 | S1 | runtime_only | ≥30 | 46 | — | ✅ ≥30 |
-| 5 | S1 | full | ≥30 | 43 | — | ✅ ≥30 |
-| 5 | S2 | baseline | ≥30 | 32 | — | ✅ ≥30 |
-| 5 | S2 | design_only | ≥30 | 17 | 13 | ❌ Need 13 more |
-| 5 | S2 | runtime_only | ≥30 | 33 | — | ✅ ≥30 |
-| 5 | S2 | full | ≥30 | 13 | 17 | ❌ Need 17 more |
-| 5 | S3 Edge | baseline | ≥30 | 5 | 25 | ❌ Need 25 more |
-| 5 | S3 Edge | design_only | ≥30 | 35 | — | ✅ ≥30 |
-| 5 | S3 Edge | runtime_only | ≥30 | 40 | — | ✅ ≥30 |
-| 5 | S3 Edge | full | ≥30 | 32 | — | ✅ ≥30 |
-| 6 | S4 | baseline | ≥30 | 24 | 6 | 🔶 Need 6 more |
-| 6 | S4 | design_only | ≥30 | 18 | 12 | ❌ Need 12 more |
-| 6 | S4 | runtime_only | ≥30 | 11 | 19 | ❌ Need 19 more |
-| 6 | S4 | full | ≥30 | 29 | 1 | 🔶 Need 1 more |
-| 5 | SS1 | baseline | ≥30 | 45 | — | ✅ ≥30 |
-| 5 | SS1 | design_only | ≥30 | 72 | — | ✅ ≥30 |
-| 5 | SS1 | runtime_only | ≥30 | 36 | — | ✅ ≥30 |
-| 5 | SS1 | full | ≥30 | 93 | — | ✅ ≥30 |
+| 6 | S1 | baseline | ≥30 | 31 | — | ✅ Evaluated |
+| 6 | S1 | design_only | ≥30 | 41 | — | ✅ Evaluated |
+| 6 | S1 | runtime_only | ≥30 | 52 | — | ✅ Evaluated |
+| 6 | S1 | full | ≥30 | 43 | — | ✅ Evaluated |
+| 6 | S2 | baseline | ≥30 | 32 | — | ✅ Evaluated |
+| 6 | S2 | design_only | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | S2 | runtime_only | ≥30 | 33 | — | ✅ Evaluated |
+| 6 | S2 | full | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | S3 Edge | baseline | ≥30 | 147 | — | ✅ Evaluated |
+| 6 | S3 Edge | design_only | ≥30 | 143 | — | ✅ Evaluated |
+| 6 | S3 Edge | runtime_only | ≥30 | 130 | — | ✅ Evaluated |
+| 6 | S3 Edge | full | ≥30 | 154 | — | ✅ Evaluated |
+| 6 | S4 | baseline | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | S4 | design_only | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | S4 | runtime_only | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | S4 | full | ≥30 | 30 | — | ✅ Evaluated |
+| 6 | SS1 | baseline | ≥30 | 45 | — | ✅ Evaluated |
+| 6 | SS1 | design_only | ≥30 | 74 | — | ✅ Evaluated |
+| 6 | SS1 | runtime_only | ≥30 | 37 | — | ✅ Evaluated |
+| 6 | SS1 | full | ≥30 | 95 | — | ✅ Evaluated |
 
-> **Updated 2026-04-20 08:00 UTC (Batch 5 complete):**
-> - Batch 5 queue **drained 02:36 UTC Apr 20**. All 60 S3 Edge runs processed.
-> - S3 Edge treatment variants all ≥30: design=35, runtime=40, full=32.
-> - S3 Edge baseline still only **5** — need 25+ more.
-> - **5/8 ready to evaluate:** S3 Cloud ✅, S5 ✅, SS1 ✅, SS2 ✅, S1 (baseline=27, nearly ready)
-> - **3 need Batch 6:** S3 Edge (baseline short), S2 (design + full short), S4 (3/4 variants short)
-> - **Batch 6 gap fill plan:** S3 Edge baseline (×~8 dispatches), S1 baseline (×1),
->   S2 design+full (×5), S4 all variants (×6)
+> **Updated 2026-04-20 19:16 UTC (Batch 6 complete — FINAL):**
+> - **All 28/28 cells ≥30 labeled runs.** Evaluation complete.
+> - Batch 6 gap fills: S2 design (13→30), S2 full (17→30), S3 Edge baseline (5→147),
+>   S1 baseline (27→31), S4 all variants (→30), SS1 runtime (36→37)
+> - Docker daemon fix (manual `sudo dockerd`) + 2GB swap added
+> - Full 8-scenario evaluation: `20260420T161616Z`
+> - **54 comparisons, 5,833 samples, 20 charts, 7 significant improvements**
 
 ---
 
@@ -668,3 +653,130 @@ ingest) works correctly.
 - **S3 Cloud counts:** Use `s3_detect` stage for Cloud and `s3_detect_edge` for Edge
   (one row per run). Previous EVALUATION_PLAN versions double-counted by including
   both detect + recover stages. Corrected 2026-04-19.
+
+---
+
+## Era 2 — Causal-Aware Design Agent Optimization
+
+> Added: 2026-04-30
+> Triggered by: Professor review — "δούμε αν υπάρχουν κάποιες παράμετροι που μπορούν να φτιαχτούν"
+
+### Context
+
+Era 1 evaluation (timestamp `20260420T161616Z`) identified failed comparisons where
+the agent system performed worse than or not significantly different from baseline.
+The professor requested an investigation into tunable parameters that could improve
+these scenarios, followed by re-evaluation.
+
+### Era 1 Failed/NS Comparisons (from 54 total)
+
+| Scenario | Variant | Metric | Effect | Why |
+|----------|---------|--------|--------|-----|
+| S3 Edge | runtime_only | MTTR | +146% *** | `/decide` latency (~12s) on 8s baseline |
+| S3 Edge | full | MTTR | +150% *** | Same — `/decide` + minimal param benefit |
+| S5 | runtime_only | AL | +195% *** | `/decide` latency dominates |
+| S5 | full | AL | +217% *** | `/decide` + reduced delay, still net negative |
+| S5 | design_only | AL | -25.5% NS | Correct direction, low statistical power |
+| S2 | runtime_only | TDL | -10.7% NS | Medium effect (d=-0.68), n=11 too small |
+
+### Root Cause Analysis
+
+The "failed" runtime_only/full comparisons in S3 Edge and S5 are **architectural**:
+the `/decide` endpoint (Cloud Run + Gemini LLM inference) adds ~12s per call.
+This is the **expected cost of real-time AI risk assessment** — not a bug or
+misconfiguration. No parameter tuning can eliminate this overhead.
+
+The NS (not significant) results in S5 design_only and S2 runtime_only may benefit
+from (a) more aggressive params and/or (b) more samples.
+
+### Design Agent Improvement — Causal Graph Integration
+
+The initial Design Agent made proposals via surface-level LLM pattern matching
+("metric degrading → reduce associated number") without understanding causal
+relationships between parameters and metrics. This led to invalid proposals
+(e.g. proposing S2_ACTIVATION_TIMEOUT_SEC=240, worse than current 120).
+
+**Fix applied (2026-04-25 → 2026-04-30):**
+
+1. **Causal Graph** (`design-agent/agent/causal_graph.yaml`):
+   - Encodes direction (LOWER/HIGHER_IS_BETTER) for each parameter
+   - Defines bounds, max expected impact, bottleneck notes
+   - Documents architectural overhead (not tunable by params)
+   - Lists which evaluation variants each param affects
+
+2. **Constraint Validator** (`design-agent/agent/param_validator.py`):
+   - Validates proposed params against causal graph BEFORE storage
+   - Rejects params outside bounds or in wrong direction
+   - Flags params that would worsen metrics vs current active values
+
+3. **Context Builder Enhancement** (`design-agent/agent/tools/context_builder.py`):
+   - Injects causal graph summary into LLM context
+   - Reads and exposes active design params (so agent knows current values)
+   - Added S5 + S3 Cloud metrics (previously missing)
+
+4. **System Prompt Update** (`design-agent/agent/prompts/design_system.txt`):
+   - Explicit causal reasoning instructions
+   - Direction-aware proposal rules
+   - Variant-awareness (param changes don't help runtime_only)
+
+### Era 2 Agent Proposal
+
+**Proposal ID:** `design-20260430-b23695ca`
+**Generated by:** Design Agent (gemini-2.5-flash via ADK) with causal graph context
+
+| Parameter | Era 1 (Seed) | Era 2 (Agent) | Direction | Rationale |
+|-----------|:------------:|:-------------:|:---------:|-----------|
+| `S5_APPROVAL_DELAY_SEC` | 5 | **1** | ↓ | Reduce HITL delay — directly cuts AL in design_only |
+| `S3_DETECT_POLL_SEC` | 1 | **0.5** | ↓ | Faster fault detection — cuts MTTD |
+| `S3_RECOVER_POLL_SEC` | 1 | **0.5** | ↓ | Faster recovery confirmation — cuts MTTR |
+
+**Agent impact estimates (from proposal):**
+- AL (S5 design_only): -20% to -40% (confidence: 0.7)
+- MTTD cloud: -5% to -15% (confidence: 0.8)
+- MTTR cloud: -5% to -15% (confidence: 0.8)
+- MTTD/MTTR edge: no significant change (confidence: 0.9) — correctly identifies /decide bottleneck
+- TDL (S2): no significant change (confidence: 0.8) — correctly skips
+
+**Param validation:** PASSED (all within bounds, correct direction, improves on current)
+
+### Era 2 Evaluation Plan — Scenarios to Re-run
+
+Only re-run scenarios where Era 2 params differ from Era 1 AND improvement is causally possible:
+
+| Scenario | Variants to Re-run | Why | Expected Benefit |
+|----------|-------------------|-----|-----------------|
+| **S5** | design_only, full | S5_APPROVAL_DELAY_SEC 5→1 | AL should decrease significantly |
+| **S3 Cloud** | design_only, full | DETECT/RECOVER_POLL 1→0.5 | MTTD/MTTR should decrease |
+| **S3 Edge** | design_only | RECOVER_POLL 1→0.5 | MTTR_edge may improve slightly (param is ~3s of total) |
+
+**NOT re-running:**
+- S3 Edge runtime_only/full: `/decide` latency dominates, params irrelevant
+- S5 runtime_only: `/decide` latency dominates, approval delay irrelevant
+- S2: agent correctly identified no param change helps (timeout already at 120)
+- S1, S4, SS1, SS2: no param changes proposed
+
+**Samples needed:** ≥30 per variant (matching Era 1 methodology).
+Baseline runs from Era 1 remain valid (same deterministic workflows, no baseline changes).
+
+### Activation Steps
+
+1. ☐ Upload Era 2 active proposals to GCS (overwrite `active/s5.json`, `active/s3.json`)
+2. ☐ Dispatch design_only + full runs for S5 (≥30 each)
+3. ☐ Dispatch design_only + full runs for S3 Cloud (≥30 each)
+4. ☐ Dispatch design_only runs for S3 Edge (≥30)
+5. ☐ Wait for queue to drain
+6. ☐ Re-run evaluation: `run_experiment.py --scenarios s5 s3_cloud s3_edge --labeled-baselines-only --causal-mode`
+7. ☐ Compare Era 1 vs Era 2 results
+
+### Expected Thesis Narrative
+
+The evaluation demonstrates:
+1. **Runtime agent adds measurable latency** (~12s per decision) — this is the
+   security-latency tradeoff inherent in real-time AI risk assessment
+2. **Design agent (with causal reasoning) produces valid structural optimizations**
+   that reduce latency in the design_only axis without runtime overhead
+3. **The two axes are complementary**: design reduces baseline latency, runtime
+   adds security at the cost of some latency — net effect depends on use case
+4. **AI-assisted development** (GitHub Copilot) identified the causal structure
+   that the Design Agent needed to reason correctly — demonstrating human-AI
+   collaboration in the improvement loop

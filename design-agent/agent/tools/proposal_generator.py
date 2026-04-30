@@ -21,6 +21,7 @@ def generate_proposal(
     changes: str,
     expected_impact: str = "",
     policy_refs: str = "",
+    params: str = "",
 ) -> dict:
     """Generate a structured design proposal from LLM analysis.
 
@@ -34,6 +35,10 @@ def generate_proposal(
         expected_impact: JSON array of expected metric changes.
             Each object: {metric_name, estimated_change, confidence}.
         policy_refs: Comma-separated NIST/ISO control references.
+        params: JSON object of concrete parameter overrides for workflows.
+            Keys are environment variable names (e.g. S5_APPROVAL_DELAY_SEC),
+            values are proposed string values (e.g. "3").
+            These are fetched by agent-managed workflows at runtime.
 
     Returns:
         Serialized DesignProposal dict for validation and storage.
@@ -59,6 +64,11 @@ def generate_proposal(
     refs_list = (
         [r.strip() for r in policy_refs.split(",") if r.strip()] if policy_refs else []
     )
+
+    try:
+        params_dict = _json.loads(params) if params else {}
+    except _json.JSONDecodeError:
+        params_dict = {}
 
     # Normalize changes
     normalized_changes = []
@@ -97,6 +107,7 @@ def generate_proposal(
         "analysis_summary": analysis_summary,
         "changes": normalized_changes,
         "expected_impact": normalized_impact,
+        "params": params_dict,
         "policy_refs": refs_list,
         "validation": {
             "valid": False,

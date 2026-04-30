@@ -2,33 +2,31 @@
 
 ### Context (summarized)
 The context builder returns:
-- S3 MTTR mean: 45.2s, p95: 78.1s, trend: degrading
-- S3 MTTD mean: 8.3s, p95: 12.1s, trend: stable
-- Runtime decisions: 85 total, 12 ROLLBACK, 8 ESCALATE
-- Current thresholds: anomaly_z_threshold=2.5, s3_polling_interval=5s
+- S3 MTTR_cloud mean: 45.2s, p95: 78.1s, trend: degrading
+- S3 MTTD_cloud mean: 8.3s, p95: 12.1s, trend: stable
+- Active params: S3_DETECT_POLL_SEC=1, S3_RECOVER_POLL_SEC=1
+- Causal graph: S3_RECOVER_POLL_SEC is LOWER_IS_BETTER, bounds [0.5, 10], current=1, max impact on MTTR_cloud: -15%
+- Causal graph: MTTR_edge in runtime_only/full is bottlenecked by /decide latency (~12s) — params cannot fix this
 
-### Analysis
-MTTR is degrading (p95 at 78s, up from ~55s two weeks ago). The main bottleneck appears to be the edge OTA rollback activation time — the 5s polling interval combined with a high anomaly threshold means detection is fast but recovery initiation has latency. Reducing the polling interval during recovery and pre-staging LKG manifests could cut MTTR by 20-30%.
+### Causal Analysis
+MTTR_cloud is degrading (p95 at 78s). The causal graph shows S3_RECOVER_POLL_SEC affects MTTR_cloud with max -15% impact. Current value is 1s, minimum bound is 0.5s. Reducing to 0.5s could save ~0.5s per poll cycle.
+
+However, MTTR_edge in runtime_only/full is bottlenecked by /decide architectural overhead (+12s on 8s baseline). No param change can address this — it's the expected cost of real-time AI risk assessment.
 
 ### Action
 Call `generate_proposal` with:
-- intent: "Reduce MTTR in S3 by optimizing recovery activation"
-- target_scenarios: ["S3", "SS2"]
-- analysis_summary: "MTTR trending upward (p95: 78.1s vs 55s prior period). Recovery activation is the bottleneck — 5s polling interval adds latency during rollback. Pre-staging LKG manifests and reducing recovery poll interval would accelerate recovery."
+- intent: "Reduce MTTR_cloud in S3 by optimizing recovery polling"
+- target_scenarios: "S3"
+- analysis_summary: "MTTR_cloud trending upward (p95: 78.1s). Causal analysis: S3_RECOVER_POLL_SEC (currently 1s) affects recovery confirmation latency. Reducing to 0.5s (minimum bound) saves ~0.5s per poll cycle. Max expected improvement: -15% on MTTR_cloud. Note: MTTR_edge in runtime_only/full is architecturally bottlenecked by /decide latency (~12s) — not addressable via params."
 - changes:
   - change_type: "threshold_adjustment"
     target_file: "s3_edge_rollback.yml"
-    description: "Reduce health poll interval during recovery phase"
-    current_value: "5"
-    proposed_value: "2"
-    rationale: "Faster health confirmation shortens the tail of MTTR distribution"
-  - change_type: "workflow_improvement"
-    target_file: "s3_edge_rollback.yml"
-    description: "Pre-cache LKG manifest in workflow to eliminate GCS fetch during rollback"
-    current_value: "fetch on demand"
-    proposed_value: "pre-fetch: true"
-    rationale: "Eliminates ~3-5s GCS round-trip during recovery critical path"
+    description: "Reduce health poll interval during recovery phase from 1s to 0.5s"
+    current_value: "1"
+    proposed_value: "0.5"
+    rationale: "Causal graph: LOWER_IS_BETTER, bounds [0.5, 10], max impact -15% on MTTR_cloud"
 - expected_impact:
-  - metric_name: "MTTR", estimated_change: "-25%", confidence: 0.6
-  - metric_name: "MTTD", estimated_change: "no change", confidence: 0.8
-- policy_refs: ["NIST CP-10", "ISO 27001 A.17.1.2"]
+  - metric_name: "MTTR_cloud", estimated_change: "-10%", confidence: 0.6
+  - metric_name: "MTTR_edge", estimated_change: "no change (bottlenecked by /decide)", confidence: 0.9
+- policy_refs: "NIST CP-10, ISO 27001 A.17.1.2"
+- params: {"S3_RECOVER_POLL_SEC": "0.5"}
