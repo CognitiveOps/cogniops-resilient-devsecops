@@ -65,7 +65,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: s4-pqc-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+  group: s4-pqc-${{ github.ref }}${{ (inputs.run_suffix || '') != '' &&
+    format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: false
 
 env:
@@ -78,7 +79,8 @@ jobs:
   s4-pqc:
     runs-on: self-hosted
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix ||
+        '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s4
       VARIANT: ${{ inputs.variant || 'baseline' }}
