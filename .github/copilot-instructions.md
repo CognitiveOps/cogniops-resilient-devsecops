@@ -54,7 +54,7 @@ Metrics → Context Builder → Intent Processor → Planning (LlmAgent)
 
 ### Security
 - No secrets in code — use GCP Secret Manager
-- PQC validation via liboqs (FIPS 203–205: Dilithium, SPHINCS+)
+- PQC validation via liboqs (FIPS 204 ML-DSA / Dilithium2)
 - OPA policies for deployment guardrails
 - IAM least-privilege for all service accounts
 - No `--no-verify`, no force-push, no bypassing safety checks

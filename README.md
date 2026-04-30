@@ -118,7 +118,7 @@ Integrity-failure cases emit `ss2_integrity_block` with `status=blocked` (no MTT
 | **Runtime**               | Cloud Run (Managed) + Artifact Registry Images                  |
 | **Edge**                  | Docker (runner‑simulated edge; optional Raspberry Pi / Jetson via Docker Compose) |
 | **Monitoring**            | Prometheus + Grafana (+ Loki for logs)                          |
-| **Security**              | Post-Quantum Crypto (FIPS 203 – 205 : Dilithium, SPHINCS+)      |
+| **Security**              | Post-Quantum Crypto (FIPS 204 ML-DSA / Dilithium2)              |
 | **Explainability**        | Structured JSON logs + Markdown/PDF Explainability Reports      |
 | **Language / Frameworks** | Python 3.11 / FastAPI / pytest                                  |
 
