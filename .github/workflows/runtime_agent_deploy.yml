@@ -69,11 +69,11 @@ jobs:
       - name: Build OPA bundle & upload to GCS
         run: |
           opa build -b security/policies/ -o bundle.tar.gz
-          gsutil cp bundle.tar.gz "gs://${CONFIG_BUCKET}/bundles/runtime/bundle.tar.gz"
+          gcloud storage cp bundle.tar.gz "gs://${CONFIG_BUCKET}/bundles/runtime/bundle.tar.gz"
 
       - name: Upload control mappings
         run: |
-          gsutil cp config/control-mappings.yaml "gs://${CONFIG_BUCKET}/control-mappings/v1.yaml"
+          gcloud storage cp config/control-mappings.yaml "gs://${CONFIG_BUCKET}/control-mappings/v1.yaml"
 
   # ── Job 3: Build & push Docker image ──────────────────────────────
   build-push:

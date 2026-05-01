@@ -830,9 +830,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "Uploading SS2 artifacts to ${GCS_PREFIX}"
-          gsutil cp -r baseline/metrics/ss2 "${GCS_PREFIX}/"
+          gcloud storage cp -r baseline/metrics/ss2 "${GCS_PREFIX}/"
           if [ -d baseline/metrics/hitl ]; then
-            gsutil cp -r baseline/metrics/hitl "${GCS_PREFIX}/"
+            gcloud storage cp -r baseline/metrics/hitl "${GCS_PREFIX}/"
           fi
 
       - name: Cleanup Docker

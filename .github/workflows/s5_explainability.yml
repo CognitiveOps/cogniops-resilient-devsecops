@@ -145,7 +145,7 @@ jobs:
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/preapprove"
           echo "Uploading S5 pre-approval artifacts to ${GCS_PREFIX}"
-          gsutil cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
 
   s5_approve:
     name: s5_approve
@@ -210,9 +210,9 @@ jobs:
           rm -rf baseline/metrics/s5
           mkdir -p baseline/metrics
           if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
-            gsutil cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
           else
-            gsutil cp -r "${GCS_PREFIX}/" baseline/metrics/
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
             if [ -d baseline/metrics/preapprove/s5 ]; then
               rm -rf baseline/metrics/s5
               mv baseline/metrics/preapprove/s5 baseline/metrics/s5
@@ -255,7 +255,7 @@ jobs:
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/postapprove"
           echo "Uploading S5 post-approval artifacts to ${GCS_PREFIX}"
-          gsutil cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
 
   s5_final:
     name: s5_final
@@ -318,9 +318,9 @@ jobs:
           rm -rf baseline/metrics/s5
           mkdir -p baseline/metrics
           if gcloud storage ls "${GCS_PREFIX}/s5/" >/dev/null 2>&1; then
-            gsutil cp -r "${GCS_PREFIX}/s5" baseline/metrics/
+            gcloud storage cp -r "${GCS_PREFIX}/s5" baseline/metrics/
           else
-            gsutil cp -r "${GCS_PREFIX}/" baseline/metrics/
+            gcloud storage cp -r "${GCS_PREFIX}/" baseline/metrics/
             if [ -d baseline/metrics/postapprove/s5 ]; then
               rm -rf baseline/metrics/s5
               mv baseline/metrics/postapprove/s5 baseline/metrics/s5
@@ -362,4 +362,4 @@ jobs:
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s5/${RUN_ID}/final"
           echo "Uploading S5 final artifacts to ${GCS_PREFIX}"
-          gsutil cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
+          gcloud storage cp -r baseline/metrics/s5 "${GCS_PREFIX}/"
