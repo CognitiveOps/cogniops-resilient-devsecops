@@ -215,6 +215,19 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Local development files (keys, handoff notes, scratch)
+# Local development files (keys, handoff notes, scratch, drafts)
 .local/
 key.json
+*.local
+*.local.*
+# Thesis drafts and personal docs (keep in .local/)
+report_*_draft.docx
+report_*_draft.pdf
+*_draft.docx
+*_draft.pdf
+# Service account / credentials (always local)
+*-service-account*.json
+*-credentials*.json
+.env
+.env.*
+!.env.example
