@@ -1,13 +1,13 @@
 # CogniOps Evaluation Plan — Complete Scenario Coverage
 
-> Updated: 2026-04-20 19:16 UTC
+> Updated: 2026-05-04 07:22 UTC
 > Branch: `design_time_agent_dev`
 > Thesis: "Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"
 > **Data integrity audit completed 2026-04-17** — see §Data Integrity Audit below.
 > **S3 Edge bugs fixed + OOM fix applied 2026-04-19** — see §Issue 6 and §Issue 7 below.
 > **Batch 6 complete 2026-04-20 16:00 UTC** — All 28/28 cells ≥30 labeled runs.
-> **FULL 8-SCENARIO EVALUATION COMPLETE** — 54 comparisons, 5,833 samples, 7 significant improvements.
-> Evaluation timestamp: `20260420T161616Z`
+> **FULL 8-SCENARIO EVALUATION COMPLETE (Era1)** — 54 comparisons, 5,833 samples, 7 significant improvements. Timestamp: `20260420T161616Z`.
+> **ERA2 EVALUATION COMPLETE (2026-05-04)** — S3 Cloud/Edge/S5 redispatch (18 re-dispatch runs, 18 comparisons, 3337 samples, 7 significant improvements). Timestamp: `20260504T041940Z`. See §Era 2 Summary below.
 
 ---
 
@@ -373,6 +373,75 @@ python -m evaluation.scripts.run_experiment \
   --scenarios s1 s2 s3_cloud s3_edge s4 s5 ss1 ss2 \
   --labeled-baselines-only --causal-mode -v
 ```
+
+### Phase 7: Era2 Evaluation and Comparative Analysis ✅ COMPLETE (2026-05-04)
+
+**Rationale:** Era1 baseline was comprehensive (8 scenarios, 54 comparisons).
+Era2 targets refined scope (S3 Cloud, S3 Edge, S5) using improved parameters
+from Era1 insights and post-fix infrastructure validation.
+
+**Era2 runs (2026-05-03):** 
+- Re-dispatched 6 pairs × 3 scenarios × 3 variants (design_only, runtime_only, full)
+  = **18 runs total**, all dispatched as `s3_rollback.yml`, `s3_edge_rollback.yml`,
+  `s5_explainability_*.yml` variant workflows.
+- All 18/18 completed successfully (✅ success conclusion).
+- BQ metrics collected: s3_cloud (MTTD, MTTR), s3_edge (MTTD, MTTR), s5 (AL, ACR).
+
+**Era2 evaluation command** (2026-05-04 07:18 UTC):
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=$PWD/key.json
+python -m evaluation.scripts.run_experiment \
+  --project cogent-wall-445012-h5 \
+  --scenarios s3_cloud s3_edge s5 \
+  --labeled-baselines-only --causal-mode \
+  --output evaluation/results/era2_2026-05-03 -v
+```
+
+**Era2 Results Summary (18 comparisons, 3337 metric samples, overlap-scope):**
+
+| Indicator | Era1 (overlap) | Era2 | Delta |
+|-----------|:-:|:-:|---:|
+| Total comparisons | 18 | 18 | 0 |
+| Improved | 8 (44.4%) | 10 (55.6%) | +2 |
+| Significant | 10 (55.6%) | 11 (61.1%) | +1 |
+| Practical | 12 (66.7%) | 9 (50.0%) | -3 |
+| Sig & Practical | 8 (44.4%) | 8 (44.4%) | 0 |
+| Mean Cohen's d | 0.3028 | 0.2396 | -0.0631 |
+
+**By Scenario (overlap-scope):**
+
+| Scenario | Era1 improved | Era2 improved | Era1 significant | Era2 significant |
+|----------|:---:|:---:|:---:|:---:|
+| s3_cloud | 6/6 | 6/6 | 6/6 | 6/6 |
+| s3_edge | 1/6 | 3/6 | 2/6 | 3/6 |
+| s5 | 1/6 | 1/6 | 2/6 | 2/6 |
+
+**By Variant (overlap-scope):**
+
+| Variant | Era1 improved | Era2 improved | Era1 significant | Era2 significant |
+|---------|:---:|:---:|:---:|:---:|
+| design_only | 4/6 | 5/6 | 2/6 | 3/6 |
+| runtime_only | 2/6 | 2/6 | 4/6 | 4/6 |
+| full | 2/6 | 3/6 | 4/6 | 4/6 |
+
+**Key Era2 Findings:**
+1. **S3 Cloud stable:** All 6 comparisons remain significant improvements (Era1↔Era2 identical outcome). Runtime MTTD/MTTR improvements confirmed across eras.
+2. **S3 Edge improvement:** Significant jump in improvement rate (1/6→3/6) and significance (2/6→3/6). The May re-dispatch with stabilized infrastructure shows better detection/recovery performance.
+3. **Significance & Practicality trade:** Era2 gains breadth in improvement count (+2) and significance (+1) but reduces practical-only wins (−3). This reflects the tight 2σ confidence intervals on metric estimates.
+4. **Variant stability:** design_only improves in Era2 (4→5 improved); runtime_only/full remain stable or improve slightly.
+
+**Artifacts (Era2):**
+- Summary JSON: [evaluation/results/era2_2026-05-03/analysis/summary_20260504T041940Z.json](evaluation/results/era2_2026-05-03/analysis/summary_20260504T041940Z.json)
+- Comparison CSV: [evaluation/results/era2_2026-05-03/analysis/comparison_20260504T041940Z.csv](evaluation/results/era2_2026-05-03/analysis/comparison_20260504T041940Z.csv)
+- Raw metrics: [evaluation/results/era2_2026-05-03/raw/metrics_20260504T041940Z.csv](evaluation/results/era2_2026-05-03/raw/metrics_20260504T041940Z.csv)
+- Graphs: [evaluation/results/era2_2026-05-03/analysis/graphs/](evaluation/results/era2_2026-05-03/analysis/graphs/) (8 charts: effect heatmap, scenario bars, 2-axis quadrant)
+- **Comparative Report:** [evaluation/results/era2_2026-05-03/analysis/era1_vs_era2_comparison_20260504.md](evaluation/results/era2_2026-05-03/analysis/era1_vs_era2_comparison_20260504.md)
+- **Appendix (one-page):** [evaluation/results/era2_2026-05-03/analysis/era1_vs_era2_appendix_20260504.md](evaluation/results/era2_2026-05-03/analysis/era1_vs_era2_appendix_20260504.md)
+
+**Era1 Artifacts (unchanged):**
+- Summary JSON: [evaluation/results/analysis/summary_20260420T161616Z.json](evaluation/results/analysis/summary_20260420T161616Z.json)
+- Comparison CSV: [evaluation/results/analysis/comparison_20260420T161616Z.csv](evaluation/results/analysis/comparison_20260420T161616Z.csv)
+- Raw metrics: [evaluation/results/raw/metrics_20260420T161616Z.csv](evaluation/results/raw/metrics_20260420T161616Z.csv)
 
 ---
 
