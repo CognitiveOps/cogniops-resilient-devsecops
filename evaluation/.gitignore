@@ -1,6 +1,0 @@
-# Evaluation output — regenerated from BQ data
-results/raw/
-results/analysis/
-results/*.md
-results/*.docx
-results/security_agent/
