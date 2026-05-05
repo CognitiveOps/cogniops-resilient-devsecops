@@ -190,8 +190,11 @@ cython_debug/
 # .vscode/
 
 # Evaluation reports & outputs (kept local, regenerated from BQ)
-evaluation/results/*.md
-evaluation/results/*.docx
+evaluation/results/**/*.md
+evaluation/results/**/*.docx
+evaluation/results/raw/
+evaluation/results/analysis/
+evaluation/results/era2_2026-05-03/
 evaluation/results/security_agent/
 
 # Drawio diagrams (binary, not diffable)
