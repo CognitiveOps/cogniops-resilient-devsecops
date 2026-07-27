@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests — runtime agent
+        run: pytest runtime-agent/tests
+
+      - name: Run unit tests — design agent
+        run: pytest design-agent/tests
+
+      - name: Run unit tests — security agent
+        run: pytest security-agent/tests
+
+      - name: Run unit tests — evaluation framework
+        run: pytest evaluation/tests
+
+      - name: Run unit tests — baseline services
+        run: |
+          pytest baseline/services/app/tests
+          pytest baseline/services/edge_cv_app/tests
+
+      - name: Run unit tests — ingest function
+        run: pytest functions/ingest_runs

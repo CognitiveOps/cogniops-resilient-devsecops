@@ -2,8 +2,7 @@
 
 > MSc thesis implementation: an autonomous cognitive agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
 
-[![S1 CI/CD](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/s1_ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/s1_ci.yml)
-[![SS1 Policy Audit](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ss1_ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ss1_ci.yml)
+[![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
