@@ -200,6 +200,12 @@ evaluation/results/security_agent/
 # Drawio diagrams (binary, not diffable)
 *.drawio
 
+# Windows / venv artifacts that leak into the repo root
+Lib/
+share/
+scripts/*.exe
+scripts/vba_extract.py
+
 # Ruff stuff:
 .ruff_cache/
 

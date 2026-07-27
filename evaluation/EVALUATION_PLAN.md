@@ -362,9 +362,9 @@ Full 8-scenario evaluation completed `20260420T161616Z` with `--labeled-baseline
 - S5 AL: runtime effect reduced from +282% to +205% (still large, same conclusion).
 - S3 Cloud: results stable — minimal change from labeled-only filtering.
 
-**Artifacts:** [summary](evaluation/results/analysis/summary_20260417T071656Z.json),
-[comparison CSV](evaluation/results/analysis/comparison_20260417T071656Z.csv),
-[raw metrics](evaluation/results/raw/metrics_20260417T071656Z.csv)
+**Artifacts (Era 1 final run — `20260420T161616Z`):** [summary](evaluation/results/analysis/summary_20260420T161616Z.json),
+[comparison CSV](evaluation/results/analysis/comparison_20260420T161616Z.csv),
+[raw metrics](evaluation/results/raw/metrics_20260420T161616Z.csv)
 
 **Re-run for all 8 scenarios** after queue drains:
 ```bash
