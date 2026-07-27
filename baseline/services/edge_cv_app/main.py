@@ -10,17 +10,30 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from metrics import EdgeMetrics
-from fault_models import (
-    NoFaultModel,
-    NetworkLikeFault,
-    CpuThrottleFault,
-    BlackFramesFault,
-    CorruptedModelFault,
-    DiskFullFault,
-    WrongArchFault,
-    MarkovStepper,
-)
+try:
+    from .metrics import EdgeMetrics
+    from .fault_models import (
+        NoFaultModel,
+        NetworkLikeFault,
+        CpuThrottleFault,
+        BlackFramesFault,
+        CorruptedModelFault,
+        DiskFullFault,
+        WrongArchFault,
+        MarkovStepper,
+    )
+except ImportError:  # pragma: no cover - supports running main.py as a script
+    from metrics import EdgeMetrics
+    from fault_models import (
+        NoFaultModel,
+        NetworkLikeFault,
+        CpuThrottleFault,
+        BlackFramesFault,
+        CorruptedModelFault,
+        DiskFullFault,
+        WrongArchFault,
+        MarkovStepper,
+    )
 
 app = FastAPI()
 
