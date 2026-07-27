@@ -7,7 +7,7 @@ def test_status_ok():
     c = TestClient(app)
     r = c.get("/status")
     assert r.status_code == 200
-    assert r.json()["ok"] is True
+    assert r.json()["healthy"] is True
 
 def test_infer_rejects_invalid():
     c = TestClient(app)
