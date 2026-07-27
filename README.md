@@ -158,6 +158,19 @@ This work demonstrates:
 
 Yanna Koutroumpi, *Autonomous Cognitive AI Agent for Resilient DevSecOps Environments*, MSc thesis, 2026.
 
+## Future work
+
+This release is a stable snapshot of the thesis baseline. Natural next steps:
+
+- **Multi-agent orchestration** — coordinate runtime, design-time, and security agents in a single causal loop instead of independent pipelines.
+- **Human feedback integration** — learn from approval / override decisions to reduce false-positive escalations and approval latency.
+- **Online drift detection** — detect when the substrate distribution shifts and automatically trigger a design-time review.
+- **Multi-cloud substrate** — port the deterministic scenarios to Azure DevOps / AWS CodePipeline to test portability of the cognitive control plane.
+- **Cost-aware planning** — include GCP spend, LLM token cost, and CI runner minutes in the agent's decision objective.
+- **Formal verification of guardrails** — model-check the bounded action surface and OPA policies before each release.
+
+Contributions and forks are welcome; see [`CITATION.cff`](CITATION.cff) for attribution.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
