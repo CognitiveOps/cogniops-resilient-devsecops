@@ -3,7 +3,10 @@ import random
 import time
 from typing import Protocol, Optional
 
-from metrics import EdgeMetrics
+try:
+    from .metrics import EdgeMetrics
+except ImportError:  # pragma: no cover - supports running as a script
+    from metrics import EdgeMetrics
 
 
 def _get_float_env(name: str, default: float) -> float:
