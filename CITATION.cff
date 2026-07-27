@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software or the evaluation data in academic work, please cite it as below."
+type: software
+title: "CogniOps: Autonomous Cognitive AI Agent for Resilient DevSecOps"
+abstract: "A hybrid Cognitive-SOAR agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability with deterministic guardrails and a 2-axis evaluation framework."
+authors:
+  - family-names: Koutroumpi
+    given-names: Yanna
+repository-code: "https://github.com/CognitiveOps/cogniops-resilient-devsecops"
+license: MIT
+version: 0.1.0-alpha
+date-released: 2026-07-27
+keywords:
+  - cognitive-ai
+  - devsecops
+  - edge-computing
+  - post-quantum-cryptography
+  - explainable-ai
+  - autonomous-agents
+  - google-adk

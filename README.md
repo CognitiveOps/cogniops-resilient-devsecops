@@ -6,6 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
 [![Evaluation data](https://img.shields.io/badge/evaluation-data%20available-blue)](evaluation/results/)
 [![Evidence](https://img.shields.io/badge/evidence-showcase--evidence%2Emd-green)](docs/showcase-evidence.md)
+[![Cite](https://img.shields.io/badge/cite-CITATION%2Ecff-9cf)](CITATION.cff)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
