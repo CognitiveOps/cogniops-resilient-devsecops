@@ -43,9 +43,9 @@ jobs:
         run: pytest evaluation/tests
 
       - name: Run unit tests — baseline services
-        run: |
-          pytest baseline/services/app/tests
-          pytest baseline/services/edge_cv_app/tests
+        run: pytest baseline/services/edge_cv_app/tests
+
+      # Note: baseline/services/app/tests requires Docker and is run manually.
 
       - name: Run unit tests — ingest function
         run: pytest functions/ingest_runs

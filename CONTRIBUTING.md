@@ -18,9 +18,11 @@ Thanks for your interest. This repository started as an MSc thesis project and i
    pytest design-agent/tests
    pytest security-agent/tests
    pytest evaluation/tests
-   pytest baseline/services/app/tests
    pytest baseline/services/edge_cv_app/tests
    pytest functions/ingest_runs
+
+   # The app container test requires Docker and is run manually:
+   # pytest baseline/services/app/tests
    ```
 5. **Keep the architecture separation intact**:
    - Runtime agent must not edit structure (no PRs, no YAML changes).

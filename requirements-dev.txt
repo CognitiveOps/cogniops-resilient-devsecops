@@ -16,6 +16,10 @@ pandas>=2.0,<3.0
 scipy>=1.13,<2.0
 matplotlib>=3.9,<4.0
 
+# Baseline services
+opencv-python-headless>=4.10
+Pillow>=10.0
+
 # HTTP / testing
 httpx>=0.27,<1.0
 pytest>=8.0,<9.0
