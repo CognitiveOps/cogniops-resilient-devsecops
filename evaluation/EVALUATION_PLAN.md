@@ -211,7 +211,8 @@ Fix: add `continue-on-error: true` to the upload step — pending.
 6. ✅ S4 gap fills completed (all variants ≥30)
 7. ✅ Full 8-scenario evaluation run:
    ```bash
-   GCP_PROJECT_ID=cogent-wall-445012-h5 python -m evaluation.scripts.run_experiment \
+   export GCP_PROJECT_ID=<your-gcp-project-id>
+   python -m evaluation.scripts.run_experiment \
      --scenarios s1 s2 s3_cloud s3_edge s4 s5 ss1 ss2 \
      --labeled-baselines-only --causal-mode -v
    ```
@@ -234,9 +235,10 @@ Pushed to `design_time_agent_dev` (commit `b00c728`) and cherry-picked to `main`
 - Seed proposals script, dispatch scripts, EVALUATION_PLAN.md
 
 ### Phase 3: Seed Design Proposals to GCS ✅ DONE
-7 proposals seeded to `gs://cogent-wall-445012-h5-agent-artifacts/proposals/design/active/`.
+7 proposals seeded to `gs://<your-artifacts-bucket>/proposals/design/active/`.
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=$PWD/key.json
+export AGENT_ARTIFACTS_BUCKET=<your-artifacts-bucket>
 python scripts/seed_design_proposals.py --bucket $AGENT_ARTIFACTS_BUCKET
 ```
 
@@ -258,8 +260,8 @@ Proposal params per scenario (see `scripts/seed_design_proposals.py`):
 
 ### Phase 4: Deploy Updated Design Agent ✅ DONE
 Design-agent redeployed to Cloud Run (revision `design-agent-00010-pg9`).
-- Image: `europe-docker.pkg.dev/cogent-wall-445012-h5/apps/design-agent:latest`
-- URL: `https://design-agent-kauyrrwc3a-ew.a.run.app`
+- Image: `europe-docker.pkg.dev/<your-gcp-project-id>/apps/design-agent:latest`
+- URL: `https://<your-design-agent>-<hash>-<region>.a.run.app`
 - GitHub variable `DESIGN_AGENT_URL` set for workflow access
 
 ### Phase 5: Dispatch Variant Runs for S1/S2/S3-Edge/S4/SS1 ✅ DONE
@@ -391,7 +393,7 @@ from Era1 insights and post-fix infrastructure validation.
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=$PWD/key.json
 python -m evaluation.scripts.run_experiment \
-  --project cogent-wall-445012-h5 \
+  --project <your-gcp-project-id> \
   --scenarios s3_cloud s3_edge s5 \
   --labeled-baselines-only --causal-mode \
   --output evaluation/results/era2_2026-05-03 -v

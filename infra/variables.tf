@@ -5,7 +5,7 @@
 
 # The Google Cloud Project ID where all resources will be created.
 variable "project_id" {
-  description = "GCP Project ID (e.g., cogent-wall-445012-h5)"
+  description = "GCP Project ID (e.g., your-gcp-project-id)"
   type        = string
 }
 

@@ -185,11 +185,11 @@ S1 CI (with deploy)
 
 Status: success
 
-Service URL: https://baseline-app-ew.a.run.app
+Service URL: `https://<your-baseline-app>-<hash>-<region>.a.run.app`
 
 Full TTD (commit→healthy): 132 sec
 
-Image: europe-docker.pkg.dev/thesis-pipeline/apps/baseline-app:abcdef1
+Image: `europe-docker.pkg.dev/<your-project>/apps/baseline-app:<sha>`
 
 
 ---
@@ -294,7 +294,7 @@ SELECT
       ),
     2
   ) AS df_per_day
-FROM `cogent-wall-445012-h5.agent_metrics.runs`
+FROM `<your-gcp-project-id>.agent_metrics.runs`
 GROUP BY scenario_id
 ORDER BY scenario_id;
 ```
@@ -1058,7 +1058,7 @@ WITH s4_cases AS (
       SAFE_CAST(JSON_VALUE(metrics, '$.verified') AS BOOL),
       SAFE_CAST(JSON_VALUE(labels, '$.verified') AS BOOL)
     ) AS verified_bool
-  FROM `cogent-wall-445012-h5.agent_metrics.runs`
+  FROM `<your-gcp-project-id>.agent_metrics.runs`
   WHERE scenario_id = 's4'
     AND STARTS_WITH(stage, 's4_p')
 )
