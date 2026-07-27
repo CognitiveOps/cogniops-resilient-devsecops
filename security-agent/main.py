@@ -11,7 +11,7 @@ Batch/scheduled service that:
 
 Endpoints:
   POST /run          – Trigger compliance check (Cloud Scheduler or manual)
-  GET  /healthz      – Liveness probe
+  GET  /health       – Liveness probe
   GET  /agent/info   – ADK agent metadata
 
 Trigger: Cloud Scheduler HTTP POST to /run (daily or weekly)
@@ -260,8 +260,8 @@ def _create_github_issue(proposal: ComplianceProposal) -> str | None:
 # ── Health check ─────────────────────────────────────────────────────
 
 
-@app.get("/healthz")
-async def healthz():
+@app.get("/health")
+async def health():
     return {"status": "ok", "version": "0.1.0", "agent": "security-compliance"}
 
 

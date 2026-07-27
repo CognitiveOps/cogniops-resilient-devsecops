@@ -21,6 +21,16 @@ on:
         required: false
         default: "true"
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -33,6 +43,11 @@ on:
         required: false
         default: "true"
         type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -42,7 +57,7 @@ env:
   AR_REPO: "apps"
   ENV: "prod"
   SS1_ALLOWED_REGIONS: ${{ vars.SS1_ALLOWED_REGIONS || vars.GCP_REGION }}
-  SS1_ALLOWED_INGRESS: "all"  # keep Cloud Run reachable for pipeline health checks
+  SS1_ALLOWED_INGRESS: "all" # keep Cloud Run reachable for pipeline health checks
   SS1_ALLOWED_SERVICE_ACCOUNTS: ${{ vars.SS1_ALLOWED_SERVICE_ACCOUNTS || vars.RUN_EXEC_SA_EMAIL }}
 
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
@@ -51,7 +66,7 @@ env:
 permissions:
   id-token: write
   contents: read
-  
+
 concurrency:
   group: ss1-${{ github.repository }}-${{ github.ref_name }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: false
@@ -59,7 +74,7 @@ concurrency:
 jobs:
   ss1:
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 35
 
     strategy:
@@ -71,6 +86,7 @@ jobs:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}-${{ matrix.subscenario }}
       MODE: baseline
       SS1_SUBSCENARIO: ${{ matrix.subscenario }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     defaults:
       run:
@@ -105,8 +121,8 @@ jobs:
       - name: Install deps (tests + OPA)
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+          sudo flock /var/lock/apt-actions.lock apt-get update -y
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq
           python -m pip install --upgrade pip
           pip install pytest httpx
           curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
@@ -205,7 +221,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -245,7 +262,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -360,7 +378,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -401,7 +420,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -436,7 +456,8 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "${REASON}"
+              "reason": "${REASON}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -496,7 +517,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -534,7 +556,8 @@ jobs:
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
               "violation_expected": "${VIOLATION_EXPECTED}",
-              "reason": "${REASON}"
+              "reason": "${REASON}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -604,7 +627,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -656,7 +680,8 @@ jobs:
               "epoch": "E2",
               "subscenario": "${SUB_LABEL}",
               "policy": "${POLICY_DESC}",
-              "violation_expected": "${VIOLATION_EXPECTED}"
+              "violation_expected": "${VIOLATION_EXPECTED}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

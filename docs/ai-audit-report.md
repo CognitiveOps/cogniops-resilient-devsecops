@@ -370,3 +370,30 @@ functions/ingest_runs/main.py
 | policy_refs | STRING (REPEATED) | ISO/NIST control references |
 | guard_approved | BOOLEAN | Guard verdict |
 | processed_at | TIMESTAMP | Processing timestamp (partition key) |
+
+---
+
+## Appendix C: Post-Implementation Status (2026-03-19)
+
+This addendum records the current implementation status. All gaps identified in
+Section 6.2 have been resolved.
+
+| Gap (Section 6.2) | Resolution | Evidence |
+|----|----|----|
+| No LLM integration | ADK LlmAgent + Gemini 2.0 Flash | `runtime-agent/agent/cogniops_agent.py` |
+| No real anomaly detection | Z-score + BQ baselines | `runtime-agent/agent/tools/perception_tool.py` |
+| No OPA runtime check | OPA REST (fail-closed) + PQC guard | `runtime-agent/agent/callbacks/guard_callback.py` |
+| No execution actions | Mode-gated GitHub API actions | `runtime-agent/agent/tools/execution_tools.py` |
+| No episodic memory | BQ query for recent decisions | ADK Session.state + `memory_tool.py` |
+| No design-time agent | ADK LlmAgent, propose-only | `design-agent/` (97 tests) |
+| No evaluation framework | 2-Axis statistical comparison | `evaluation/` (59 tests) |
+| No ADK dependency | `google-adk` in requirements.txt | `runtime-agent/requirements.txt` |
+
+### Test Coverage Summary
+
+| Component | Tests |
+|-----------|-------|
+| Runtime Agent (Steps 1–5b) | 231 |
+| Security Agent (Step 6b) | Included in runtime |
+| Design-Time Agent (Step 6) | 97 |
+| 2-Axis Evaluation (Step 7) | 59 |

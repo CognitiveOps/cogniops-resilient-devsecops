@@ -38,7 +38,7 @@ class TestBuildOpaInput:
             args={"rationale": "test", "target": "deploy-123"},
             session_state={"scenario": "S1", "severity": 0.9},
         )
-        assert result["action"] == "block_deployment"
+        assert result["action"] == "BLOCK"
         assert result["scenario"] == "S1"
         assert result["severity"] == 0.9
         assert result["args"]["target"] == "deploy-123"

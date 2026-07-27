@@ -1,10 +1,14 @@
 import json
+import logging
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from google.cloud import bigquery
+from google.cloud import bigquery, pubsub_v1
 from flask import Request, make_response
+
+logger = logging.getLogger(__name__)
 
 
 # These come from Terraform environment variables:
@@ -20,7 +24,77 @@ PROJECT_ID = (
 BQ_DATASET = os.environ.get("BQ_DATASET", "agent_metrics")
 BQ_TABLE = os.environ.get("BQ_TABLE", "runs")
 
+PUBSUB_TOPIC = os.environ.get("PUBSUB_TOPIC", "runtime-events-v1")
+
 bq_client = bigquery.Client()
+pubsub_client = pubsub_v1.PublisherClient()
+
+# ── Pub/Sub bridge: scenario → RuntimeEvent mapping ────────────────
+
+# Variants that should trigger runtime-agent events
+_RUNTIME_VARIANTS = frozenset({"runtime_only", "full"})
+
+# (scenario_id, status) → event_type mapping
+_EVENT_TYPE_MAP: Dict[Tuple[str, str], str] = {
+    ("s1", "failure"): "pipeline_failure",
+    ("s3", "failure"): "resilience_degradation",
+    ("ss1", "deny"): "policy_violation",
+    ("ss1", "failure"): "policy_violation",
+    ("ss2", "failure"): "resilience_degradation",
+}
+
+_SEVERITY_MAP: Dict[str, str] = {
+    "pipeline_failure": "high",
+    "policy_violation": "critical",
+    "resilience_degradation": "high",
+}
+
+
+def _maybe_publish_runtime_event(
+    payload: Dict[str, Any],
+    labels: Dict[str, Any],
+) -> None:
+    """Publish a RuntimeEvent to Pub/Sub if the stage-event qualifies."""
+    variant = str(labels.get("variant", ""))
+    if variant not in _RUNTIME_VARIANTS:
+        return
+
+    scenario_id = str(payload.get("scenario_id", "")).lower()
+    status = str(payload.get("status", "")).lower()
+    event_type = _EVENT_TYPE_MAP.get((scenario_id, status))
+    if event_type is None:
+        return
+
+    runtime_event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "occurred_at": payload.get("t_end", datetime.now(tz=timezone.utc).isoformat()),
+        "source": f"baseline/{scenario_id}",
+        "context": {
+            "run_id": str(payload.get("run_id", "")),
+            "scenario_id": scenario_id,
+            "stage": str(payload.get("stage", "")),
+            "status": status,
+            "severity": _SEVERITY_MAP.get(event_type, "medium"),
+            "commit_sha": str(payload.get("commit_sha", "")),
+            "variant": variant,
+        },
+    }
+
+    topic_path = pubsub_client.topic_path(PROJECT_ID, PUBSUB_TOPIC)
+    data = json.dumps(runtime_event, ensure_ascii=False).encode("utf-8")
+    try:
+        future = pubsub_client.publish(topic_path, data)
+        msg_id = future.result(timeout=10)
+        logger.info(
+            "Published RuntimeEvent %s (%s) to %s [msg_id=%s]",
+            runtime_event["event_id"],
+            event_type,
+            PUBSUB_TOPIC,
+            msg_id,
+        )
+    except Exception as e:
+        logger.error("Failed to publish RuntimeEvent to Pub/Sub: %s", e)
 
 
 def _epoch_to_datetime(value: Any) -> datetime:
@@ -256,5 +330,8 @@ def ingest_runs(request: Request):
     if errors:
         # Also logged as 500 to see the full structured errors
         return make_response((f"BigQuery insert errors: {errors}", 500))
+
+    # ── Pub/Sub bridge: emit RuntimeEvent for cognitive agent ────────
+    _maybe_publish_runtime_event(payload, labels)
 
     return make_response(("OK", 200))

@@ -54,7 +54,7 @@ Metrics → Context Builder → Intent Processor → Planning (LlmAgent)
 
 ### Security
 - No secrets in code — use GCP Secret Manager
-- PQC validation via liboqs (FIPS 203–205: Dilithium, SPHINCS+)
+- PQC validation via liboqs (FIPS 204 ML-DSA / Dilithium2)
 - OPA policies for deployment guardrails
 - IAM least-privilege for all service accounts
 - No `--no-verify`, no force-push, no bypassing safety checks
@@ -110,5 +110,5 @@ Always start new capabilities in `shadow` mode.
 | S3 (Resilience) | MTTD, MTTR |
 | S4 (PQC) | TTV, VSR, FDR |
 | S5 (Explainability) | AL, ACR |
-| SS1 (Policy Audit) | CFR, DF, FDR, ACR |
+| SS1 (Policy Audit) | CFR, FDR |
 | SS2 (Adaptive Threat) | MTTD, AL, ACR |

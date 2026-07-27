@@ -20,6 +20,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -31,6 +41,11 @@ on:
         description: "Optional simulated approval delay override (seconds)"
         required: false
         default: ""
+        type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
         type: string
 
 permissions:
@@ -50,13 +65,14 @@ env:
 jobs:
   s5_explain:
     name: s5_explain
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       t_recommend_epoch: ${{ steps.recommend.outputs.t_recommend_epoch }}
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -134,13 +150,14 @@ jobs:
   s5_approve:
     name: s5_approve
     needs: [s5_explain]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       t_approved_epoch: ${{ steps.approved.outputs.t_approved_epoch }}
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -243,11 +260,12 @@ jobs:
   s5_final:
     name: s5_final
     needs: [s5_explain, s5_approve]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
       SCENARIO_ID: s5
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     steps:
       - uses: actions/checkout@v4

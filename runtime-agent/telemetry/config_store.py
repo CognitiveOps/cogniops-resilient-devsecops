@@ -25,7 +25,7 @@ class ConfigStore:
 
     def __init__(self) -> None:
         self._cache: dict[str, Any] = {}
-        self._last_fetch: float = 0.0
+        self._last_fetch: float = float("-inf")
 
     def _is_stale(self) -> bool:
         return (time.monotonic() - self._last_fetch) > REFRESH_INTERVAL_SEC

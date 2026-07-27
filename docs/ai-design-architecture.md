@@ -1,9 +1,9 @@
 # AI Design Engineering Architecture
 
 > CogniOps — Autonomous Cognitive AI Agent for Resilient DevSecOps Environments  
-> Version: 1.0 (Pre-Implementation)  
-> Last Updated: 2026-03-09  
-> Status: Approved — Ready for Phase 1 Implementation
+> Version: 2.0 (Post-Implementation)  
+> Last Updated: 2026-03-19  
+> Status: All Steps (0–7) Implemented — Ready for Evaluation with Real Data
 
 ---
 
@@ -318,26 +318,36 @@ Scheduled Trigger or Manual Invocation
   └── Optional: GitHub Issue with summary
 ```
 
-### 5.4 Target Directory Structure
+### 5.4 Implemented Directory Structure
 
 ```
 design-agent/
 ├── agent/
 │   ├── __init__.py
-│   ├── design_agent.py          # ADK Agent definition
+│   ├── design_agent.py          # ADK LlmAgent (Gemini 2.0 Flash)
 │   ├── tools/
 │   │   ├── __init__.py
-│   │   ├── context_builder.py   # BQ + GitHub + config reader
-│   │   ├── proposal_gen.py      # Generate structured proposals
-│   │   └── validator.py         # OPA sim, YAML lint, dry-run
+│   │   ├── context_builder.py   # BQ metrics (30-day trends, percentiles)
+│   │   ├── proposal_generator.py # Structured DesignProposal assembly
+│   │   └── validator.py         # Schema + YAML lint + path traversal guard
 │   └── prompts/
-│       └── design_system.txt    # System prompt for design reasoning
-├── main.py                      # Entry point (FastAPI or batch)
+│       ├── design_system.txt    # System prompt for design reasoning
+│       ├── few_shot_optimize.txt # Few-shot: metric optimization proposals
+│       └── few_shot_policy.txt  # Few-shot: policy update proposals
+├── models/
+│   ├── __init__.py
+│   └── schemas.py               # Pydantic v2: MetricContext, DesignProposal
+├── main.py                      # FastAPI /run + /health endpoints
 ├── requirements.txt
 ├── Dockerfile
 └── tests/
     ├── __init__.py
-    └── test_design_pipeline.py  # InMemoryRunner tests
+    ├── conftest.py
+    ├── test_context_builder.py
+    ├── test_design_pipeline.py  # End-to-end + FastAPI endpoint tests
+    ├── test_proposal_generator.py
+    ├── test_schemas.py
+    └── test_validator.py        # 97 tests total
 ```
 
 ---
@@ -565,20 +575,22 @@ All infrastructure is defined in `infra/runtime.tf` (additive to `main.tf`):
 | Push subscription | OIDC-auth to Cloud Run | ✅ Deployed |
 | `runtime_decisions` | BQ table (12 fields) | ✅ Deployed |
 | Cloud Run v2 | Agent service | ✅ Deployed |
-| _Design-Time infra_ | SA, BQ, GCS | ⬜ Phase 2 |
+| Design-Time infra | SA, BQ, GCS, Cloud Scheduler | ✅ `infra/design.tf` |
 
 ---
 
 ## 10. Implementation Roadmap
 
 ```
-Phase 0 ✅ ──── Phase 1 ──────────────────── Phase 2 ──── Phase 3
+Phase 0 ✅ ──── Phase 1 ✅ ────────────────── Phase 2 ✅ ── Phase 3 ✅
                 │                              │              │
-           Step 1: ADK Bootstrap ✅       Step 6: Design  Step 7: Eval
-           Step 2: Perception               Agent
-           Step 3: Planning (LLM)
-           Step 4: Guard + Execution
-           Step 5: Telemetry
+           Step 1: ADK Bootstrap ✅       Step 6: Design ✅  Step 7: Eval ✅
+           Step 2: Perception ✅              Agent (97 tests)
+           Step 3: Planning (LLM) ✅     Step 7: 2-Axis ✅
+           Step 4: Guard + Execution ✅       (59 tests)
+           Step 5: Telemetry ✅
+           Step 5b: Deploy & Wire ✅
+           Step 6b: Security Agent ✅
 ```
 
 ### Step Dependencies
@@ -598,13 +610,15 @@ Step 0 (Copilot governance) ✅
 
 | Step | Exit Criteria |
 |------|---------------|
-| Step 1 | ADK LlmAgent runs in InMemoryRunner, FastAPI coexists, 38 tests pass |
-| Step 2 | Perception detects anomalies against real BQ baselines (mocked in tests) |
-| Step 3 | Gemini selects correct tool for 90%+ of test cases, fallback works |
-| Step 4 | OPA guard blocks invalid actions, mode gating works for all 3 modes |
-| Step 5 | Every LLM call logged, ActionTraces emitted, ACR validated |
-| Step 6 | Design agent produces valid JSON proposals, OPA simulation passes |
-| Step 7 | Statistical comparison shows measurable difference across variants |
+| Step 1 | ADK LlmAgent runs in InMemoryRunner, FastAPI coexists, 38 tests pass | ✅ |
+| Step 2 | Perception detects anomalies against real BQ baselines (mocked in tests) | ✅ |
+| Step 3 | Gemini selects correct tool for 90%+ of test cases, fallback works | ✅ |
+| Step 4 | OPA guard blocks invalid actions, mode gating works for all 3 modes | ✅ |
+| Step 5 | Every LLM call logged, ActionTraces emitted, ACR validated | ✅ |
+| Step 5b | Deploy & Wire: IaC, CI/CD, OPA bundle, config store (231 tests) | ✅ |
+| Step 6 | Design agent produces valid JSON proposals, validator passes (97 tests) | ✅ |
+| Step 6b | Security compliance agent: NIST feed → diff → propose (propose-only) | ✅ |
+| Step 7 | Statistical comparison: Mann-Whitney U, Cohen's d, Bootstrap CI (59 tests) | ✅ |
 
 ---
 

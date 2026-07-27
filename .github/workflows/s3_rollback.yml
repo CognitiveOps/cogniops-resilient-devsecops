@@ -18,6 +18,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   # Reusable workflow
   workflow_call:
     inputs:
@@ -26,10 +36,15 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC to GCP
+  id-token: write # required for OIDC to GCP
 
 concurrency:
   group: s3-resilience-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
@@ -44,18 +59,54 @@ jobs:
       matrix:
         fault:
           # net: detect on latency or non-200; keep lax fps/detection thresholds
-          - { name: net-unstable, fail_mode: net_unstable, latency_budget_sec: 2, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: net-unstable,
+              fail_mode: net_unstable,
+              latency_budget_sec: 2,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # disk-full: deterministic error; thresholds unused but kept default
-          - { name: disk-full, fail_mode: disk_full, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: disk-full,
+              fail_mode: disk_full,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # cpu: detect via fps drop + latency; tighten fps_min
-          - { name: cpu-starvation, fail_mode: cpu_starvation, latency_budget_sec: 3, fps_min: 15, detection_rate_min: 0.05 }
+          - {
+              name: cpu-starvation,
+              fail_mode: cpu_starvation,
+              latency_budget_sec: 3,
+              fps_min: 15,
+              detection_rate_min: 0.05,
+            }
           # camera: detect via detection_rate ~0
-          - { name: dead-camera, fail_mode: dead_camera, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.001 }
+          - {
+              name: dead-camera,
+              fail_mode: dead_camera,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.001,
+            }
           # wrong-arch: deterministic non-200
-          - { name: wrong-arch, fail_mode: wrong_arch, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
+          - {
+              name: wrong-arch,
+              fail_mode: wrong_arch,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
           # corrupt model: deterministic 500 on inference/status
-          - { name: corrupt-weights, fail_mode: corrupt_weights, latency_budget_sec: 0, fps_min: 10, detection_rate_min: 0.01 }
-    runs-on: ubuntu-latest
+          - {
+              name: corrupt-weights,
+              fail_mode: corrupt_weights,
+              latency_budget_sec: 0,
+              fps_min: 10,
+              detection_rate_min: 0.01,
+            }
+    runs-on: self-hosted
 
     env:
       SCENARIO: s3
@@ -77,6 +128,7 @@ jobs:
       GCP_SA_APP_EMAIL: ${{ vars.GCP_SA_APP_EMAIL }}
       # Scenario runs ingest endpoint (Cloud Function Gen2)
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
       # Tunable fault model parameters (override here or via secrets/vars)
       S3_NET_FAIL_P: "0.1"
       S3_NET_BURST_PROB: "0.05"
@@ -93,6 +145,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       # 0) Start S3 overall timer
       - name: Start S3 timer
@@ -407,7 +464,8 @@ jobs:
               "fault_type": "${FAULT_NAME}",
               "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
               "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
+              "detection_rate_min": "${DETECTION_RATE_MIN}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -436,7 +494,8 @@ jobs:
               "fault_type": "${FAULT_NAME}",
               "latency_budget_sec": "${LATENCY_BUDGET_SEC}",
               "fps_min": "${FPS_MIN}",
-              "detection_rate_min": "${DETECTION_RATE_MIN}"
+              "detection_rate_min": "${DETECTION_RATE_MIN}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

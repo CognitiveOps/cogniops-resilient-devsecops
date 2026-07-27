@@ -99,6 +99,7 @@ def build_decision_row(
     decision_executed: bool,
     rationale: str | None,
     policy_refs: list[str] | None,
+    mode: str = "shadow",
     agentops_trace_id: str | None = None,
 ) -> DecisionRow:
     """
@@ -114,7 +115,7 @@ def build_decision_row(
         decision_executed=decision_executed,
         rationale=rationale,
         policy_refs=policy_refs,
-        mode="shadow",
+        mode=mode,
         agentops_trace_id=agentops_trace_id,
         processed_at=datetime.now(timezone.utc),
     )

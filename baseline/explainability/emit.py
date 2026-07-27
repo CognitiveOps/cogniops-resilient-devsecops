@@ -10,6 +10,7 @@ This uses the project-wide stage-event payload schema described in README:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -18,7 +19,26 @@ from typing import Any, Dict, Optional
 
 
 def _iso_from_epoch(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
+
+def _extract_causal_labels(run_id: str, labels: Dict[str, Any]) -> None:
+    """Parse causal experiment metadata from run_id suffix.
+
+    Paired-run workflows produce run_ids like:
+      12345-1-causal-20260403T120000Z-67890-p3-baseline
+      12345-1-causal-20260403T120000Z-s3b-p3-treatment
+    We extract experiment_id, pair_id, pair_order.
+    """
+    import re
+
+    m = re.search(r"(causal-.+?)-p(\d+)-(baseline|treatment)", run_id)
+    if m:
+        labels.setdefault("experiment_id", m.group(1))
+        labels.setdefault("pair_id", m.group(2))
+        labels.setdefault("pair_order", m.group(3))
 
 
 def emit_stage_event(
@@ -40,6 +60,25 @@ def emit_stage_event(
         return
 
     duration = max(0.0, float(t_end_epoch) - float(t_start_epoch))
+    merged_labels = dict(labels or {})
+    if "variant" not in merged_labels:
+        merged_labels["variant"] = os.environ.get("VARIANT", "baseline")
+    # Causal evaluation labels — extract from env or parse from RUN_ID.
+    # Paired-run workflows set run_suffix to:
+    #   causal-<ts>-<ghid>-p<N>-baseline  or  ...-p<N>-treatment
+    for env_key, label_key in (
+        ("EXPERIMENT_ID", "experiment_id"),
+        ("PAIR_ID", "pair_id"),
+        ("PAIR_ORDER", "pair_order"),
+    ):
+        val = os.environ.get(env_key, "")
+        if val and label_key not in merged_labels:
+            merged_labels[label_key] = val
+    # Auto-detect from RUN_ID if explicit env vars are absent
+    if "experiment_id" not in merged_labels:
+        _run_id = os.environ.get("RUN_ID", run_id)
+        if "causal-" in _run_id:
+            _extract_causal_labels(_run_id, merged_labels)
     payload: Dict[str, Any] = {
         "run_id": run_id,
         "scenario_id": scenario_id,
@@ -50,7 +89,7 @@ def emit_stage_event(
         "t_start": _iso_from_epoch(t_start_epoch),
         "t_end": _iso_from_epoch(t_end_epoch),
         "duration_sec": round(duration, 6),
-        "labels": labels or {},
+        "labels": merged_labels,
         "metrics": metrics or {},
     }
 
@@ -63,7 +102,9 @@ def emit_stage_event(
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.getcode() != 200:
-                sys.stderr.write(f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n")
+                sys.stderr.write(
+                    f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n"
+                )
     except urllib.error.HTTPError as e:
         sys.stderr.write(f"[ingest] HTTPError status={e.code} body={e.read()!r}\n")
     except Exception as e:  # pragma: no cover
@@ -95,7 +136,9 @@ def emit_cloudevent(
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             if resp.getcode() != 200:
-                sys.stderr.write(f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n")
+                sys.stderr.write(
+                    f"[ingest] HTTP {resp.getcode()} body={resp.read()!r}\n"
+                )
     except urllib.error.HTTPError as e:
         sys.stderr.write(f"[ingest] HTTPError status={e.code} body={e.read()!r}\n")
     except Exception as e:  # pragma: no cover

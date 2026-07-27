@@ -136,9 +136,10 @@ class TestExecutionTools:
 
 
 class TestMemoryTool:
-    """Verify memory tool returns stub response."""
+    """Verify memory tool returns empty when BQ is not configured."""
 
-    def test_query_recent_decisions_stub(self):
+    def test_query_recent_decisions_no_project(self, monkeypatch):
+        monkeypatch.setattr("agent.tools.memory_tools.GCP_PROJECT_ID", "")
         result = query_recent_decisions(scenario_id="S3", limit=5)
         assert result["count"] == 0
         assert result["decisions"] == []

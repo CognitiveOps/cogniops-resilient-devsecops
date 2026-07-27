@@ -3,7 +3,7 @@ runtime-agent – CogniOps Runtime Agent (ADK Cognitive Pipeline).
 
 Endpoints:
   POST /events/runtime   – Pub/Sub push receiver (runtime event pipeline)
-  GET  /healthz           – Liveness probe for Cloud Run
+  GET  /health            – Liveness probe for Cloud Run
   GET  /agent/info        – ADK agent metadata
 
 Pipeline:  Event → ADK Runner (Perception → Planning → Guard → Execution) → BQ → Trace
@@ -64,10 +64,51 @@ runner.auto_create_session = True
 # ── Health check ─────────────────────────────────────────────────────
 
 
-@app.get("/healthz")
-async def healthz():
+@app.get("/health")
+async def health():
     """Liveness / readiness probe for Cloud Run."""
     return {"status": "ok", "mode": COGNIOPS_MODE, "version": "0.3.0"}
+
+
+# ── Synchronous decision endpoint (agent-in-the-loop) ───────────────
+
+
+@app.post("/decide")
+async def decide(request: Request):
+    """
+    Synchronous decision endpoint for agent-in-the-loop workflows.
+
+    Accepts a RuntimeEvent directly (no Pub/Sub envelope), runs the
+    full cognitive pipeline, and returns the decision immediately.
+
+    Used by treatment variant workflows to get real agent decisions
+    instead of using inline simulation scripts.
+
+    Returns: {"decision": "ESCALATE", "rationale": "...", ...}
+    """
+    try:
+        body = await request.json()
+        event = RuntimeEvent(**body)
+    except Exception as exc:
+        logger.warning("Invalid event in /decide: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_event", "message": str(exc)},
+        )
+
+    if event.event_type not in ALLOWED_EVENT_TYPES_PHASE0:
+        logger.warning(
+            "Unknown event_type '%s' in /decide — processing anyway",
+            event.event_type,
+        )
+
+    logger.info(
+        "Decide request: id=%s type=%s source=%s",
+        event.event_id, event.event_type, event.source,
+    )
+
+    # Reuse the same pipeline as /events/runtime
+    return await _run_pipeline(event)
 
 
 # ── Pub/Sub push endpoint ───────────────────────────────────────────
@@ -131,6 +172,15 @@ async def receive_runtime_event(request: Request):
         event.source,
     )
 
+    return await _run_pipeline(event)
+
+
+# ── Core cognitive pipeline ──────────────────────────────────────────
+
+
+async def _run_pipeline(event: RuntimeEvent) -> JSONResponse:
+    """Run the ADK cognitive pipeline for a validated RuntimeEvent."""
+
     # ── 4–7. ADK Cognitive Pipeline (with Phase 0 fallback) ───────────
     t_start = time.monotonic()
     t_start_epoch = time.time()
@@ -174,7 +224,10 @@ async def receive_runtime_event(request: Request):
                 # Extract tool call results from ADK events
                 if hasattr(adk_event, "content") and adk_event.content:
                     for part in adk_event.content.parts or []:
-                        if hasattr(part, "function_response") and part.function_response:
+                        if (
+                            hasattr(part, "function_response")
+                            and part.function_response
+                        ):
                             resp = part.function_response.response
                             if isinstance(resp, dict) and "action" in resp:
                                 last_tool_result = resp
@@ -220,6 +273,7 @@ async def receive_runtime_event(request: Request):
         decision_executed=decision_executed,
         rationale=rationale,
         policy_refs=policy_refs,
+        mode=COGNIOPS_MODE,
         agentops_trace_id=agentops_trace_id,
     )
 

@@ -43,7 +43,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: s3-edge-rollback-${{ github.ref }}-${{ inputs.variant || 'baseline' }}
+  group: s3-edge-rollback-${{ github.ref }}-${{ inputs.variant || 'baseline' }}${{
+    (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || ''
+    }}
   cancel-in-progress: false
 
 jobs:
@@ -58,11 +60,16 @@ jobs:
         # - push: run the full fault set (all)
         # - workflow_dispatch fault_mode=all: run the full fault set
         # - workflow_dispatch fault_mode=<x>: run only that fault
-        fault_mode: ${{ fromJson((github.event_name == 'workflow_dispatch' && github.event.inputs.fault_mode != 'all') && format('["{0}"]', github.event.inputs.fault_mode) || '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]') }}
+        fault_mode: ${{ fromJson((github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.fault_mode != 'all') && format('["{0}"]',
+          github.event.inputs.fault_mode) ||
+          '["corrupt_weights","dead_camera","cpu_starvation","net_unstable","disk_full","wrong_arch"]')
+          }}
     env:
       SCENARIO_ID: s3
       MODE: baseline
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ inputs.run_suffix && format('-{0}', inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ inputs.run_suffix &&
+        format('-{0}', inputs.run_suffix) || '' }}
       VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
@@ -74,7 +81,8 @@ jobs:
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       FAIL_MODE: ${{ matrix.fault_mode }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
-      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{ github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
+      GCS_PREFIX: gs://${{ vars.AGENT_ARTIFACTS_BUCKET }}/runs/s3_edge/${{
+        github.run_id }}-${{ github.run_attempt }}/${{ matrix.fault_mode }}
       # Tunable fault model parameters (keep aligned with Cloud Run defaults)
       S3_NET_FAIL_P: "0.1"
       S3_NET_BURST_PROB: "0.05"
@@ -151,9 +159,6 @@ jobs:
           echo "EDGE_PORT=$PORT" >> "$GITHUB_ENV"
           echo "Allocated host port: $PORT"
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
       - name: Compute image refs
         id: refs
         run: |
@@ -164,20 +169,30 @@ jobs:
           echo "ar_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
           echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build & Push image
+      - name: Pull image from Artifact Registry
         id: buildpush
         run: |
           set -euo pipefail
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
-          docker buildx build \
-            --platform linux/amd64 \
-            -t "$IMG" --push baseline/services/edge_cv_app
+          # Pull pre-built image instead of building (saves ~400MB peak RAM)
+          if docker pull "$IMG" 2>/dev/null; then
+            echo "Pulled image by commit SHA"
+          else
+            # Exact tag not in registry — re-use locally cached edge-cv-app image
+            EXISTING=$(docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep 'edge-cv-app' | grep -v '<none>' | head -1)
+            if [ -n "$EXISTING" ]; then
+              docker tag "$EXISTING" "$IMG"
+              echo "Re-tagged local $EXISTING as current SHA"
+            else
+              echo "No cached image, building as fallback..."
+              DOCKER_BUILDKIT=0 docker build -t "$IMG" baseline/services/edge_cv_app
+            fi
+          fi
 
-          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
-          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" 2>/dev/null | sed 's/.*@//')
           if [ -z "$DIGEST" ]; then
-            echo "Failed to resolve image digest for $IMG" >&2
-            exit 1
+            DIGEST=$(docker inspect --format='{{.Id}}' "$IMG")
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
@@ -323,8 +338,10 @@ jobs:
         id: s3recover
         run: |
           set -euo pipefail
+          # Kill faulty container so the port is freed for the healthy replacement
+          docker rm -f "$EDGE_CONTAINER" 2>/dev/null || true
           cd baseline/services/edge_cv_app
-          EDGE_MODE=real EDGE_FAIL_MODE=0 EDGE_HEALTH_CHECK=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
+          EDGE_HOST_PORT="${EDGE_PORT}" EDGE_MODE=real EDGE_FAIL_MODE=0 EDGE_HEALTH_CHECK=0 ./edge_pull_and_activate.sh "$(basename "${{ steps.lkg.outputs.manifest }}")" "${{ env.GCP_REGION }}" "${{ env.GCP_PROJECT }}"
 
       - name: Wait for recovery (MTTR)
         id: s3recover_wait
@@ -489,13 +506,15 @@ jobs:
 
       - name: Upload S3 edge artifacts to GCS (canonical)
         id: gcs
+        continue-on-error: true
         run: |
           set -euo pipefail
           echo "Uploading S3 edge artifacts to ${GCS_PREFIX}"
           gcloud storage cp -r baseline/metrics/s3_edge "${GCS_PREFIX}/"
 
-      - name: Cleanup Docker buildx builder
+      - name: Cleanup Docker
         if: always()
         run: |
-          docker buildx rm --force $(docker buildx ls | grep -oP 'builder-\S+' | head -1) 2>/dev/null || true
+          docker rm -f $(docker ps -aq) 2>/dev/null || true
           docker builder prune -f 2>/dev/null || true
+          docker image prune -f 2>/dev/null || true

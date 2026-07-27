@@ -40,8 +40,15 @@ else
   FINAL_REF="${IMG}"
 fi
 
-# 5) stop old container
-docker rm -f edge_cv_app || true
+# 5) unique container name & port per concurrent run (self-hosted runners share one Docker daemon)
+CONTAINER_NAME="edge_cv_app_${GITHUB_RUN_ID:-$$}"
+HOST_PORT="${EDGE_HOST_PORT:-0}"
+# pick a random free port if not specified and default 0 would not work for health checks
+if [ "$HOST_PORT" = "0" ]; then
+  HOST_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+fi
+
+docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 # 6) run new container
 # Defaults match S2 semantics (MODE=real, FAIL_MODE=0). S3/SS2 may override via env vars.
@@ -68,21 +75,29 @@ for var in "${S3_ENV_VARS[@]}"; do
     EXTRA_ENVS+=(-e "${var}=${!var}")
   fi
 done
-docker run -d --restart=always \
-  --name edge_cv_app \
-  -p 8080:8080 \
+docker run -d --restart=no \
+  --name "$CONTAINER_NAME" \
+  -p "${HOST_PORT}:8080" \
   -e MODE="${EDGE_MODE}" \
   -e FAIL_MODE="${EDGE_FAIL_MODE}" \
   "${EXTRA_ENVS[@]}" \
   "$FINAL_REF"
 
 # 7) health probe
+# Only set cleanup trap when the caller does NOT need the container to persist.
+# When EDGE_HEALTH_CHECK=0 the caller (e.g. S3 recovery step) relies on the
+# container staying alive after this script exits.
+if [ "${EDGE_HEALTH_CHECK:-1}" != "0" ]; then
+  cleanup() { docker rm -f "$CONTAINER_NAME" 2>/dev/null || true; }
+  trap cleanup EXIT
+fi
+
 if [ "${EDGE_HEALTH_CHECK}" = "0" ]; then
   echo "health check skipped (EDGE_HEALTH_CHECK=0)"
   exit 0
 fi
 for i in {1..20}; do
-  if curl -fsS http://127.0.0.1:8080/status >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${HOST_PORT}/status" >/dev/null; then
     echo "healthy"
     exit 0
   fi
@@ -90,5 +105,5 @@ for i in {1..20}; do
 done
 
 echo "not healthy; container logs:"
-docker logs edge_cv_app || true
+docker logs "$CONTAINER_NAME" || true
 exit 1

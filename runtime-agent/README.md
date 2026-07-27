@@ -17,7 +17,7 @@ and **explainability telemetry** (ISO/NIST control mapping + CloudEvent ActionTr
 
 ```
 runtime-agent/
-├── main.py                     # FastAPI app (POST /events/runtime, GET /healthz, GET /agent/info)
+├── main.py                     # FastAPI app (POST /events/runtime, GET /health, GET /agent/info)
 ├── Dockerfile                  # python:3.12-slim + uvicorn
 ├── requirements.txt
 │
@@ -199,7 +199,7 @@ to the metrics ingest endpoint (when `METRICS_INGEST_URL` is configured).
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/events/runtime` | Pub/Sub push receiver — decodes envelope, runs pipeline, writes to BQ |
-| `GET`  | `/healthz` | Liveness / readiness probe (`{"status":"ok","mode":"shadow","version":"0.3.0"}`) |
+| `GET`  | `/health` | Liveness / readiness probe (`{"status":"ok","mode":"shadow","version":"0.3.0"}`) |
 | `GET`  | `/agent/info` | ADK agent metadata — tools, model, guard status |
 
 ### Response Codes

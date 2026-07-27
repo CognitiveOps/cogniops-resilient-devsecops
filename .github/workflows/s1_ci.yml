@@ -13,12 +13,42 @@ on:
 
   # Optional: manual runs
   workflow_dispatch:
+    inputs:
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID (for repeated sampling runs)"
+        required: false
+        default: ""
+        type: string
+
+  # Reusable workflow
+  workflow_call:
+    inputs:
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
+      run_suffix:
+        description: "Optional suffix appended to RUN_ID"
+        required: false
+        default: ""
+        type: string
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION }}
   SERVICE: "baseline-app"
-  REPO_LOCATION: "europe"      # region prefix (europe, us, asia)
+  REPO_LOCATION: "europe" # region prefix (europe, us, asia)
   AR_REPO: "apps"
   METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
   ENV: "prod"
@@ -28,23 +58,19 @@ permissions:
   contents: read
 
 concurrency:
-<<<<<<< HEAD
-  group: s1-baseline-${{ github.ref }}
-  cancel-in-progress: false
-=======
   group: s1-baseline-${{ github.ref }}-${{ inputs.variant || 'baseline' }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: false
->>>>>>> 312c4dd (fix(ci): set cancel-in-progress: false on all 32 workflows)
 
 jobs:
   build-test-push-deploy:
     # Only run if WIF is configured
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 30
     env:
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       MODE: baseline
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     defaults:
       run:
@@ -93,7 +119,7 @@ jobs:
           pip install pytest httpx requests
 
       # --- Prepare metrics context (scenario/branch/env) ----------------------
-      - name: Set run context (scenario/branch/env) 
+      - name: Set run context (scenario/branch/env)
         run: |
           echo "SCENARIO_ID=S1" >> $GITHUB_ENV
           echo "BRANCH=${{ github.ref_name }}" >> $GITHUB_ENV
@@ -137,7 +163,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -171,7 +198,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -226,7 +254,8 @@ jobs:
               "service": "${SERVICE}",
               "env": "${ENV}",
               "branch": "${{ github.ref_name }}",
-              "image": "${IMAGE}"
+              "image": "${IMAGE}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -273,7 +302,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             },
             "metrics": {
               "service_url": "${URL:-}"
@@ -320,7 +350,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -360,7 +391,8 @@ jobs:
             "labels": {
               "service": "${SERVICE}",
               "env": "${ENV}",
-              "branch": "${{ github.ref_name }}"
+              "branch": "${{ github.ref_name }}",
+              "variant": "${VARIANT}"
             }
           }
           EOF

@@ -189,6 +189,23 @@ cython_debug/
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
+# Evaluation reports & outputs (kept local, regenerated from BQ)
+evaluation/results/**/*.md
+evaluation/results/**/*.docx
+evaluation/results/raw/
+evaluation/results/analysis/
+evaluation/results/era2_2026-05-03/
+evaluation/results/security_agent/
+
+# Drawio diagrams (binary, not diffable)
+*.drawio
+
+# Windows / venv artifacts that leak into the repo root
+Lib/
+share/
+scripts/*.exe
+scripts/vba_extract.py
+
 # Ruff stuff:
 .ruff_cache/
 
@@ -206,3 +223,20 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local development files (keys, handoff notes, scratch, drafts)
+.local/
+key.json
+*.local
+*.local.*
+# Thesis drafts and personal docs (keep in .local/)
+report_*_draft.docx
+report_*_draft.pdf
+*_draft.docx
+*_draft.pdf
+# Service account / credentials (always local)
+*-service-account*.json
+*-credentials*.json
+.env
+.env.*
+!.env.example

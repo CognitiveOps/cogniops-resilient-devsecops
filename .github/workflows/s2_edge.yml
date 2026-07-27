@@ -18,6 +18,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -25,22 +35,29 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC auth to GCP
+  id-token: write # required for OIDC auth to GCP
 
 concurrency:
-  group: s2-baseline-${{ github.ref }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+  group: s2-baseline-${{ github.ref }}${{ (inputs.run_suffix || '') != '' &&
+    format('-{0}', inputs.run_suffix) || '' }}
   cancel-in-progress: false
 
 jobs:
   s2:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     env:
       SCENARIO: s2
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix ||
+        '') != '' && format('-{0}', inputs.run_suffix) || '' }}
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       AR_LOCATION: ${{ vars.GCP_REPO_LOCATION }}
@@ -49,9 +66,15 @@ jobs:
       # URL of the scenario-runs-ingest Cloud Function (Gen2, private)
       METRICS_INGEST_URL: ${{ vars.METRICS_INGEST_URL }}
       AGENT_ARTIFACTS_BUCKET: ${{ vars.AGENT_ARTIFACTS_BUCKET }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       # 0️⃣ Start overall timer (used for TTD_edge)
       - name: Start timer
@@ -108,11 +131,11 @@ jobs:
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
           echo "Building image: $IMG"
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/amd64 \
             -t "$IMG" --push baseline/services/edge_cv_app
 
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y jq >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
           RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
           DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
           if [ -z "$DIGEST" ]; then
@@ -197,7 +220,8 @@ jobs:
             },
             "labels": {
               "service": "edge_cv_app",
-              "edge_device": "gh-runner"
+              "edge_device": "gh-runner",
+              "variant": "${VARIANT}"
             }
           }
           EOF
@@ -220,13 +244,15 @@ jobs:
             },
             "labels": {
               "service": "edge_cv_app",
-              "edge_device": "gh-runner"
+              "edge_device": "gh-runner",
+              "variant": "${VARIANT}"
             }
           }
           EOF
 
       # 6️⃣ Upload artifacts to GCS (canonical)
       - name: Upload S2 artifacts to GCS (canonical)
+        continue-on-error: true
         run: |
           set -euo pipefail
           GCS_PREFIX="gs://${AGENT_ARTIFACTS_BUCKET}/runs/s2/${RUN_ID}"

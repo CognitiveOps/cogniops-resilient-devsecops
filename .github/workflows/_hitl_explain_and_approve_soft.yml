@@ -88,7 +88,7 @@ permissions:
 
 jobs:
   explain:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
     steps:
@@ -172,7 +172,7 @@ jobs:
           path: baseline/metrics/hitl
 
   approve:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [explain]
     outputs:
       approval_issue_url: ${{ steps.issue.outputs.issue_url }}
@@ -360,7 +360,7 @@ jobs:
           path: baseline/metrics/hitl
 
   final:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [approve]
     outputs:
       al_sec: ${{ steps.out.outputs.al_sec }}

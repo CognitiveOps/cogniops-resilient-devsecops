@@ -1,0 +1,9 @@
+3_12_7_venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+*.egg-info/
+.mypy_cache/
+evaluation/results/

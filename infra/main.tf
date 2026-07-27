@@ -563,9 +563,10 @@ resource "google_cloudfunctions2_function" "runs_ingest" {
     available_memory      = "256M"
     ingress_settings      = "ALLOW_ALL" # allow external POSTs; IAM still controls access
     environment_variables = {
-      BQ_DATASET  = google_bigquery_dataset.metrics.dataset_id
-      BQ_TABLE    = google_bigquery_table.runs.table_id
-      GCP_PROJECT = var.project_id
+      BQ_DATASET   = google_bigquery_dataset.metrics.dataset_id
+      BQ_TABLE     = google_bigquery_table.runs.table_id
+      GCP_PROJECT  = var.project_id
+      PUBSUB_TOPIC = google_pubsub_topic.runtime_events.name
     }
   }
 

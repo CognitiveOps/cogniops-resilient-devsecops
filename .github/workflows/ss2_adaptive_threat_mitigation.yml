@@ -27,6 +27,16 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label (baseline, runtime_only, design_only, full)"
+        required: false
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - runtime_only
+          - design_only
+          - full
   workflow_call:
     inputs:
       run_suffix:
@@ -44,6 +54,11 @@ on:
         required: false
         default: ""
         type: string
+      variant:
+        description: "Evaluation variant label"
+        required: false
+        default: "baseline"
+        type: string
 
 permissions:
   contents: read
@@ -56,7 +71,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       max-parallel: 1
       matrix:
@@ -87,6 +102,7 @@ jobs:
       SCENARIO_ID: ss2
       MODE: baseline
       RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}${{ (inputs.run_suffix || '') != '' && format('-{0}', inputs.run_suffix) || '' }}
+      VARIANT: ${{ inputs.variant || 'baseline' }}
 
       GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
@@ -113,6 +129,9 @@ jobs:
       SS2_AUTO_APPROVE: ${{ inputs.auto_approve || vars.SS2_AUTO_APPROVE || 'false' }}
       SS2_AUTO_APPROVE_DELAY_SEC: ${{ inputs.auto_approve_delay_sec || vars.SS2_AUTO_APPROVE_DELAY_SEC || '15' }}
 
+      # Unique container name per concurrent run (self-hosted runners share Docker daemon)
+      EDGE_CONTAINER: edge_cv_app_${{ github.run_id }}_${{ matrix.fault_mode }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -136,8 +155,8 @@ jobs:
       - name: Install PQC backend (OQS)
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+          sudo flock /var/lock/apt-actions.lock apt-get update -y
+          sudo flock /var/lock/apt-actions.lock apt-get install -y build-essential cmake ninja-build libssl-dev
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install git+https://github.com/open-quantum-safe/liboqs-python.git
 
@@ -152,6 +171,14 @@ jobs:
           echo "incident_type=${INCIDENT_TYPE}" >> "$GITHUB_OUTPUT"
           echo "fail_mode=${FAIL_MODE}" >> "$GITHUB_OUTPUT"
           echo "artifacts_name=ss2_${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Allocate unique host port
+        id: edge_port
+        run: |
+          PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "EDGE_PORT=$PORT" >> "$GITHUB_ENV"
+          echo "Allocated host port: $PORT"
 
       - name: Require METRICS_INGEST_URL
         run: |
@@ -193,11 +220,8 @@ jobs:
       - name: Install jq
         run: |
           set -euo pipefail
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y jq >/dev/null
-
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+          sudo flock /var/lock/apt-actions.lock apt-get update -y >/dev/null
+          sudo flock /var/lock/apt-actions.lock apt-get install -y jq >/dev/null
 
       - name: Compute image refs
         id: refs
@@ -214,15 +238,12 @@ jobs:
         run: |
           set -euo pipefail
           IMG="${{ steps.refs.outputs.ar_repo }}:${{ steps.refs.outputs.tag }}"
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            -t "$IMG" --push baseline/services/edge_cv_app
+          docker build -t "$IMG" baseline/services/edge_cv_app
+          docker push "$IMG"
 
-          RAW_MANIFEST=$(docker buildx imagetools inspect "$IMG" --format '{{json .Manifest}}')
-          DIGEST=$(echo "$RAW_MANIFEST" | jq -r '.digest // empty')
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" 2>/dev/null | sed 's/.*@//')
           if [ -z "$DIGEST" ]; then
-            echo "Failed to resolve image digest for $IMG" >&2
-            exit 1
+            DIGEST=$(docker inspect --format='{{.Id}}' "$IMG")
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
@@ -502,12 +523,12 @@ jobs:
           echo "t_inject_epoch=$T_INJECT" >> "$GITHUB_OUTPUT"
 
           IMG="${{ steps.buildpush.outputs.image }}@${{ steps.buildpush.outputs.digest }}"
-          docker rm -f edge_cv_app || true
+          docker rm -f "$EDGE_CONTAINER" || true
 
           # Inject a failure mode at runtime (simulates compromise/misconfig after a successful S2 activation).
-          docker run -d --restart=always \
-            --name edge_cv_app \
-            -p 8080:8080 \
+          docker run -d --restart=no \
+            --name "$EDGE_CONTAINER" \
+            -p "${EDGE_PORT}:8080" \
             -e MODE=twin \
             -e FAIL_MODE="${FAIL_MODE}" \
             "$IMG"
@@ -519,7 +540,7 @@ jobs:
           set -euo pipefail
           mkdir -p baseline/metrics/ss2
           python baseline/scripts/ss2_detect.py \
-            --service-url "http://127.0.0.1:8080" \
+            --service-url "http://127.0.0.1:${EDGE_PORT}" \
             --t-inject-epoch "${{ steps.inject.outputs.t_inject_epoch }}" \
             --deadline-sec 180 \
             --poll-interval-sec 2 \
@@ -536,7 +557,7 @@ jobs:
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
         run: |
           set -euo pipefail
-          docker rm -f edge_cv_app || true
+          docker rm -f "$EDGE_CONTAINER" || true
 
       - name: Build HITL case inputs
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' }}
@@ -813,3 +834,8 @@ jobs:
           if [ -d baseline/metrics/hitl ]; then
             gcloud storage cp -r baseline/metrics/hitl "${GCS_PREFIX}/"
           fi
+
+      - name: Cleanup Docker
+        if: always()
+        run: |
+          docker builder prune -f 2>/dev/null || true

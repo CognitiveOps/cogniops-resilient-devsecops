@@ -2,7 +2,7 @@ name: Security Compliance Agent — Test, Build & Deploy
 
 on:
     push:
-        branches: [runtime_agent_dev, main]
+        branches: [runtime_agent_dev, design_time_agent_dev, main]
         paths:
             - "security-agent/**"
             - "config/**"
@@ -27,7 +27,7 @@ concurrency:
 jobs:
     # ── Job 1: Run tests ──────────────────────────────────────────────
     test:
-        runs-on: ubuntu-latest
+        runs-on: self-hosted
         timeout-minutes: 15
         steps:
             - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
     build-push:
         needs: test
         if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-        runs-on: ubuntu-latest
+        runs-on: self-hosted
         timeout-minutes: 15
         outputs:
             image: ${{ steps.meta.outputs.image }}
@@ -77,8 +77,7 @@ jobs:
     # ── Job 3: Deploy to Cloud Run ─────────────────────────────────────
     deploy:
         needs: build-push
-        if: github.ref == 'refs/heads/main'
-        runs-on: ubuntu-latest
+        runs-on: self-hosted
         timeout-minutes: 10
         steps:
             - id: auth
@@ -98,7 +97,7 @@ jobs:
     # ── Job 4: Smoke test ──────────────────────────────────────────────
     smoke-test:
         needs: deploy
-        runs-on: ubuntu-latest
+        runs-on: self-hosted
         timeout-minutes: 5
         steps:
             - id: auth
@@ -106,6 +105,8 @@ jobs:
               with:
                   workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
                   service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+
+            - uses: google-github-actions/setup-gcloud@v2
 
             - name: Get service URL
               id: url
@@ -115,18 +116,40 @@ jobs:
                     --format 'value(status.url)')
                   echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+            - name: Auth with ID token
+              id: auth_id
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+                  service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+                  token_format: "id_token"
+                  id_token_audience: ${{ steps.url.outputs.url }}
+                  id_token_include_email: true
+
             - name: Health check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
-                  STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
-                    -H "Authorization: Bearer $TOKEN" \
-                    "${{ steps.url.outputs.url }}/healthz")
-                  echo "Health check: $STATUS"
-                  [ "$STATUS" = "200" ]
+                  TOKEN="${{ steps.auth_id.outputs.id_token }}"
+                  URL="${{ steps.url.outputs.url }}/health"
+                  echo "Token length: ${#TOKEN}"
+                  echo "URL: $URL"
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: Token is empty!"
+                    exit 1
+                  fi
+                  for i in 1 2 3 4 5; do
+                    STATUS=$(curl -s -o /tmp/hc_body.txt -w '%{http_code}' \
+                      -H "Authorization: Bearer $TOKEN" "$URL")
+                    echo "Attempt $i — Health check: $STATUS"
+                    cat /tmp/hc_body.txt && echo ""
+                    [ "$STATUS" = "200" ] && exit 0
+                    sleep 10
+                  done
+                  echo "Health check failed after 5 attempts"
+                  exit 1
 
             - name: Agent info check
               run: |
-                  TOKEN=$(gcloud auth print-identity-token --audiences=${{ steps.url.outputs.url }})
+                  TOKEN="${{ steps.auth_id.outputs.id_token }}"
                   curl -s -H "Authorization: Bearer $TOKEN" \
                     "${{ steps.url.outputs.url }}/agent/info" | python3 -c "
                   import json, sys

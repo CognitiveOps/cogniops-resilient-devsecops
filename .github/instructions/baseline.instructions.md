@@ -12,7 +12,7 @@ It must NEVER contain AI/LLM logic, stochastic behavior, or agent code.
 - `services/app/` — Baseline web app (Cloud Run, health check)
 - `services/edge_cv_app/` — Edge CV app (MODE=real / MODE=twin for fault injection)
 - `explainability/` — ActionTrace schema, ACR computation, approval latency, CloudEvents, reports
-- `security/pqc/` — PQC signing/verification (liboqs, Dilithium2, SPHINCS+)
+- `security/pqc/` — PQC signing/verification (liboqs, Dilithium2)
 - `scripts/` — Metric writers, backfill scripts, calibration tools
 - `metrics/` — Generated artifacts (CSV, manifests)
 

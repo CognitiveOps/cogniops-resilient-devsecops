@@ -1,0 +1,285 @@
+{
+    "description": "2-Axis Evaluation Experiment Matrix",
+    "axes": {
+        "x": "design_time_intelligence",
+        "y": "runtime_intelligence"
+    },
+    "variants": {
+        "baseline": {
+            "design_agent": false,
+            "runtime_agent": false
+        },
+        "design_only": {
+            "design_agent": true,
+            "runtime_agent": false
+        },
+        "runtime_only": {
+            "design_agent": false,
+            "runtime_agent": true
+        },
+        "full": {
+            "design_agent": true,
+            "runtime_agent": true
+        }
+    },
+    "scenarios": {
+        "s1": {
+            "name": "CI/CD Pipeline",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "TTD",
+                "CFR",
+                "DF"
+            ],
+            "min_runs": 10,
+            "primary_metric": "TTD",
+            "stages": {
+                "TTD": {
+                    "stage": "s1_final",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                },
+                "CFR": {
+                    "stage": "s1_final",
+                    "aggregation": "failure_rate",
+                    "lower_is_better": true
+                },
+                "DF": {
+                    "stage": "s1_final",
+                    "aggregation": "frequency_per_day",
+                    "higher_is_better": true
+                }
+            }
+        },
+        "s2": {
+            "name": "Edge OTA Deployment",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "TDL",
+                "DSR",
+                "TTD_edge"
+            ],
+            "min_runs": 10,
+            "primary_metric": "TDL",
+            "stages": {
+                "TDL": {
+                    "stage": "s2_activate",
+                    "json_key": "tdl_sec",
+                    "lower_is_better": true
+                },
+                "DSR": {
+                    "stage": "s2_activate",
+                    "aggregation": "success_rate",
+                    "higher_is_better": true
+                },
+                "TTD_edge": {
+                    "stage": "s2_ttd_edge",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                }
+            }
+        },
+        "s3_cloud": {
+            "name": "Rollback & Resilience (Cloud Run)",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "MTTD",
+                "MTTR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "MTTR",
+            "stages": {
+                "MTTD": {
+                    "stage": "s3_detect",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                },
+                "MTTR": {
+                    "stage": "s3_recover",
+                    "field": "duration_sec",
+                    "lower_is_better": true
+                }
+            }
+        },
+        "s3_edge": {
+            "name": "Rollback & Resilience (Edge OTA)",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "MTTD",
+                "MTTR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "MTTR",
+            "stages": {
+                "MTTD": {
+                    "stage": "s3_detect_edge",
+                    "json_key": "ttd_sample_sec",
+                    "lower_is_better": true
+                },
+                "MTTR": {
+                    "stage": "s3_recover_edge",
+                    "json_key": "ttr_sample_sec",
+                    "lower_is_better": true
+                }
+            }
+        },
+        "s4": {
+            "name": "PQC Security Validation",
+            "variants": [
+                "baseline",
+                "design_only",
+                "full"
+            ],
+            "metrics": [
+                "TTV",
+                "VSR",
+                "FDR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "TTV",
+            "stages": {
+                "TTV": {
+                    "stage": "s4_p0_valid",
+                    "json_key": "ttv_ms",
+                    "lower_is_better": true
+                },
+                "VSR": {
+                    "stage": "s4_p0_valid",
+                    "aggregation": "success_rate",
+                    "higher_is_better": true
+                },
+                "FDR": {
+                    "stages": [
+                        "s4_p1_tamper",
+                        "s4_p2_wrong_key",
+                        "s4_p3_replay"
+                    ],
+                    "aggregation": "rejection_rate",
+                    "higher_is_better": true
+                }
+            }
+        },
+        "s5": {
+            "name": "Explainability & HITL",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "AL",
+                "ACR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "AL",
+            "stages": {
+                "AL": {
+                    "stage": "s5_approve",
+                    "json_key": "al_sec",
+                    "lower_is_better": true
+                },
+                "ACR": {
+                    "stage": "s5_final",
+                    "json_key": "acr",
+                    "higher_is_better": true
+                }
+            }
+        },
+        "ss1": {
+            "name": "Security Policy Audit",
+            "variants": [
+                "baseline",
+                "design_only",
+                "full"
+            ],
+            "metrics": [
+                "CFR",
+                "FDR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "FDR",
+            "stages": {
+                "CFR": {
+                    "stage": "ss1_health",
+                    "aggregation": "failure_rate",
+                    "lower_is_better": true
+                },
+                "FDR": {
+                    "stage": "ss1_policy",
+                    "aggregation": "detection_rate",
+                    "higher_is_better": true
+                }
+            }
+        },
+        "ss2": {
+            "name": "Adaptive Threat Mitigation",
+            "variants": [
+                "baseline",
+                "design_only",
+                "runtime_only",
+                "full"
+            ],
+            "metrics": [
+                "MTTD",
+                "AL",
+                "ACR"
+            ],
+            "min_runs": 10,
+            "primary_metric": "MTTD",
+            "stages": {
+                "MTTD": {
+                    "stage": "ss2_detect",
+                    "json_key": "mttd_sample_sec",
+                    "lower_is_better": true
+                },
+                "AL": {
+                    "stage": "s5_final",
+                    "json_key": "al_sec",
+                    "lower_is_better": true
+                },
+                "ACR": {
+                    "stage": "s5_final",
+                    "json_key": "acr",
+                    "higher_is_better": true
+                }
+            }
+        }
+    },
+    "focus_tiers": {
+        "full_dual_model": [
+            "s1",
+            "s3_cloud",
+            "s3_edge",
+            "s5"
+        ],
+        "design_focus": [
+            "ss1",
+            "s4"
+        ],
+        "runtime_focus": [
+            "s2",
+            "ss2"
+        ]
+    }
+}

@@ -2,7 +2,7 @@ name: Runtime Agent — Test, Build, Bundle & Deploy
 
 on:
   push:
-    branches: [runtime_agent_dev, main]
+    branches: [runtime_agent_dev, design_time_agent_dev, main]
     paths:
       - "runtime-agent/**"
       - "security/policies/**"
@@ -29,7 +29,7 @@ concurrency:
 jobs:
   # ── Job 1: Run tests ──────────────────────────────────────────────
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
   bundle-policies:
     needs: test
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -69,17 +69,17 @@ jobs:
       - name: Build OPA bundle & upload to GCS
         run: |
           opa build -b security/policies/ -o bundle.tar.gz
-          gsutil cp bundle.tar.gz "gs://${CONFIG_BUCKET}/bundles/runtime/bundle.tar.gz"
+          gcloud storage cp bundle.tar.gz "gs://${CONFIG_BUCKET}/bundles/runtime/bundle.tar.gz"
 
       - name: Upload control mappings
         run: |
-          gsutil cp config/control-mappings.yaml "gs://${CONFIG_BUCKET}/control-mappings/v1.yaml"
+          gcloud storage cp config/control-mappings.yaml "gs://${CONFIG_BUCKET}/control-mappings/v1.yaml"
 
   # ── Job 3: Build & push Docker image ──────────────────────────────
   build-push:
     needs: test
     if: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_SA_APP_EMAIL != '' }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -105,13 +105,13 @@ jobs:
 
       - name: Build & push Docker image
         run: |
-          docker build -t "${{ steps.meta.outputs.image }}" runtime-agent/
+          docker build -f runtime-agent/Dockerfile -t "${{ steps.meta.outputs.image }}" .
           docker push "${{ steps.meta.outputs.image }}"
 
   # ── Job 4: Deploy to Cloud Run ────────────────────────────────────
   deploy:
     needs: [build-push, bundle-policies]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     steps:
       - name: Auth to GCP (OIDC/WIF)
@@ -134,7 +134,7 @@ jobs:
   # ── Job 5: Smoke test ─────────────────────────────────────────────
   smoke-test:
     needs: deploy
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -147,15 +147,37 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Health & agent-info checks
+      - name: Get service URL
+        id: url
         run: |
           URL=$(gcloud run services describe runtime-agent --region="${REGION}" --format='value(status.url)')
-          TOKEN=$(gcloud auth print-identity-token --audiences="$URL")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Auth with ID token
+        id: auth_id
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA_APP_EMAIL }}
+          token_format: "id_token"
+          id_token_audience: ${{ steps.url.outputs.url }}
+          id_token_include_email: true
+
+      - name: Health & agent-info checks
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+          TOKEN="${{ steps.auth_id.outputs.id_token }}"
           echo "Runtime agent URL: $URL"
 
           echo "── Health check ──"
-          curl -sf -H "Authorization: Bearer $TOKEN" "$URL/healthz"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /tmp/health_body.txt -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL/health")
+            echo "Attempt $i — status: $STATUS"
+            cat /tmp/health_body.txt && echo ""
+            [ "$STATUS" = "200" ] && break
+            sleep 10
+          done
+          [ "$STATUS" = "200" ]
 
-          echo ""
           echo "── Agent info ──"
-          curl -sf -H "Authorization: Bearer $TOKEN" "$URL/agent/info"
+          curl -s -H "Authorization: Bearer $TOKEN" "$URL/agent/info"

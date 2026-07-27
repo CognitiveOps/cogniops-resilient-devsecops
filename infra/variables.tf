@@ -56,9 +56,23 @@ variable "runtime_agent_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+# OPA server container image (custom image with embedded Rego policies)
+variable "opa_image" {
+  description = "Full container image URI for the OPA server (set by CI/CD)"
+  type        = string
+  default     = "openpolicyagent/opa:latest-static"
+}
+
 # Security compliance agent container image
 variable "compliance_agent_image" {
   description = "Full container image URI for the security-compliance-agent (set by CI/CD)"
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
+# Design-time agent container image
+variable "design_agent_image" {
+  description = "Full container image URI for the design-agent (set by CI/CD)"
   type        = string
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }

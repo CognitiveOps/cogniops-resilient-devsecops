@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
+from google.genai.types import GenerateContentConfig
 
 from agent.callbacks.guard_callback import guard_callback
 from agent.tools.execution_tools import (
@@ -63,6 +64,10 @@ cogniops_agent = LlmAgent(
     name="cogniops_planning",
     model=COGNIOPS_MODEL,
     instruction=_build_instruction(),
+    generate_content_config=GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=256,
+    ),
     tools=[
         perceive_anomaly,
         no_action,

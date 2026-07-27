@@ -157,6 +157,18 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
         value = "gemini-2.0-flash"
       }
       env {
+        name  = "GOOGLE_GENAI_USE_VERTEXAI"
+        value = "true"
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "GOOGLE_CLOUD_LOCATION"
+        value = var.region
+      }
+      env {
         name  = "LOOKBACK_DAYS"
         value = "7"
       }
@@ -184,7 +196,7 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
     }
   }
 
-  ingress    = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress    = "INGRESS_TRAFFIC_ALL"
   depends_on = [
     google_project_service.services,
     google_secret_manager_secret.nist_api_key,
@@ -196,6 +208,11 @@ resource "google_cloud_run_v2_service" "compliance_agent" {
     google_storage_bucket_iam_member.compliance_agent_config_reader,
     google_storage_bucket_iam_member.compliance_agent_config_writer,
   ]
+
+  # CI/CD deploys the real image; Terraform must not revert to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 
@@ -252,6 +269,15 @@ resource "google_cloud_run_v2_service_iam_member" "compliance_agent_self_invoker
   name     = google_cloud_run_v2_service.compliance_agent.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.compliance_agent.email}"
+}
+
+# gha-app SA needs roles/run.invoker on compliance-agent (CI smoke tests)
+resource "google_cloud_run_v2_service_iam_member" "gha_app_compliance_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.compliance_agent.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.gha_app.email}"
 }
 
 

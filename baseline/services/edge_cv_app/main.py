@@ -144,7 +144,11 @@ def _simulate_frame_loop(mode: str) -> None:
 def status():
     """
     Status endpoint used by S2 (real edge) and S3 (twin metrics).
-    Legacy FAIL_MODEs can still force hard failures here.
+    Legacy generic_fail mode can still force a hard failure here.
+    Specific fault modes (corrupt_weights, disk_full, etc.) are handled by
+    the fault model through METRICS — not hardcoded HTTP errors — so that
+    the /status response reflects the fault model's actual state and allows
+    recovery polling to succeed after rollback.
     """
     fail_mode = os.getenv("FAIL_MODE", "0").lower()
 
@@ -154,13 +158,9 @@ def status():
             detail="Injected failure for S3 scenario (FAIL_MODE=generic_fail)",
         )
 
-    if fail_mode == "disk_full":
-        raise HTTPException(status_code=507, detail="Simulated disk full / read-only filesystem")
-
-    if fail_mode == "corrupt_weights":
-        raise HTTPException(status_code=500, detail="Simulated corrupted model weights")
-
-    # net_unstable and cpu_starvation induce delay via fault model; keep fast response here
+    # All other fault modes (corrupt_weights, disk_full, dead_camera, etc.)
+    # degrade metrics via the fault model frame loop.  The detection script
+    # (s3_detect_status.py) checks healthy, fps, detection_rate in the JSON.
     return JSONResponse(METRICS.to_dict())
 
 
@@ -198,8 +198,7 @@ async def infer(file: UploadFile = File(...)):
         minSize=(30, 30),
     )
     boxes = [
-        {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
-        for (x, y, w, h) in faces
+        {"x": int(x), "y": int(y), "w": int(w), "h": int(h)} for (x, y, w, h) in faces
     ]
     return {"ok": True, "detections": boxes, "count": len(boxes)}
 
