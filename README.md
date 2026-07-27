@@ -70,6 +70,10 @@ The system was evaluated with **5,833 metric samples across 54 comparisons** (Er
 | S4 | FDR/VSR | 100% | — | All tampered artifacts detected; all valid signatures verified |
 | S1 | CFR | 0% | — | No deployment failures across baseline or agent variants |
 
+![Era 1 effect-size heatmap](evaluation/results/analysis/graphs/effect_size_heatmap.png)
+
+*Era 1 effect-size heatmap (54 comparisons across 8 scenarios). Blue = improvement, red = worsening. See [docs/showcase-evidence.md](docs/showcase-evidence.md) for full tables.*
+
 ### Honest limitations
 
 The evaluation also surfaced real overhead costs:

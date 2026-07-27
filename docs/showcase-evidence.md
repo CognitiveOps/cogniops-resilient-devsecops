@@ -75,9 +75,13 @@ This kind of honest reporting is the point of the 2-axis evaluation: a metric ca
 
 Pre-generated plots are committed under [`evaluation/results/analysis/graphs/`](evaluation/results/analysis/graphs/):
 
-- `effect_size_heatmap.png` — all 54 Era 1 comparisons.
-- `two_axis_quadrant.png` — practical significance vs statistical significance.
-- `s5_al_bars.png`, `s3_cloud_mttd_bars.png`, `ss2_al_bars.png` — per-scenario breakdowns.
+![Era 1 effect-size heatmap](../evaluation/results/analysis/graphs/effect_size_heatmap.png)
+
+*Era 1 effect-size heatmap: 54 comparisons across 8 scenarios. Blue cells = improvement, red cells = worsening.*
+
+![Two-axis quadrant](../evaluation/results/analysis/graphs/two_axis_quadrant.png)
+
+*Two-axis evaluation quadrant: statistical significance (x) vs practical significance (y). The upper-right quadrant contains the outcomes that are both statistically robust and practically meaningful.*
 
 ## Reproducibility
 
