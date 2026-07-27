@@ -47,8 +47,12 @@ class TestScenarioMetricMap(unittest.TestCase):
 
     def test_s3_has_mttd_and_mttr(self):
         names = {m["name"] for m in SCENARIO_METRIC_MAP["s3"]}
-        assert "MTTD" in names
-        assert "MTTR" in names
+        assert any(n.startswith("MTTD") for n in names)
+        assert any(n.startswith("MTTR") for n in names)
+        assert "MTTD_cloud" in names
+        assert "MTTD_edge" in names
+        assert "MTTR_cloud" in names
+        assert "MTTR_edge" in names
 
     def test_ss2_has_mttd(self):
         assert any(m["name"] == "MTTD" for m in SCENARIO_METRIC_MAP["ss2"])
@@ -75,7 +79,7 @@ class TestBuildContext(unittest.TestCase):
     @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
     def test_parses_metric_rows(self, mock_gcs, mock_bq):
         mock_bq.side_effect = [
-            # First call: metric query for s3 MTTD
+            # s3 MTTD_cloud metric + trend
             [
                 {
                     "mean_value": 8.5,
@@ -84,9 +88,8 @@ class TestBuildContext(unittest.TestCase):
                     "sample_count": 30,
                 }
             ],
-            # Second call: trend query for s3 MTTD
             [{"recent_avg": 8.0, "prior_avg": 9.0}],
-            # Third call: metric query for s3 MTTR
+            # s3 MTTR_cloud metric + trend
             [
                 {
                     "mean_value": 45.0,
@@ -95,22 +98,50 @@ class TestBuildContext(unittest.TestCase):
                     "sample_count": 25,
                 }
             ],
-            # Fourth call: trend query for s3 MTTR
             [{"recent_avg": 50.0, "prior_avg": 40.0}],
-            # Fifth call: decisions query
+            # s3 MTTD_edge metric + trend
+            [
+                {
+                    "mean_value": 9.0,
+                    "p50_value": 8.0,
+                    "p95_value": 14.0,
+                    "sample_count": 28,
+                }
+            ],
+            [{"recent_avg": 9.0, "prior_avg": 9.0}],
+            # s3 MTTR_edge metric + trend
+            [
+                {
+                    "mean_value": 55.0,
+                    "p50_value": 50.0,
+                    "p95_value": 90.0,
+                    "sample_count": 22,
+                }
+            ],
+            [{"recent_avg": 100.0, "prior_avg": 50.0}],
+            # Decisions query
             [],
         ]
         result = build_context(scenarios=["s3"])
         ctx = result["context"]
-        assert len(ctx["scenario_metrics"]) == 2
-        mttd = ctx["scenario_metrics"][0]
-        assert mttd["metric_name"] == "MTTD"
-        assert mttd["mean_value"] == 8.5
-        assert mttd["trend_direction"] == "improving"
+        assert len(ctx["scenario_metrics"]) == 4
 
-        mttr = ctx["scenario_metrics"][1]
-        assert mttr["metric_name"] == "MTTR"
-        assert mttr["trend_direction"] == "degrading"
+        mttd_cloud = ctx["scenario_metrics"][0]
+        assert mttd_cloud["metric_name"] == "MTTD_cloud"
+        assert mttd_cloud["mean_value"] == 8.5
+        assert mttd_cloud["trend_direction"] == "improving"
+
+        mttr_cloud = ctx["scenario_metrics"][1]
+        assert mttr_cloud["metric_name"] == "MTTR_cloud"
+        assert mttr_cloud["trend_direction"] == "degrading"
+
+        mttd_edge = ctx["scenario_metrics"][2]
+        assert mttd_edge["metric_name"] == "MTTD_edge"
+        assert mttd_edge["trend_direction"] == "stable"
+
+        mttr_edge = ctx["scenario_metrics"][3]
+        assert mttr_edge["metric_name"] == "MTTR_edge"
+        assert mttr_edge["trend_direction"] == "degrading"
 
     @patch("agent.tools.context_builder._query_bq")
     @patch("agent.tools.context_builder._read_gcs_json", return_value=None)
