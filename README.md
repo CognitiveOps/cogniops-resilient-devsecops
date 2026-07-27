@@ -3,6 +3,9 @@
 > MSc thesis implementation: an autonomous cognitive agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
 
 [![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
+[![Evaluation data](https://img.shields.io/badge/evaluation-data%20available-blue)](evaluation/results/)
+[![Evidence](https://img.shields.io/badge/evidence-showcase--evidence%2Emd-green)](docs/showcase-evidence.md)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -83,6 +86,17 @@ The evaluation also surfaced real overhead costs:
 - The design agent autonomously proposed substrate tuning that improved raw metrics, but some gains were sleep-gate artifacts rather than genuine latency reductions (documented as Goodhart's Law).
 
 These trade-offs are reported, not hidden. See [`docs/showcase-evidence.md`](docs/showcase-evidence.md).
+
+### Reproducibility
+
+The evaluation artifacts are version-controlled and timestamped:
+
+- Raw metric exports: [`evaluation/results/raw/`](evaluation/results/raw/)
+- Statistical comparisons: [`evaluation/results/analysis/`](evaluation/results/analysis/)
+- Experiment runner: [`evaluation/scripts/run_experiment.py`](evaluation/scripts/run_experiment.py)
+- Tagged snapshot: [`v0.1.0-alpha`](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases/tag/v0.1.0-alpha)
+
+Each raw export includes the CSV schema and BigQuery table metadata. The analysis files include Mann–Whitney U statistics, Cohen's *d* effect sizes, and bootstrap confidence intervals used in the tables above.
 
 ## Tech stack
 
