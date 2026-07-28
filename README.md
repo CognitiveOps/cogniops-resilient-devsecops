@@ -156,7 +156,7 @@ This work demonstrates:
 
 ## Thesis
 
-Yanna Koutroumpi, *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"*, MSc thesis, 2026.
+Yanna Koutroumpi, *"Cognitive AI Agent for Resilient DevSecOps to Edge Environments"*, MSc thesis, 2026.
 
 Note: the software implementation emphasises **bounded autonomy** — every action is constrained to a small deterministic surface and validated by guardrails.
 
@@ -175,7 +175,7 @@ Contributions and forks are welcome; see [`CITATION.cff`](CITATION.cff) for attr
 
 ## Acknowledgments
 
-This work was developed as part of the MSc thesis *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"* at the [MSc in Artificial Intelligence and Deep Learning](https://aidl.uniwa.gr/), University of West Attica. The repo code implements this as a **bounded-autonomy** system with deterministic guardrails.
+This work was developed as part of the MSc thesis *"Cognitive AI Agent for Resilient DevSecOps to Edge Environments"* at the [MSc in Artificial Intelligence and Deep Learning](https://aidl.uniwa.gr/), University of West Attica. The repo code implements this as a **bounded-autonomy** system with deterministic guardrails.
 
 - **Thesis supervisor:** [Prof. Christoforos Kachris](https://www.linkedin.com/in/christoforos-kachris-69b70b15/)
 

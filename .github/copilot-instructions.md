@@ -1,7 +1,7 @@
 # CogniOps — Project Governance & AI Engineering Standards
 
 ## Project Identity
-MSc Thesis: "Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"
+MSc Thesis: "Cognitive AI Agent for Resilient DevSecOps to Edge Environments"
 Repository: cogniops-resilient-devsecops
 Architecture: Hybrid Cognitive-SOAR pattern with 2-Axis Evaluation Model
 
