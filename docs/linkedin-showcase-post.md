@@ -19,7 +19,7 @@ Two things I’m especially proud of:
 Code, architecture docs, evaluation plan and the v0.1.0-alpha release are all open:
 https://github.com/CognitiveOps/cogniops-resilient-devsecops
 
-Big thanks to my supervisor Ioannis Kachris for keeping me honest on the rigour side.
+Big thanks to my supervisor [Prof. Christoforos Kachris](https://www.linkedin.com/in/christoforos-kachris-69b70b15/) for keeping me honest on the rigour side.
 
 If you’re working on AI agents in production — especially around safety boundaries, observability or edge ops — I’d love your feedback.
 
