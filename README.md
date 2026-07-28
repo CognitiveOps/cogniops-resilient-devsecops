@@ -1,6 +1,6 @@
 # CogniOps — Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps
 
-> MSc thesis implementation: a bounded-autonomy cognitive agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
+> Open-source reference implementation from the MSc thesis *"Cognitive AI Agent for Resilient DevSecOps to Edge Environments"* (AIDL, University of West Attica). A bounded-autonomy agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
 
 [![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
@@ -22,22 +22,29 @@ CogniOps treats these as a unified control problem: a **cognitive control plane*
 
 ## Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                    Cognitive Control Plane                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ Runtime     │  │ Design-Time │  │ Security /          │  │
-│  │ Agent       │  │ Agent       │  │ Compliance Agent    │  │
-│  │ (mitigate)  │  │ (improve)   │  │ (audit)             │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
-└─────────┼────────────────┼────────────────────┼─────────────┘
-          │                │                    │
-          └────────────────┴────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│              Deterministic Substrate (S1–SS2)                │
-│  GitHub Actions · OPA · PQC (ML-DSA) · Cloud Run · BigQuery  │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph control["Cognitive Control Plane"]
+        runtime["Runtime Agent\nperceive → plan → guard → act\nmitigate"]
+        design["Design-Time Agent\nmetrics → causal graph → proposal\nimprove"]
+        security["Security Compliance Agent\nfeed → audit → proposal\naudit"]
+    end
+
+    subgraph substrate["Deterministic Substrate"]
+        direction LR
+        gh["GitHub Actions"]
+        opa["OPA"]
+        pqc["PQC / ML-DSA"]
+        cr["Cloud Run"]
+        bq["BigQuery"]
+    end
+
+    runtime -->|bounded actions| substrate
+    design -->|validated proposals| substrate
+    security -->|compliance proposals| substrate
+
+    style control fill:#f0f7ff,stroke:#0969da
+    style substrate fill:#f6f8fa,stroke:#656d76
 ```
 
 ### Design principles
