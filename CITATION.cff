@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software or the evaluation data in academic work, please cite it as below."
 type: software
-title: "CogniOps: Autonomous Cognitive AI Agent for Resilient DevSecOps"
+title: "CogniOps: Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps"
 abstract: "A hybrid Cognitive-SOAR agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability with deterministic guardrails and a 2-axis evaluation framework."
 authors:
   - family-names: Koutroumpi

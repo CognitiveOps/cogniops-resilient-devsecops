@@ -1,6 +1,6 @@
 # AI System Audit Report
 
-> CogniOps — Autonomous Cognitive AI Agent for Resilient DevSecOps Environments  
+> CogniOps — Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps Environments  
 > Audit Date: 2026-03-09  
 > Scope: Full repository assessment prior to AI/LLM integration  
 > Auditor: AI Engineering Review (automated + human-directed)

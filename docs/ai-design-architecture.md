@@ -1,6 +1,6 @@
 # AI Design Engineering Architecture
 
-> CogniOps — Autonomous Cognitive AI Agent for Resilient DevSecOps Environments  
+> CogniOps — Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps Environments  
 > Version: 2.0 (Post-Implementation)  
 > Last Updated: 2026-03-19  
 > Status: All Steps (0–7) Implemented — Ready for Evaluation with Real Data

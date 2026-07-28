@@ -1,6 +1,6 @@
-# CogniOps — Autonomous Cognitive AI Agent for Resilient DevSecOps
+# CogniOps — Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps
 
-> MSc thesis implementation: an autonomous cognitive agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
+> MSc thesis implementation: a bounded-autonomy cognitive agent stack that reasons over CI/CD, edge OTA, resilience, post-quantum security, and explainability — with deterministic guardrails and a rigorous 2-axis evaluation framework.
 
 [![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
@@ -156,7 +156,9 @@ This work demonstrates:
 
 ## Thesis
 
-Yanna Koutroumpi, *Autonomous Cognitive AI Agent for Resilient DevSecOps Environments*, MSc thesis, 2026.
+Yanna Koutroumpi, *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"*, MSc thesis, 2026.
+
+Note: the software implementation emphasises **bounded autonomy** — every action is constrained to a small deterministic surface and validated by guardrails.
 
 ## Future work
 
@@ -173,7 +175,7 @@ Contributions and forks are welcome; see [`CITATION.cff`](CITATION.cff) for attr
 
 ## Acknowledgments
 
-This work was developed as part of the MSc thesis *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"* at the [MSc in Artificial Intelligence and Deep Learning](https://aidl.uniwa.gr/), University of West Attica.
+This work was developed as part of the MSc thesis *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"* at the [MSc in Artificial Intelligence and Deep Learning](https://aidl.uniwa.gr/), University of West Attica. The repo code implements this as a **bounded-autonomy** system with deterministic guardrails.
 
 - **Thesis supervisor:** [Prof. Christoforos Kachris](https://www.linkedin.com/in/christoforos-kachris-69b70b15/)
 

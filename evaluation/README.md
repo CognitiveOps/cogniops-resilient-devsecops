@@ -1,6 +1,6 @@
 # 2-Axis Evaluation Framework
 
-Publishable evaluation framework for the CogniOps thesis: measures autonomous agent impact across two orthogonal axes of intelligence.
+Publishable evaluation framework for the CogniOps thesis: measures bounded-autonomy agent impact across two orthogonal axes of intelligence.
 
 ## 2-Axis Model
 

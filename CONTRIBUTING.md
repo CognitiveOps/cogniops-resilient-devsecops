@@ -1,6 +1,6 @@
 # Contributing to CogniOps
 
-Thanks for your interest. This repository started as an MSc thesis project and is now maintained as an open portfolio piece for autonomous cognitive agents in DevSecOps.
+Thanks for your interest. This repository started as an MSc thesis project and is now maintained as an open portfolio piece for bounded-autonomy cognitive agents in DevSecOps.
 
 ## How to contribute
 

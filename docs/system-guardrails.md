@@ -1,6 +1,6 @@
 # System Design Guardrails
 
-> CogniOps — Autonomous Cognitive AI Agent for Resilient DevSecOps Environments  
+> CogniOps — Bounded-Autonomy Cognitive AI Agent for Resilient DevSecOps Environments  
 > Version: 1.0  
 > Last Updated: 2026-03-09  
 > Status: Binding — All implementation MUST comply with these constraints
