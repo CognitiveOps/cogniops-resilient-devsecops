@@ -171,6 +171,12 @@ This release is a stable snapshot of the thesis baseline. The evaluation surface
 
 Contributions and forks are welcome; see [`CITATION.cff`](CITATION.cff) for attribution.
 
+## Acknowledgments
+
+This work was developed as part of the MSc thesis *"Autonomous Cognitive AI Agent for Resilient DevSecOps Environments"* at the [MSc in Artificial Intelligence and Deep Learning](https://aidl.uniwa.gr/), University of West Attica.
+
+- **Thesis supervisor:** [Prof. Christoforos Kachris](https://www.linkedin.com/in/christoforos-kachris-69b70b15/)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
