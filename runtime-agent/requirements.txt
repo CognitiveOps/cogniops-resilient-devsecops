@@ -10,7 +10,7 @@ google-cloud-storage>=2.16,<3.0
 
 # ADK — Cognitive Agent (Step 1+)
 google-adk>=1.0,<2.0
-google-cloud-aiplatform>=1.60,<2.0
+google-cloud-aiplatform>=1.163.0,<2.0
 
 # Telemetry (optional – AgentOps)
 agentops>=0.3,<1.0
