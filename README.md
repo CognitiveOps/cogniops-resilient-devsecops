@@ -163,14 +163,17 @@ See [`docs/local-setup.md`](docs/local-setup.md) for the full local setup.
 
 ```bash
 python -m venv .venv
-. .venv/bin/activate
+. .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
+# Run per package (root pytest may fail on Windows due to conftest.py names)
 pytest runtime-agent/tests
 pytest design-agent/tests
 pytest security-agent/tests
 pytest evaluation/tests
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full development workflow.
 
 ### Option 3 — Full GCP deployment
 
@@ -203,7 +206,7 @@ This release is a stable snapshot of the thesis baseline. The evaluation surface
 - **Progressive trust escalation** — formalise automatic graduation across shadow → advisory → enforce modes based on accumulated safe operation.
 - **Cross-organisation evaluation** — port the substrate to GitLab CI, Azure DevOps, and AWS to test architectural portability.
 
-Contributions and forks are welcome; see [`CITATION.cff`](CITATION.cff) for attribution.
+Contributions and forks are welcome; see [`CONTRIBUTING.md`](CONTRIBUTING.md) to get started and [`CITATION.cff`](CITATION.cff) for attribution.
 
 ## Acknowledgments
 

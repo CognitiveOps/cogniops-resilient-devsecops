@@ -2,6 +2,20 @@
 
 Thanks for your interest. This repository started as an MSc thesis project and is now maintained as an open portfolio piece for bounded-autonomy cognitive agents in DevSecOps.
 
+## Quick ways to contribute
+
+- **Try the local demo** — run `docker compose up --build`, open an issue if it breaks.
+- **Fix a typo or unclear explanation** in README / docs.
+- **Improve Windows dev experience** — the repo is developed on Windows and has pytest discovery quirks.
+- **Add tests** for edge cases in the deterministic modules (`baseline/`, `guard/`, `execution/`).
+
+## What we are *not* looking for
+
+- New AI models or prompt engineering experiments.
+- New unbounded actions for the runtime agent.
+- Breaking changes to the BigQuery `agent_metrics.runs` schema.
+- Large refactoring of the agent architecture without prior discussion.
+
 ## How to contribute
 
 1. **Open an issue** first to discuss the change — especially for new scenarios, agent actions, or infrastructure changes.
@@ -9,10 +23,10 @@ Thanks for your interest. This repository started as an MSc thesis project and i
 3. **Install dependencies**:
    ```bash
    python -m venv .venv
-   source .venv/bin/activate
+   source .venv/bin/activate   # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
-4. **Run tests** before committing:
+4. **Run tests** before committing. Because each agent package has its own `conftest.py`, a root `pytest` run can hit an import-path mismatch on Windows. Run each package separately:
    ```bash
    pytest runtime-agent/tests
    pytest design-agent/tests
@@ -24,11 +38,21 @@ Thanks for your interest. This repository started as an MSc thesis project and i
    # The app container test requires Docker and is run manually:
    # pytest baseline/services/app/tests
    ```
-5. **Keep the architecture separation intact**:
+5. **Run syntax validation**:
+   ```bash
+   python -m compileall -q baseline design-agent evaluation functions runtime-agent security-agent
+   ```
+6. **Run the local Docker Compose demo** if your change touches the agents or OPA policy:
+   ```bash
+   cp local.env .env
+   # edit .env and set GEMINI_API_KEY
+   docker compose up --build
+   ```
+7. **Keep the architecture separation intact**:
    - Runtime agent must not edit structure (no PRs, no YAML changes).
    - Design-time agent must not execute mitigations.
    - LLM calls must have a safe fallback and schema validation.
-6. **Submit a pull request** with a clear description and, if possible, a test.
+8. **Submit a pull request** with a clear description and, if possible, a test. Keep commits atomic and messages in English, e.g. `docs: clarify local demo env setup`.
 
 ## Code conventions
 

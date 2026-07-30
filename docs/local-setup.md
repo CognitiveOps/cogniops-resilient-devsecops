@@ -70,9 +70,13 @@ Expected response:
 
 ## Limitations
 
-- **BigQuery**: decision rows are not persisted locally (no local emulator).
+- **BigQuery**: decision rows are not persisted locally (no local emulator). The agents detect missing credentials and continue without raising.
 - **GCS**: proposals/configs are not persisted locally.
 - **GitHub Issues**: skipped when `GITHUB_TOKEN` is empty.
 - **Security agent**: NIST API calls require internet; mocked feeds are not included.
 
 For full production deployment on GCP, see `infra/` and `.github/workflows/`.
+
+## Contributing
+
+Found a bug in the local demo? See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for how to open an issue or pull request.
