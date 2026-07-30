@@ -26,4 +26,4 @@ pre-commit>=3.7,<4.0
 opencv-python-headless>=4.9,<5.0
 
 # Cloud Functions (tests)
-google-cloud-pubsub>=2.21,<3.0
+-r functions/ingest_runs/requirements.txt
