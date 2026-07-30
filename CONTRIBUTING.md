@@ -26,14 +26,19 @@ Thanks for your interest. This repository started as an MSc thesis project and i
    source .venv/bin/activate   # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
-4. **Run tests** before committing. Because each agent package has its own `conftest.py`, a root `pytest` run can hit an import-path mismatch on Windows. Run each package separately:
+4. **Run tests** before committing. Because each agent package defines its own top-level `agent` and `models` packages, run them from their own directories (or use the `Justfile`):
    ```bash
-   pytest runtime-agent/tests
-   pytest design-agent/tests
-   pytest security-agent/tests
-   pytest evaluation/tests
-   pytest baseline/services/edge_cv_app/tests
-   pytest functions/ingest_runs
+   just test-all                    # runs all agent + evaluation tests
+
+   # Or run each package individually
+   pytest runtime-agent/test_runtime -q
+   pytest design-agent/test_design -q
+   pytest security-agent/test_security -q
+   pytest evaluation/test_evaluation -q
+
+   # Optional: baseline / functions require extra local deps
+   pytest baseline/services/edge_cv_app/tests -q
+   pytest functions/ingest_runs -q
 
    # The app container test requires Docker and is run manually:
    # pytest baseline/services/app/tests

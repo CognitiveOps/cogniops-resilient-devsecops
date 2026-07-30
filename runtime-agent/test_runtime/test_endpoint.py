@@ -16,7 +16,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from main import app
-from tests.conftest import SAMPLE_EVENT_DICT, SAMPLE_EVENT_NO_SCENARIO, make_pubsub_body
 
 
 def _mock_no_op_runner():
@@ -51,9 +50,11 @@ def anyio_backend():
 class TestEndpoint:
     """Integration tests for POST /events/runtime."""
 
-    async def test_valid_event_returns_200(self):
+    async def test_valid_event_returns_200(
+        self, sample_event_dict: dict, make_pubsub_body: callable
+    ):
         """Full Pub/Sub push → 200 with correct pipeline output."""
-        body = make_pubsub_body(SAMPLE_EVENT_DICT)
+        body = make_pubsub_body(sample_event_dict)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -74,9 +75,11 @@ class TestEndpoint:
         assert "processed_at" in data
         assert "agentops_trace_id" in data
 
-    async def test_valid_event_no_scenario_returns_200(self):
+    async def test_valid_event_no_scenario_returns_200(
+        self, sample_event_no_scenario_dict: dict, make_pubsub_body: callable
+    ):
         """Event without scenario_id still processes successfully."""
-        body = make_pubsub_body(SAMPLE_EVENT_NO_SCENARIO)
+        body = make_pubsub_body(sample_event_no_scenario_dict)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

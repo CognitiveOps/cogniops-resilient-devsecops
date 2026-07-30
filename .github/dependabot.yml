@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "pip"
+    directory: "/runtime-agent"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "runtime-agent"
+
+  - package-ecosystem: "pip"
+    directory: "/design-agent"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "design-agent"
+
+  - package-ecosystem: "pip"
+    directory: "/security-agent"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "security-agent"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"

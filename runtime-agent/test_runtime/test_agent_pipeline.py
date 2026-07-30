@@ -12,17 +12,11 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-# Ensure runtime-agent root is on sys.path
-_AGENT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _AGENT_ROOT not in sys.path:
-    sys.path.insert(0, _AGENT_ROOT)
 
 from google.adk.agents import LlmAgent
 from google.adk.models.llm_response import LlmResponse

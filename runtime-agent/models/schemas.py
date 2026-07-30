@@ -17,7 +17,7 @@ import enum
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Event Envelope (runtime-event-contract.md) ──────────────────────
@@ -26,15 +26,14 @@ from pydantic import BaseModel, Field
 class EventContext(BaseModel):
     """Context block inside a runtime event."""
 
+    model_config = ConfigDict(extra="allow")  # unknown fields are kept but logged
+
     run_id: Optional[str] = None
     scenario_id: Optional[str] = None
     stage: Optional[str] = None
     status: str
     severity: Optional[str] = None
     commit_sha: Optional[str] = None
-
-    class Config:
-        extra = "allow"  # unknown fields are kept but logged
 
 
 ALLOWED_EVENT_TYPES_PHASE0 = frozenset(
@@ -52,14 +51,13 @@ ALLOWED_EVENT_TYPES_PHASE0 = frozenset(
 class RuntimeEvent(BaseModel):
     """Runtime event envelope – must match runtime-event-contract.md."""
 
+    model_config = ConfigDict(extra="allow")  # unknown top-level fields ignored per contract
+
     event_id: str = Field(..., description="UUID from publisher")
     event_type: str = Field(..., description="One of the allowed Phase 0 types")
     occurred_at: datetime = Field(..., description="RFC 3339 timestamp")
     source: str = Field(..., description="Publisher identity")
     context: EventContext
-
-    class Config:
-        extra = "allow"  # unknown top-level fields ignored per contract
 
 
 # ── Pub/Sub Push Wrapper ────────────────────────────────────────────

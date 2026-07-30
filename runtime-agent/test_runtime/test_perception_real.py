@@ -12,16 +12,10 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-# Ensure runtime-agent root on sys.path
-_AGENT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _AGENT_ROOT not in sys.path:
-    sys.path.insert(0, _AGENT_ROOT)
 
 from agent.tools.anomaly_detection import (
     BaselineStats,

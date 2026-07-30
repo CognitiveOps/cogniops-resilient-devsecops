@@ -1,0 +1,10 @@
+# Default owners for everything in the repo
+* @CognitiveOps/maintainers
+
+# Baseline deterministic substrate is immutable for AI-driven changes
+baseline/** @CognitiveOps/maintainers
+.github/workflows/** @CognitiveOps/maintainers
+
+# Infrastructure changes
+infra/** @CognitiveOps/maintainers
+security/policies/** @CognitiveOps/maintainers

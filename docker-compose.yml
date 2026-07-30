@@ -40,6 +40,12 @@ services:
       - 0.0.0.0
       - --port
       - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       opa:
         condition: service_healthy
@@ -61,8 +67,15 @@ services:
       - 0.0.0.0
       - --port
       - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
-      - runtime-agent
+      runtime-agent:
+        condition: service_healthy
 
   security-agent:
     build:
@@ -81,5 +94,12 @@ services:
       - 0.0.0.0
       - --port
       - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
-      - runtime-agent
+      runtime-agent:
+        condition: service_healthy

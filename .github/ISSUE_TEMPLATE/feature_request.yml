@@ -1,0 +1,42 @@
+name: Feature Request
+description: Propose an enhancement or new capability.
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read `CONTRIBUTING.md` first. New cognitive capabilities must
+        start in `shadow` mode and respect the runtime/design/security agent
+        separation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      placeholder: What pain point are you solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Describe the change and which component it touches.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - runtime-agent
+        - design-agent
+        - security-agent
+        - evaluation
+        - baseline
+        - infrastructure
+        - documentation
+        - other

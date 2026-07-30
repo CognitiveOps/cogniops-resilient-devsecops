@@ -41,66 +41,59 @@ class TestDesignAgent(unittest.TestCase):
         assert "FDR" in design_agent.instruction
 
 
-class TestFastAPIEndpoints(unittest.TestCase):
+@pytest.fixture
+async def design_client():
+    """Async HTTP client for the design-agent FastAPI app."""
+    from httpx import ASGITransport, AsyncClient
+
+    from main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+class TestFastAPIEndpoints:
     """Tests for FastAPI endpoints in main.py."""
 
-    @pytest.fixture(autouse=True)
-    def setup_client(self):
-        from httpx import ASGITransport, AsyncClient
+    async def test_health(self, design_client):
+        resp = await design_client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
 
-        from main import app
+    async def test_agent_info(self, design_client):
+        resp = await design_client.get("/agent/info")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agent_name"] == "cogniops_design"
+        assert "build_context" in data["tools"]
 
-        self.transport = ASGITransport(app=app)
-        self.client_factory = lambda: AsyncClient(
-            transport=self.transport, base_url="http://test"
-        )
-
-    @pytest.mark.asyncio
-    async def test_health(self):
-        async with self.client_factory() as client:
-            resp = await client.get("/health")
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "ok"
-
-    @pytest.mark.asyncio
-    async def test_agent_info(self):
-        async with self.client_factory() as client:
-            resp = await client.get("/agent/info")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["agent_name"] == "cogniops_design"
-            assert "build_context" in data["tools"]
-
-    @pytest.mark.asyncio
-    async def test_run_returns_result(self):
+    async def test_run_returns_result(self, design_client):
         """Test that /run returns a valid response (mocking ADK)."""
-        async with self.client_factory() as client:
-            with patch("main._run_pipeline") as mock_pipeline:
-                mock_pipeline.return_value = {
-                    "status": "no_changes",
-                    "reason": "All metrics healthy",
-                    "duration_sec": 1.5,
-                }
-                resp = await client.post("/run")
-                assert resp.status_code == 200
-                assert resp.json()["status"] == "no_changes"
+        with patch("main._run_pipeline") as mock_pipeline:
+            mock_pipeline.return_value = {
+                "status": "no_changes",
+                "reason": "All metrics healthy",
+                "duration_sec": 1.5,
+            }
+            resp = await design_client.post("/run")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "no_changes"
 
-    @pytest.mark.asyncio
-    async def test_run_with_scenarios(self):
+    async def test_run_with_scenarios(self, design_client):
         """Test that /run accepts scenario filter."""
-        async with self.client_factory() as client:
-            with patch("main._run_pipeline") as mock_pipeline:
-                mock_pipeline.return_value = {
-                    "status": "no_changes",
-                    "reason": "S3 metrics stable",
-                    "duration_sec": 0.8,
-                }
-                resp = await client.post(
-                    "/run",
-                    json={"scenarios": ["s3"]},
-                )
-                # FastAPI may handle the body or not — either way should not error
-                assert resp.status_code in (200, 422)
+        with patch("main._run_pipeline") as mock_pipeline:
+            mock_pipeline.return_value = {
+                "status": "no_changes",
+                "reason": "S3 metrics stable",
+                "duration_sec": 0.8,
+            }
+            resp = await design_client.post(
+                "/run",
+                json={"scenarios": ["s3"]},
+            )
+            # FastAPI may handle the body or not — either way should not error
+            assert resp.status_code in (200, 422)
 
 
 class TestGCSWrite(unittest.TestCase):

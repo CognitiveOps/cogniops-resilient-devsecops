@@ -1,0 +1,22 @@
+# Development / CI dependencies for the whole CogniOps repository.
+# Aggregates runtime-, design-, security-agent, evaluation, baseline and
+# cloud-function test dependencies. For production deployments each service
+# installs only its own requirements.txt.
+
+# Root / shared
+-r requirements.txt
+
+# Runtime agent
+-r runtime-agent/requirements.txt
+
+# Design-time agent
+-r design-agent/requirements.txt
+
+# Security compliance agent
+-r security-agent/requirements.txt
+
+# Baseline services (tests)
+opencv-python-headless>=4.9,<5.0
+
+# Cloud Functions (tests)
+google-cloud-pubsub>=2.21,<3.0

@@ -6,30 +6,9 @@ from __future__ import annotations
 
 import base64
 import json
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
-
-# Ensure runtime-agent root is on sys.path so bare imports work (models.schemas, etc.)
-_AGENT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _AGENT_ROOT not in sys.path:
-    sys.path.insert(0, _AGENT_ROOT)
-
-# Ensure project root is on sys.path so `baseline.*` imports work (PQC guard tests)
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
-from models.schemas import (  # noqa: E402
-    AnomalyOutput,
-    DecisionType,
-    EventContext,
-    GuardVerdict,
-    PlanningDecision,
-    RuntimeEvent,
-)
 
 
 # ── Sample data ──────────────────────────────────────────────────────
@@ -60,20 +39,26 @@ SAMPLE_EVENT_NO_SCENARIO = {
 
 
 @pytest.fixture
-def sample_event() -> RuntimeEvent:
+def sample_event() -> "RuntimeEvent":
     """A valid RuntimeEvent with scenario_id=S3."""
+    from models.schemas import RuntimeEvent
+
     return RuntimeEvent(**SAMPLE_EVENT_DICT)
 
 
 @pytest.fixture
-def sample_event_no_scenario() -> RuntimeEvent:
+def sample_event_no_scenario() -> "RuntimeEvent":
     """A valid RuntimeEvent without scenario_id."""
+    from models.schemas import RuntimeEvent
+
     return RuntimeEvent(**SAMPLE_EVENT_NO_SCENARIO)
 
 
 @pytest.fixture
-def sample_anomaly() -> AnomalyOutput:
+def sample_anomaly() -> "AnomalyOutput":
     """A stub anomaly matching the default perceive() output for sample_event."""
+    from models.schemas import AnomalyOutput
+
     return AnomalyOutput(
         scenario="S3",
         anomaly_type="manual_test_event",
@@ -84,8 +69,10 @@ def sample_anomaly() -> AnomalyOutput:
 
 
 @pytest.fixture
-def sample_decision() -> PlanningDecision:
+def sample_decision() -> "PlanningDecision":
     """A stub NO_OP decision (Phase 0 default)."""
+    from models.schemas import DecisionType, PlanningDecision
+
     return PlanningDecision(
         decision=DecisionType.NO_OP,
         rationale="Phase 0 shadow mode — no action taken",
@@ -94,22 +81,41 @@ def sample_decision() -> PlanningDecision:
 
 
 @pytest.fixture
-def sample_verdict() -> GuardVerdict:
+def sample_verdict() -> "GuardVerdict":
     """A stub guard verdict (Phase 0 – always approved)."""
+    from models.schemas import GuardVerdict
+
     return GuardVerdict(
         approved=True,
         reason="Phase 0 — guard bypassed",
     )
 
 
-def make_pubsub_body(event_dict: dict) -> dict:
-    """Wrap an event dict into a Pub/Sub push envelope (base64 encoded)."""
-    encoded = base64.b64encode(json.dumps(event_dict).encode()).decode()
-    return {
-        "message": {
-            "data": encoded,
-            "messageId": "msg-test-001",
-            "publishTime": "2026-03-01T12:00:01Z",
-        },
-        "subscription": "projects/test-project/subscriptions/runtime-agent-push",
-    }
+@pytest.fixture
+def sample_event_dict() -> dict:
+    """Raw event dict with scenario_id=S3 (useful where a dict is needed)."""
+    return SAMPLE_EVENT_DICT
+
+
+@pytest.fixture
+def sample_event_no_scenario_dict() -> dict:
+    """Raw event dict without scenario_id."""
+    return SAMPLE_EVENT_NO_SCENARIO
+
+
+@pytest.fixture
+def make_pubsub_body() -> callable:
+    """Return a helper that wraps an event dict into a Pub/Sub push envelope."""
+
+    def _make_pubsub_body(event_dict: dict) -> dict:
+        encoded = base64.b64encode(json.dumps(event_dict).encode()).decode()
+        return {
+            "message": {
+                "data": encoded,
+                "messageId": "msg-test-001",
+                "publishTime": "2026-03-01T12:00:01Z",
+            },
+            "subscription": "projects/test-project/subscriptions/runtime-agent-push",
+        }
+
+    return _make_pubsub_body

@@ -10,6 +10,26 @@
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+## TL;DR — run it in 60 seconds
+
+```bash
+# 1. Clone and enter the repo
+git clone git@github.com:CognitiveOps/cogniops-resilient-devsecops.git
+cd cogniops-resilient-devsecops
+
+# 2. Install Python deps
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+
+# 3. Run the test suite
+just test-all            # or pytest per-agent, see CONTRIBUTING.md
+```
+
+The default `pytest` runs the evaluation suite only. Agent packages share top-level
+`agent`/`models` package names, so they are tested per-directory — `just test-runtime`,
+`just test-design`, `just test-security`.
+
 ## Problem
 
 Modern DevSecOps pipelines span cloud CI/CD, edge deployments, rollback resilience, cryptographic verification, and human-in-the-loop approval. Coordinating these concerns with hard safety constraints is difficult:
@@ -164,13 +184,16 @@ See [`docs/local-setup.md`](docs/local-setup.md) for the full local setup.
 ```bash
 python -m venv .venv
 . .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
-# Run per package (root pytest may fail on Windows due to conftest.py names)
-pytest runtime-agent/tests
-pytest design-agent/tests
-pytest security-agent/tests
-pytest evaluation/tests
+# Run all agent + evaluation tests
+just test-all
+
+# Or run each package individually
+just test-runtime
+just test-design
+just test-security
+just test-evaluation
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full development workflow.
