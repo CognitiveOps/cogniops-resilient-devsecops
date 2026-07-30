@@ -5,6 +5,7 @@
 [![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
 [![Evidence](https://img.shields.io/badge/evidence-showcase--evidence%2Emd-green)](docs/showcase-evidence.md)
+[![Local demo](https://img.shields.io/badge/local%20demo-docker--compose-blue)](docs/local-setup.md)
 [![Cite](https://img.shields.io/badge/cite-CITATION%2Ecff-9cf)](CITATION.cff)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -132,25 +133,49 @@ Generated raw exports and analysis charts are written to `evaluation/results/`
 
 ## Quick start
 
+### Option 1 — Local containerized demo (fastest)
+
 ```bash
 # Clone
  git clone git@github.com:CognitiveOps/cogniops-resilient-devsecops.git
  cd cogniops-resilient-devsecops
 
-# Create a virtual environment
-python -m venv .venv
-. .venv/bin/activate  # or .venv\Scripts\activate on Windows
+# Set your Gemini API key
+ cp local.env .env
+# Edit .env and set GEMINI_API_KEY
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Run tests
-pytest
+# Start OPA + runtime-agent + design-agent + security-agent
+ docker compose up --build
 ```
 
-Running the full scenarios requires a GCP project with Workload Identity Federation, Terraform (`infra/`), and the agent deploy workflows. The baseline workflows and `infra/` files are the authoritative setup reference.
+Verify:
 
-For a local, containerized demo of the three agents + OPA, see [`docs/local-setup.md`](docs/local-setup.md).
+```bash
+curl http://localhost:8080/health
+curl -X POST http://localhost:8080/decide \
+  -H "Content-Type: application/json" \
+  -d '{"event_id":"demo-001","event_type":"manual_test_event","occurred_at":"2026-07-30T10:00:00Z","source":"demo","context":{"scenario_id":"S3","status":"fail","severity":"high"}}'
+```
+
+See [`docs/local-setup.md`](docs/local-setup.md) for the full local setup.
+
+### Option 2 — Tests only (no GCP, no LLM)
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+
+pytest runtime-agent/tests
+pytest design-agent/tests
+pytest security-agent/tests
+pytest evaluation/tests
+```
+
+### Option 3 — Full GCP deployment
+
+Use Terraform (`infra/`) and the GitHub Actions deploy workflows. The baseline
+workflows and `infra/` files are the authoritative setup reference.
 
 ## Why this matters
 
