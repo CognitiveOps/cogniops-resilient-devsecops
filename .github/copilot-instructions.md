@@ -48,7 +48,7 @@ Metrics → Context Builder → Intent Processor → Planning (LlmAgent)
 - Google ADK (`google-adk`) for agent orchestration
 - Vertex AI Gemini for LLM reasoning (via ADK, not raw SDK)
 - Structured output via ADK tool definitions — never free-text generation
-- Prompts are code: version-controlled in `prompts/` directories
+- Prompts are code: version-controlled in each agent's `agent/prompts/` directory
 - Every LLM response validated against Pydantic schema before use
 - Fallback on any LLM failure: NO_OP (safe default, zero operational risk)
 
@@ -63,16 +63,15 @@ Metrics → Context Builder → Intent Processor → Planning (LlmAgent)
 - `pytest` for unit tests, `httpx` for async endpoint tests
 - Mock all external services (BQ, Pub/Sub, LLM, OPA) in unit tests
 - ADK `InMemoryRunner` for deterministic agent pipeline tests
-- Integration tests with real GCP only via `scripts/`
 - Every new module must have corresponding test file
 
 ## Project Structure
 ```
 baseline/            — Deterministic substrate (IMMUTABLE for AI changes)
-runtime-agent/       — Phase 1+ Cognitive Runtime System (ADK-based)
-design-agent/        — Phase 2 Design-Time Agent (ADK-based)
-security-agent/      — Step 6b Security Compliance Agent (ADK-based, propose-only)
-evaluation/          — Phase 4 2-Axis evaluation framework
+runtime-agent/       — Cognitive Runtime System (ADK-based)
+design-agent/        — Design-Time Agent (ADK-based)
+security-agent/      — Security Compliance Agent (ADK-based, propose-only)
+evaluation/          — 2-Axis evaluation framework
 infra/               — Terraform IaC (additive only for new phases)
 functions/           — Cloud Functions (ingest endpoints)
 security/            — OPA policies
