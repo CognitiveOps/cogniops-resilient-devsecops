@@ -1,0 +1,15 @@
+services:
+  # Static bundle served from a local volume
+  local:
+    url: file:///policies
+
+bundles:
+  runtime:
+    service: local
+    resource: cogniops_runtime.rego
+    polling:
+      min_delay_seconds: 30
+      max_delay_seconds: 120
+
+decision_logs:
+  console: true

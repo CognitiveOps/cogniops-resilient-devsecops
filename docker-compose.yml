@@ -1,0 +1,85 @@
+version: "3.9"
+
+services:
+  opa:
+    image: openpolicyagent/opa:0.64.1-rootless
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./security/policies:/policies:ro
+      - ./docker/opa-config.dev.yaml:/opa-config.yaml:ro
+    command:
+      - run
+      - --server
+      - --addr
+      - :8181
+      - --config-file
+      - /opa-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  runtime-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - OPA_URL=http://opa:8181
+    command:
+      - python
+      - -m
+      - uvicorn
+      - runtime-agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    depends_on:
+      opa:
+        condition: service_healthy
+
+  design-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "8081:8080"
+    env_file:
+      - .env
+    command:
+      - python
+      - -m
+      - uvicorn
+      - design-agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    depends_on:
+      - runtime-agent
+
+  security-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "8082:8080"
+    env_file:
+      - .env
+    command:
+      - python
+      - -m
+      - uvicorn
+      - security-agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    depends_on:
+      - runtime-agent

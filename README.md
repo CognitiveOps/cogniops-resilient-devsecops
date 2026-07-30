@@ -150,6 +150,8 @@ pytest
 
 Running the full scenarios requires a GCP project with Workload Identity Federation, Terraform (`infra/`), and the agent deploy workflows. The baseline workflows and `infra/` files are the authoritative setup reference.
 
+For a local, containerized demo of the three agents + OPA, see [`docs/local-setup.md`](docs/local-setup.md).
+
 ## Why this matters
 
 This work demonstrates:

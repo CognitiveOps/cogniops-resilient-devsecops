@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# Local development Dockerfile for CogniOps agents.
+# Builds a single image that can run any agent via command override.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies for opencv and liboqs-backed wheels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy shared runtime requirements first for layer caching
+COPY runtime-agent/requirements.txt /tmp/runtime-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/runtime-requirements.txt
+
+# Copy agent sources
+COPY runtime-agent /app/runtime-agent
+COPY design-agent /app/design-agent
+COPY security-agent /app/security-agent
+COPY config/control-mappings.yaml /app/config/control-mappings.yaml
+
+# Set Python path so agents can import each other if needed
+ENV PYTHONPATH=/app/runtime-agent:/app/design-agent:/app/security-agent
+
+EXPOSE 8080
+
+# Default to runtime-agent; override per service in docker-compose.yml
+CMD ["python", "-m", "uvicorn", "runtime-agent.main:app", "--host", "0.0.0.0", "--port", "8080"]
