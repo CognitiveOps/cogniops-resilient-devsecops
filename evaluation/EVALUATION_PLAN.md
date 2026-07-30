@@ -239,10 +239,10 @@ Pushed to `design_time_agent_dev` (commit `b00c728`) and cherry-picked to `main`
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=$PWD/key.json
 export AGENT_ARTIFACTS_BUCKET=<your-artifacts-bucket>
-python scripts/seed_design_proposals.py --bucket $AGENT_ARTIFACTS_BUCKET
+python .local/scripts/seed_design_proposals.py --bucket $AGENT_ARTIFACTS_BUCKET
 ```
 
-Proposal params per scenario (see `scripts/seed_design_proposals.py`):
+Proposal params per scenario (see `.local/scripts/seed_design_proposals.py`):
 | Scenario | Param | Baseline | Proposed |
 |----------|-------|:--------:|:--------:|
 | S1 | `S1_HEALTH_RETRIES` | 6 | 3 |

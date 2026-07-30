@@ -361,7 +361,7 @@ In `shadow` mode, every decision row written to BigQuery satisfies:
 | `mode` | `shadow` | Set via `COGNIOPS_MODE` env var |
 
 The OPA policy `cogniops.runtime` enforces shadow mode restrictions.
-These invariants are verified by `scripts/verify_runtime_decision.sh`.
+These invariants are verified by `.local/scripts/verify_runtime_decision.sh`.
 
 ---
 
