@@ -13,7 +13,7 @@ google-adk>=1.0,<2.0
 google-cloud-aiplatform>=1.60,<2.0
 
 # Telemetry (optional – AgentOps)
-agentops>=0.3,<1.0
+agentops>=0.4.21,<1.0
 
 # Config
 pyyaml>=6.0,<7.0
