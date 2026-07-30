@@ -148,7 +148,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-Running the full scenarios requires a GCP project with Workload Identity Federation. The detailed setup is in [`docs/thesis-setup.md`](docs/thesis-setup.md) (retained from the original thesis documentation).
+Running the full scenarios requires a GCP project with Workload Identity Federation, Terraform (`infra/`), and the agent deploy workflows. The baseline workflows and `infra/` files are the authoritative setup reference.
 
 ## Why this matters
 
