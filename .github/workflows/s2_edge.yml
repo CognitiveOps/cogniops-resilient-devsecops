@@ -112,7 +112,7 @@ jobs:
 
       # 2️⃣ Build and Push Multi-Arch Image (amd64 + arm64)
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Compute image refs
         id: refs
