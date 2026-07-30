@@ -78,7 +78,7 @@ jobs:
           export_environment_variables: true
 
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       # Enable core APIs only in bootstrap mode
       - name: Pre-enable core APIs (CRM & Service Usage)
