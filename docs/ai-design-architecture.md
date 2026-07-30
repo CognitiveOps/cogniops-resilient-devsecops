@@ -640,24 +640,15 @@ Copilot **helps build** CogniOps. CogniOps **is** the AI system. They are separa
 ```
 .github/
 ├── copilot-instructions.md              # Workspace-wide governance (always loaded)
-├── instructions/
-│   ├── runtime-agent.instructions.md    # Auto-loads for runtime-agent/** files
-│   ├── baseline.instructions.md         # Auto-loads for baseline/** files
-│   └── terraform.instructions.md        # Auto-loads for infra/** files
-├── prompts/
-│   ├── implement-cogniops.prompt.md     # Master orchestrator (Step selection)
-│   ├── step1-adk-bootstrap.prompt.md    # Step 1 implementation prompt
-│   ├── step2-perception.prompt.md       # Step 2 implementation prompt
-│   ├── step3-planning-llm.prompt.md     # Step 3 prompt (→ @llm-specialist)
-│   ├── step4-guard-execution.prompt.md  # Step 4 implementation prompt
-│   ├── step5-telemetry.prompt.md        # Step 5 implementation prompt
-│   ├── step6-design-agent.prompt.md     # Step 6 implementation prompt
-│   └── step7-evaluation.prompt.md       # Step 7 prompt (→ @evaluator)
-└── agents/
-    ├── llm-specialist.agent.md          # ADK/Gemini/prompt engineering expert
-    ├── evaluator.agent.md               # BQ metrics/statistical analysis expert
-    └── security-reviewer.agent.md       # OPA/PQC/IAM/secrets reviewer
+└── instructions/
+    ├── runtime-agent.instructions.md    # Auto-loads for runtime-agent/** files
+    ├── baseline.instructions.md         # Auto-loads for baseline/** files
+    └── terraform.instructions.md        # Auto-loads for infra/** files
 ```
+
+Historical implementation prompts and specialist agents are archived in
+`.local/github/` (gitignored) and are not required to understand or run the
+system.
 
 ### 11.3 How Copilot Governance Enforces Architecture
 
@@ -665,11 +656,11 @@ Copilot **helps build** CogniOps. CogniOps **is** the AI system. They are separa
 |----------------|-------------|
 | Baseline immutability | `baseline.instructions.md` (forbidden actions list) |
 | LLM confinement | `copilot-instructions.md` + `runtime-agent.instructions.md` |
-| Bounded actions | `copilot-instructions.md` (enum list) + all step prompts |
-| Fail-safe NO_OP | Every step prompt includes fallback requirement |
-| Shadow-first mode | `copilot-instructions.md` + `step4-guard-execution.prompt.md` |
+| Bounded actions | `copilot-instructions.md` (enum list) + `runtime-agent.instructions.md` |
+| Fail-safe NO_OP | `copilot-instructions.md` + `runtime-agent.instructions.md` |
+| Shadow-first mode | `copilot-instructions.md` + `runtime-agent.instructions.md` |
 | Additive-only infra | `terraform.instructions.md` (explicit rules) |
-| Security review | `@security-reviewer` agent (read-only, audit checklist) |
+| Security review | `security-agent.instructions.md` + manual review checklist |
 
 ---
 
@@ -677,10 +668,7 @@ Copilot **helps build** CogniOps. CogniOps **is** the AI system. They are separa
 
 | Document | Purpose | Location |
 |----------|---------|----------|
-| AI Audit Report | Pre-implementation baseline state | [docs/ai-audit-report.md](ai-audit-report.md) |
 | System Guardrails | Safety constraints and invariants | [docs/system-guardrails.md](system-guardrails.md) |
 | Runtime Event Contract | Event schema and scenario mapping | [docs/runtime-event-contract.md](runtime-event-contract.md) |
-| Phase 0 Spec | Runtime-ready infrastructure spec | [docs/phase0-runtime-ready-spec.md](phase0-runtime-ready-spec.md) |
-| Phase 0 Implementation | Commit history and notes | [docs/phase0-implementation-notes.md](phase0-implementation-notes.md) |
 | Runtime Agent IAM | Service account roles | [docs/runtime_agent_iam.md](runtime_agent_iam.md) |
 | Copilot Governance | Development-time guardrails | [.github/copilot-instructions.md](../.github/copilot-instructions.md) |

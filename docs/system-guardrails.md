@@ -528,7 +528,6 @@ Summary of how each guardrail is enforced:
 
 | Document | Relationship |
 |----------|-------------|
-| [AI Audit Report](ai-audit-report.md) | Baseline state these guardrails protect |
 | [AI Design Architecture](ai-design-architecture.md) | Architecture these guardrails constrain |
 | [Runtime Event Contract](runtime-event-contract.md) | Input schema for guardrail I-3 |
 | [Runtime Agent IAM](runtime_agent_iam.md) | IAM design for guardrail Sec-2 |
