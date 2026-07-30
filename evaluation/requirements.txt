@@ -1,0 +1,7 @@
+# Evaluation framework dependencies
+# Statistical analysis + visualization for the 2-axis evaluation model.
+
+pandas>=2.2,<3.0
+numpy>=1.26,<2.0
+scipy>=1.13,<2.0
+matplotlib>=3.9,<4.0

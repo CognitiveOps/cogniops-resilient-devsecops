@@ -9,13 +9,10 @@ PYTEST := PYTHON + " -m pytest"
 
 # ── Development ─────────────────────────────────────────────────────
 
-# Install all Python dependencies
+# Install all Python dependencies (development / CI superset)
 install:
     {{PYTHON}} -m pip install --upgrade pip
-    {{PYTHON}} -m pip install -r requirements.txt
-    {{PYTHON}} -m pip install -r runtime-agent/requirements.txt
-    {{PYTHON}} -m pip install -r design-agent/requirements.txt
-    {{PYTHON}} -m pip install -r security-agent/requirements.txt
+    {{PYTHON}} -m pip install -r requirements-dev.txt
 
 # Format all Python files
 fmt:

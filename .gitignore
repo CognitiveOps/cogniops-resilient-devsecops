@@ -178,6 +178,19 @@ cython_debug/
 
 # Abstra
 # Abstra is an AI-powered process automation framework.
+
+# CogniOps local secrets / service-account keys
+key.json
+*.key.json
+service-account*.json
+
+# VS Code local settings
+.vscode/
+
+# Additional local env variants
+.env.*
+*.env
+!.env.example
 # Ignore directories containing user credentials, local state, and settings.
 # Learn more at https://abstra.io/docs
 .abstra/

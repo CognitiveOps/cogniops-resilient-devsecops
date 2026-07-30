@@ -15,6 +15,13 @@
 # Security compliance agent
 -r security-agent/requirements.txt
 
+# Evaluation framework
+-r evaluation/requirements.txt
+
+# Lint / format (used by Justfile and pre-commit fallback)
+ruff>=0.5.0,<0.6.0
+pre-commit>=3.7,<4.0
+
 # Baseline services (tests)
 opencv-python-headless>=4.9,<5.0
 
