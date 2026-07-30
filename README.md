@@ -4,7 +4,6 @@
 
 [![CI](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/CognitiveOps/cogniops-resilient-devsecops?include_prereleases&label=release)](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases)
-[![Evaluation data](https://img.shields.io/badge/evaluation-data%20available-blue)](evaluation/results/)
 [![Evidence](https://img.shields.io/badge/evidence-showcase--evidence%2Emd-green)](docs/showcase-evidence.md)
 [![Cite](https://img.shields.io/badge/cite-CITATION%2Ecff-9cf)](CITATION.cff)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
@@ -81,9 +80,7 @@ The system was evaluated with **5,833 metric samples across 54 comparisons** (Er
 | S4 | FDR/VSR | 100% | — | All tampered artifacts detected; all valid signatures verified |
 | S1 | CFR | 0% | — | No deployment failures across baseline or agent variants |
 
-![Era 1 effect-size heatmap](evaluation/results/analysis/graphs/effect_size_heatmap.png)
-
-*Era 1 effect-size heatmap (54 comparisons across 8 scenarios). Blue = improvement, red = worsening. See [docs/showcase-evidence.md](docs/showcase-evidence.md) for full tables.*
+*See [docs/showcase-evidence.md](docs/showcase-evidence.md) for the full results tables, statistical details, and limitations.*
 
 ### Honest limitations
 
@@ -97,14 +94,15 @@ These trade-offs are reported, not hidden. See [`docs/showcase-evidence.md`](doc
 
 ### Reproducibility
 
-The evaluation artifacts are version-controlled and timestamped:
+The evaluation is reproducible from BigQuery data and version-controlled code:
 
-- Raw metric exports: [`evaluation/results/raw/`](evaluation/results/raw/)
-- Statistical comparisons: [`evaluation/results/analysis/`](evaluation/results/analysis/)
 - Experiment runner: [`evaluation/scripts/run_experiment.py`](evaluation/scripts/run_experiment.py)
+- Statistical methods: Mann–Whitney U, Cohen's *d*, bootstrap 95% CI
 - Tagged snapshot: [`v0.1.0-alpha`](https://github.com/CognitiveOps/cogniops-resilient-devsecops/releases/tag/v0.1.0-alpha)
 
-Each raw export includes the CSV schema and BigQuery table metadata. The analysis files include Mann–Whitney U statistics, Cohen's *d* effect sizes, and bootstrap confidence intervals used in the tables above.
+Generated raw exports and analysis charts are written to `evaluation/results/`
+(locally, `.gitignored`) when the runner is executed against a populated
+`agent_metrics.runs` dataset.
 
 ## Tech stack
 
@@ -129,7 +127,7 @@ Each raw export includes the CSV schema and BigQuery table metadata. The analysi
 ├── security/         # OPA policies
 ├── functions/        # Cloud Functions for metrics ingest
 ├── docs/             # Architecture, guardrails, evaluation evidence
-└── scripts/          # Integration and dispatch scripts
+└── .local/           # Gitignored archive: historical scripts, prompts, results
 ```
 
 ## Quick start
