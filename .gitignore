@@ -195,7 +195,10 @@ evaluation/results/**/*.docx
 evaluation/results/raw/
 evaluation/results/analysis/
 evaluation/results/era2_2026-05-03/
+evaluation/results/era2_s5_2026-05-05/
 evaluation/results/security_agent/
+evaluation/results/design_agent_proposal_*.json
+evaluation/results/runtime_agent_*.json
 
 # Drawio diagrams (binary, not diffable)
 *.drawio
