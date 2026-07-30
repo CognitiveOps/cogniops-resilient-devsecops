@@ -68,7 +68,7 @@ jobs:
                   IMAGE="${REPO_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${GITHUB_SHA::8}"
                   echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-            - uses: docker/build-push-action@v6
+            - uses: docker/build-push-action@v7
               with:
                   context: security-agent
                   push: true
