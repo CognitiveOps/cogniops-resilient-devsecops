@@ -31,7 +31,7 @@
 # Actions used:
 # - actions/checkout@v4
 # - google-github-actions/auth@v2 (authenticate via workload identity)
-# - google-github-actions/setup-gcloud@v2 (install gcloud)
+# - google-github-actions/setup-gcloud@v3 (install gcloud)
 #
 # Preconditions & IAM:
 # - Workload Identity Federation must be configured between the GitHub repo and the GCP provider.
@@ -81,7 +81,7 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
       - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
       - name: Validate policy file
         run: |
           test -f artifact_registry/policy.json
