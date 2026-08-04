@@ -133,7 +133,7 @@ jobs:
       EDGE_CONTAINER: edge_cv_app_${{ github.run_id }}_${{ matrix.fault_mode }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v5

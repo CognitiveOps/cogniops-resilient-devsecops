@@ -57,7 +57,7 @@ jobs:
       HAS_JSON: ${{ secrets.GCP_CREDENTIALS_JSON != '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Prefer WIF; fall back to JSON (bootstrap)
       - name: Auth to GCP (WIF)

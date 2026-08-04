@@ -79,7 +79,7 @@ jobs:
     steps:
       # --- Source checkout ----------------------------------------------------
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # --- Compute image ref early (used throughout) --------------------------
       - name: Compute IMAGE var
