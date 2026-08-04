@@ -35,7 +35,6 @@ from agent.tools.execution_tools import (
 from agent.tools.memory_tools import query_recent_decisions
 from agent.tools.perception_tool import perceive_anomaly
 
-
 # ── Agent Structure Tests ────────────────────────────────────────────
 
 

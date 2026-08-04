@@ -3,16 +3,19 @@ from baseline.services.edge_cv_app.app import app
 import io
 from PIL import Image
 
+
 def test_status_ok():
     c = TestClient(app)
     r = c.get("/status")
     assert r.status_code == 200
     assert r.json()["healthy"] is True
 
+
 def test_infer_rejects_invalid():
     c = TestClient(app)
     r = c.post("/infer", files={"file": ("x.jpg", b"not_an_image", "image/jpeg")})
     assert r.status_code == 400
+
 
 def test_infer_accepts_image():
     c = TestClient(app)

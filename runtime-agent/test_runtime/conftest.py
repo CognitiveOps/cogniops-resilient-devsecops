@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-
 # ── Sample data ──────────────────────────────────────────────────────
 
 SAMPLE_EVENT_DICT = {

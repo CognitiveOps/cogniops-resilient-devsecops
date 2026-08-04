@@ -201,7 +201,9 @@ class CorruptedModelFault:
             metrics.detection_rate = 0.0
         else:
             # Degrade detection rate gradually to reflect drift
-            metrics.detection_rate = max(0.0, metrics.detection_rate * random.uniform(0.6, 0.9))
+            metrics.detection_rate = max(
+                0.0, metrics.detection_rate * random.uniform(0.6, 0.9)
+            )
             metrics.inference_ms *= random.uniform(1.1, 1.5)
 
 
@@ -231,8 +233,8 @@ class DiskFullFault:
         fill_ratio = min(1.0, elapsed / self.time_to_full_sec)  # 0 → 1
 
         # Before full, increase latency proportional to fill_ratio
-        metrics.queue_latency_ms *= (1.0 + fill_ratio)
-        metrics.inference_ms *= (1.0 + 0.5 * fill_ratio)
+        metrics.queue_latency_ms *= 1.0 + fill_ratio
+        metrics.inference_ms *= 1.0 + 0.5 * fill_ratio
 
         if fill_ratio >= 1.0:
             metrics.healthy = False
@@ -255,7 +257,12 @@ class WrongArchFault:
     - Bernoulli retry success per cycle to exit failure, otherwise re-fail.
     """
 
-    def __init__(self, retry_interval_sec: float = 20.0, fail_window_sec: float = 10.0, retry_success_p: float = 0.2):
+    def __init__(
+        self,
+        retry_interval_sec: float = 20.0,
+        fail_window_sec: float = 10.0,
+        retry_success_p: float = 0.2,
+    ):
         self._t_inject_set = False
         self.retry_interval_sec = retry_interval_sec
         self.fail_window_sec = fail_window_sec

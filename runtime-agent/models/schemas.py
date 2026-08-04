@@ -19,7 +19,6 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ── Event Envelope (runtime-event-contract.md) ──────────────────────
 
 
@@ -51,7 +50,9 @@ ALLOWED_EVENT_TYPES_PHASE0 = frozenset(
 class RuntimeEvent(BaseModel):
     """Runtime event envelope – must match runtime-event-contract.md."""
 
-    model_config = ConfigDict(extra="allow")  # unknown top-level fields ignored per contract
+    model_config = ConfigDict(
+        extra="allow"
+    )  # unknown top-level fields ignored per contract
 
     event_id: str = Field(..., description="UUID from publisher")
     event_type: str = Field(..., description="One of the allowed Phase 0 types")
@@ -84,7 +85,9 @@ class PubSubPushEnvelope(BaseModel):
 class AnomalyOutput(BaseModel):
     """Structured anomaly produced by the Perception module."""
 
-    scenario: str = Field("unknown", description="Scenario ID from context or 'unknown'")
+    scenario: str = Field(
+        "unknown", description="Scenario ID from context or 'unknown'"
+    )
     anomaly_type: str = Field(..., description="Copied from event_type")
     severity: float = Field(0.5, description="Neutral in Phase 0")
     risk_score: float = Field(0.5, description="Neutral in Phase 0")
