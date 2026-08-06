@@ -30,6 +30,8 @@ The default `pytest` runs the evaluation suite only. Agent packages share top-le
 `agent`/`models` package names, so they are tested per-directory — `just test-runtime`,
 `just test-design`, `just test-security`.
 
+<!-- CI trigger: keep moving to clear stale cancelled status -->
+
 ## Problem
 
 Modern DevSecOps pipelines span cloud CI/CD, edge deployments, rollback resilience, cryptographic verification, and human-in-the-loop approval. Coordinating these concerns with hard safety constraints is difficult:
