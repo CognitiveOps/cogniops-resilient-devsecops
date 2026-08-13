@@ -644,7 +644,7 @@ jobs:
       - id: issue
         name: Create approval issue
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           APPROVERS_CSV: ${{ vars.SS2_APPROVERS || github.actor }}
         with:
@@ -695,7 +695,7 @@ jobs:
 
       - name: Wait for approval comment
         if: ${{ env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
           APPROVERS_CSV: ${{ vars.SS2_APPROVERS || github.actor }}
@@ -792,7 +792,7 @@ jobs:
 
       - name: Close approval issue
         if: ${{ always() && env.INCIDENT_TYPE == 'runtime_fault' && env.SS2_AUTO_APPROVE != 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
         with:

@@ -248,7 +248,7 @@ jobs:
           echo "agent_artifacts_bucket=$(jq -r '.agent_artifacts_bucket_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
 
       - name: Upsert repository variables
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GH_ADMIN_TOKEN }}
           script: |
