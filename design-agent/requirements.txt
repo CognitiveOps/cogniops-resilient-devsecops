@@ -6,7 +6,7 @@ pydantic>=2.13.4,<3.0
 pyyaml>=6.0.3,<7.0
 
 # GCP
-google-cloud-storage>=3.13.0,<4.0
+google-cloud-storage>=3.13.1,<4.0
 google-cloud-bigquery>=3.20,<4.0
 
 # ADK — Cognitive Agent
